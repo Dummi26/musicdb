@@ -20,6 +20,15 @@ use crate::{
     gui_text::Label,
 };
 
+/*
+
+
+This is responsible for showing the current queue,
+with drag-n-drop only if the mouse leaves the element before it is released,
+because simple clicks have to be GoTo events.
+
+*/
+
 #[derive(Clone)]
 pub struct QueueViewer {
     config: GuiElemCfg,

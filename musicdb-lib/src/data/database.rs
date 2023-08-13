@@ -18,7 +18,9 @@ use super::{
 };
 
 pub struct Database {
+    /// the path to the file used to save/load the data
     db_file: PathBuf,
+    /// the path to the directory containing the actual music and cover image files
     pub lib_directory: PathBuf,
     artists: HashMap<ArtistId, Artist>,
     albums: HashMap<AlbumId, Album>,
@@ -26,13 +28,18 @@ pub struct Database {
     covers: HashMap<CoverId, DatabaseLocation>,
     // TODO! make sure this works out for the server AND clients
     // cover_cache: HashMap<CoverId, Vec<u8>>,
+    // These will be used for autosave once that gets implemented
     db_data_file_change_first: Option<Instant>,
     db_data_file_change_last: Option<Instant>,
     pub queue: Queue,
+    /// if the database receives an update, it will inform all of its clients so they can stay in sync.
+    /// this is a list containing all the clients.
     pub update_endpoints: Vec<UpdateEndpoint>,
+    /// true if a song is/should be playing
     pub playing: bool,
     pub command_sender: Option<mpsc::Sender<Command>>,
 }
+// for custom server implementations, this enum should allow you to deal with updates from any context (writers such as tcp streams, sync/async mpsc senders, or via closure as a fallback)
 pub enum UpdateEndpoint {
     Bytes(Box<dyn Write + Sync + Send>),
     CmdChannel(mpsc::Sender<Arc<Command>>),
@@ -41,6 +48,7 @@ pub enum UpdateEndpoint {
 }
 
 impl Database {
+    /// TODO!
     fn panic(&self, msg: &str) -> ! {
         // custom panic handler
         // make a backup
@@ -50,6 +58,7 @@ impl Database {
     pub fn get_path(&self, location: &DatabaseLocation) -> PathBuf {
         self.lib_directory.join(&location.rel_path)
     }
+    // NOTE: just use `songs` directly? not sure yet...
     pub fn get_song(&self, song: &SongId) -> Option<&Song> {
         self.songs.get(song)
     }
@@ -72,6 +81,7 @@ impl Database {
         }
         id
     }
+    /// used internally
     pub fn add_song_new_nomagic(&mut self, mut song: Song) -> SongId {
         for key in 0.. {
             if !self.songs.contains_key(&key) {
@@ -89,6 +99,7 @@ impl Database {
         let id = self.add_artist_new_nomagic(artist);
         id
     }
+    /// used internally
     fn add_artist_new_nomagic(&mut self, mut artist: Artist) -> ArtistId {
         for key in 0.. {
             if !self.artists.contains_key(&key) {
@@ -110,6 +121,7 @@ impl Database {
         }
         id
     }
+    /// used internally
     fn add_album_new_nomagic(&mut self, mut album: Album) -> AlbumId {
         for key in 0.. {
             if !self.albums.contains_key(&key) {

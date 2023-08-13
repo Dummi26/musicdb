@@ -204,27 +204,36 @@ pub trait GuiElemTrait {
 }
 
 #[derive(Debug, Clone)]
+/// The config for any gui element.
 pub struct GuiElemCfg {
     pub enabled: bool,
     /// if true, indicates that something (text size, screen size, ...) has changed
     /// and you should probably relayout and redraw from scratch.
     pub redraw: bool,
+    /// Position relative to the parent where this element should be drawn.
+    /// ((0, 0), (1, 1)) is the default and fills all available space.
+    /// ((0, 0.5), (0.5, 1)) fills the bottom left quarter.
     pub pos: Rectangle,
     /// the pixel position after the last call to draw().
     /// in draw, use info.pos instead, as pixel_pos is only updated *after* draw().
     /// this can act like a "previous pos" field within draw.
     pub pixel_pos: Rectangle,
+    /// which mouse buttons were pressed down while the mouse was on this element and haven't been released since? (Left/Middle/Right)
     pub mouse_down: (bool, bool, bool),
+    /// Set this to true to receive mouse click events when the mouse is within this element's bounds
     pub mouse_events: bool,
+    /// Set this to true to receive scroll events when the mouse is within this element's bounds
     pub scroll_events: bool,
     /// allows elements to watch all keyboard events, regardless of keyboard focus.
     pub keyboard_events_watch: bool,
     /// indicates that this element can have the keyboard focus
     pub keyboard_events_focus: bool,
     /// index of the child that has keyboard focus. if usize::MAX, `self` has focus.
-    /// will automatically be changed when Tab is pressed. [TODO]
+    /// will automatically be changed when Tab is pressed (Tab skips elements with keyboard_events_focus == false)
     pub keyboard_focus_index: usize,
+    /// if this is true and ResetKeyboardFocus is returned, this element may get the keyboard focus (guaranteed if no other element has this set to true)
     pub request_keyboard_focus: bool,
+    /// if this is true, things can be dragged into this element via drag-n-drop
     pub drag_target: bool,
 }
 impl GuiElemCfg {
@@ -281,9 +290,10 @@ pub enum GuiAction {
     OpenMain,
     SetIdle(bool),
     OpenSettings(bool),
+    /// Build the GuiAction(s) later, when we have access to the Database (can turn an AlbumId into a QueueContent::Folder, etc)
     Build(Box<dyn FnOnce(&mut Database) -> Vec<Self>>),
     SendToServer(Command),
-    /// unfocuses all gui elements, then assigns keyboard focus to one with config().request_keyboard_focus == true.
+    /// unfocuses all gui elements, then assigns keyboard focus to one with config().request_keyboard_focus == true if there is one.
     ResetKeyboardFocus,
     SetDragging(
         Option<(
@@ -292,6 +302,7 @@ pub enum GuiAction {
         )>,
     ),
     SetLineHeight(f32),
+    /// Run a custom closure with mutable access to the Gui struct
     Do(Box<dyn FnMut(&mut Gui)>),
     Exit,
 }
@@ -301,6 +312,9 @@ pub enum Dragging {
     Song(SongId),
     Queue(Queue),
 }
+
+/// GuiElems have access to this within draw.
+/// Except for `actions`, they should not change any of these values - GuiElem::draw will handle everything automatically.
 pub struct DrawInfo<'a> {
     pub actions: Vec<GuiAction>,
     pub pos: Rectangle,
@@ -316,6 +330,7 @@ pub struct DrawInfo<'a> {
     pub line_height: f32,
 }
 
+/// Generic wrapper over anything that implements GuiElemTrait
 pub struct GuiElem {
     pub inner: Box<dyn GuiElemTrait>,
 }

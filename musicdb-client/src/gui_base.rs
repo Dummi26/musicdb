@@ -7,6 +7,13 @@ use crate::{
     gui_text::Label,
 };
 
+/*
+
+Some basic structs to use everywhere.
+Mostly containers for other GuiElems.
+
+*/
+
 /// A simple container for zero, one, or multiple child GuiElems. Can optionally fill the background with a color.
 #[derive(Clone)]
 pub struct Panel {

@@ -14,6 +14,13 @@ use crate::{
     gui_wrappers::WithFocusHotkey,
 };
 
+/*
+
+This is responsible for showing the library,
+with Regex search and drag-n-drop.
+
+*/
+
 #[derive(Clone)]
 pub struct LibraryBrowser {
     config: GuiElemCfg,

@@ -9,6 +9,13 @@ use crate::{
     gui_text::Label,
 };
 
+/*
+
+Components for the StatusBar.
+This file could probably have a better name.
+
+*/
+
 #[derive(Clone)]
 pub struct CurrentSong {
     config: GuiElemCfg,

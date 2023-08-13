@@ -10,6 +10,13 @@ use speedy2d::{
 
 use crate::gui::{GuiAction, GuiElem, GuiElemCfg, GuiElemTrait};
 
+/*
+
+Some basic structs to use everywhere,
+except they are all text-related.
+
+*/
+
 #[derive(Clone)]
 pub struct Label {
     config: GuiElemCfg,

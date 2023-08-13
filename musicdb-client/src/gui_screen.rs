@@ -12,7 +12,15 @@ use crate::{
     gui_text::Label,
 };
 
-/// calculates f(p) (f(x) = 3x^2 - 2x^3)):
+/*
+
+The root gui element.
+Contains the Library, Queue, StatusBar, and sometimes Settings elements.
+Resizes these elements to show/hide the settings menu and to smoothly switch to/from idle mode.
+
+*/
+
+/// calculates f(p), where f(x) = 3x^2 - 2x^3, because
 /// f(0) = 0
 /// f(0.5) = 0.5
 /// f(1) = 1
@@ -36,9 +44,6 @@ pub struct GuiScreen {
     pub prev_mouse_pos: Vec2,
 }
 impl GuiScreen {
-    fn i_statusbar() -> usize {
-        0
-    }
     pub fn new(
         config: GuiElemCfg,
         line_height: f32,

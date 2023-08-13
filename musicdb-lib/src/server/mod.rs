@@ -81,6 +81,8 @@ pub fn run_server(
     sender_sender: Option<tokio::sync::mpsc::Sender<mpsc::Sender<Command>>>,
 ) {
     let mut player = Player::new().unwrap();
+    // commands sent to this will be handeled later in this function in an infinite loop.
+    // these commands are sent to the database asap.
     let (command_sender, command_receiver) = mpsc::channel();
     if let Some(s) = sender_sender {
         s.blocking_send(command_sender.clone()).unwrap();
@@ -91,6 +93,7 @@ pub fn run_server(
             Ok(v) => {
                 let command_sender = command_sender.clone();
                 let db = Arc::clone(&database);
+                // each connection gets its own thread, but they will be idle most of the time (waiting for data on the tcp stream)
                 thread::spawn(move || loop {
                     if let Ok((mut connection, con_addr)) = v.accept() {
                         eprintln!("[info] TCP connection accepted from {con_addr}.");
@@ -100,10 +103,15 @@ pub fn run_server(
                             // sync database
                             let mut db = db.lock().unwrap();
                             db.init_connection(&mut connection)?;
+                            // keep the client in sync:
+                            // the db will send all updates to the client once it is added to update_endpoints
                             db.update_endpoints.push(UpdateEndpoint::Bytes(Box::new(
+                                // try_clone is used here to split a TcpStream into Writer and Reader
                                 connection.try_clone().unwrap(),
                             )));
+                            // drop the mutex lock
                             drop(db);
+                            // read updates from the tcp stream and send them to the database, exit on EOF or Err
                             loop {
                                 if let Ok(command) = Command::from_bytes(&mut connection) {
                                     command_sender.send(command).unwrap();
@@ -121,6 +129,8 @@ pub fn run_server(
             }
         }
     }
+    // for now, update the player 10 times a second so it can detect when a song has finished and start a new one.
+    // TODO: player should send a NextSong update to the mpsc::Sender to wake up this thread
     let dur = Duration::from_secs_f32(0.1);
     loop {
         player.update(&mut database.lock().unwrap());

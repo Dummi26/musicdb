@@ -25,6 +25,7 @@ use musicdb_lib::data::database::Database;
 
 #[tokio::main]
 async fn main() {
+    // parse args
     let mut args = std::env::args().skip(1);
     let mut tcp_addr = None;
     let mut web_addr = None;
@@ -148,20 +149,7 @@ this help was shown because no arguments were provided."
         );
         exit(1);
     };
-    // database.add_song_new(Song::new(
-    //     "Amaranthe/Manifest/02 Make It Better.mp3".into(),
-    //     "Make It Better".to_owned(),
-    //     None,
-    //     None,
-    //     vec![],
-    //     None,
-    // ));
-    // let mut player = Player::new();
-    // eprintln!("[info] database.songs: {:?}", database.songs());
-    // database.save_database(Some("/tmp/dbfile".into())).unwrap();
-    // eprintln!("{}", database.get_song(&0).unwrap());
-    // database.queue.add_to_end(QueueContent::Song(1).into());
-    // player.update_and_restart_playing_song(&database);
+    // database can be shared by multiple threads using Arc<Mutex<_>>
     let database = Arc::new(Mutex::new(database));
     if tcp_addr.is_some() || web_addr.is_some() {
         if let Some(addr) = web_addr {
@@ -177,8 +165,4 @@ this help was shown because no arguments were provided."
     } else {
         eprintln!("nothing to do, not starting the server.");
     }
-    // std::io::stdin().read_line(&mut String::new()).unwrap();
-    // dbg!(Update::from_bytes(&mut BufReader::new(
-    //     TcpStream::connect("127.0.0.1:26314".parse::<SocketAddr>().unwrap()).unwrap()
-    // )));
 }

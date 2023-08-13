@@ -17,11 +17,13 @@ pub type ArtistId = u64;
 pub type CoverId = u64;
 
 #[derive(Clone, Default, Debug)]
+/// general data for songs, albums and artists
 pub struct GeneralData {
     pub tags: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
+/// the location of a file relative to the lib directory, often Artist/Album/Song.ext or similar
 pub struct DatabaseLocation {
     pub rel_path: PathBuf,
 }
