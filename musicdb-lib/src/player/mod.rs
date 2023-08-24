@@ -82,8 +82,6 @@ impl Player {
                 // db.playing, but no song in queue...
                 db.apply_command(Command::Stop);
             }
-        } else if !db.playing && self.source.is_some() {
-            self.current_song_id = SongOpt::New(None);
         } else if let Some((_source, notif)) = &mut self.source {
             if let Ok(()) = notif.try_recv() {
                 // song has finished playing
@@ -121,21 +119,27 @@ impl Player {
                         Some(s) => s.to_str().unwrap_or(""),
                         None => "",
                     };
-                    if let Some(bytes) = song.cached_data_now(db) {
-                        match Self::sound_from_bytes(ext, bytes) {
-                            Ok(v) => {
-                                let (sound, notif) = v.pausable().with_async_completion_notifier();
-                                // add it
-                                let (sound, controller) = sound.controllable();
-                                self.source = Some((controller, notif));
-                                // and play it
-                                self.manager.play(Box::new(sound));
-                            }
-                            Err(e) => {
-                                eprintln!("[player] Can't play, skipping! {e}");
-                                db.apply_command(Command::NextSong);
+                    if db.playing {
+                        if let Some(bytes) = song.cached_data_now(db) {
+                            match Self::sound_from_bytes(ext, bytes) {
+                                Ok(v) => {
+                                    let (sound, notif) =
+                                        v.pausable().with_async_completion_notifier();
+                                    // add it
+                                    let (sound, controller) = sound.controllable();
+                                    self.source = Some((controller, notif));
+                                    // and play it
+                                    self.manager.play(Box::new(sound));
+                                }
+                                Err(e) => {
+                                    eprintln!("[player] Can't play, skipping! {e}");
+                                    db.apply_command(Command::NextSong);
+                                }
                             }
                         }
+                    } else {
+                        self.source = None;
+                        song.cache_data_start_thread(&db);
                     }
                 } else {
                     panic!("invalid song ID: current_song_id not found in DB!");
