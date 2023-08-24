@@ -35,7 +35,8 @@ a custom database speeds up server startup and allows for more features.
 ### build
 
 build `musicdb-server` and `musicdb-client` using cargo.
-for the client, you may need to change the path used in `include_bytes!(...)` to one that actually points to a valid font on your system.
+
+Note: the client has a config file in ~/.config/musicdb-client/, which includes the path to a font. You need to set this manually or the client won't start.
 
 ## setup
 
