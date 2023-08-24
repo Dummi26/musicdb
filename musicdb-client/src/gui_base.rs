@@ -64,6 +64,55 @@ impl GuiElemTrait for Panel {
 }
 
 #[derive(Clone)]
+pub struct Square {
+    config: GuiElemCfg,
+    pub inner: GuiElem,
+}
+impl Square {
+    pub fn new(mut config: GuiElemCfg, inner: GuiElem) -> Self {
+        config.redraw = true;
+        Self { config, inner }
+    }
+}
+impl GuiElemTrait for Square {
+    fn config(&self) -> &GuiElemCfg {
+        &self.config
+    }
+    fn config_mut(&mut self) -> &mut GuiElemCfg {
+        &mut self.config
+    }
+    fn children(&mut self) -> Box<dyn Iterator<Item = &mut GuiElem> + '_> {
+        Box::new([&mut self.inner].into_iter())
+    }
+    fn any(&self) -> &dyn std::any::Any {
+        self
+    }
+    fn any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+    fn clone_gui(&self) -> Box<dyn GuiElemTrait> {
+        Box::new(self.clone())
+    }
+    fn draw(&mut self, info: &mut DrawInfo, _g: &mut speedy2d::Graphics2D) {
+        if info.pos.size() != self.config.pixel_pos.size() {
+            self.config.redraw = true;
+        }
+        if self.config.redraw {
+            self.config.redraw = false;
+            if info.pos.width() > info.pos.height() {
+                let w = 0.5 * info.pos.height() / info.pos.width();
+                self.inner.inner.config_mut().pos =
+                    Rectangle::from_tuples((0.5 - w, 0.0), (0.5 + w, 1.0));
+            } else {
+                let h = 0.5 * info.pos.width() / info.pos.height();
+                self.inner.inner.config_mut().pos =
+                    Rectangle::from_tuples((0.0, 0.5 - h), (1.0, 0.5 + h));
+            }
+        }
+    }
+}
+
+#[derive(Clone)]
 pub struct ScrollBox {
     config: GuiElemCfg,
     pub children: Vec<(GuiElem, f32)>,

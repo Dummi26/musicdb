@@ -1,5 +1,9 @@
-use std::time::{Duration, Instant};
+use std::{
+    io::{Read, Write},
+    time::{Duration, Instant},
+};
 
+use musicdb_lib::server::get;
 use speedy2d::{color::Color, dimen::Vec2, shape::Rectangle, Graphics2D};
 
 use crate::{
@@ -44,8 +48,9 @@ pub struct GuiScreen {
     pub prev_mouse_pos: Vec2,
 }
 impl GuiScreen {
-    pub fn new(
+    pub fn new<T: Read + Write + 'static + Sync + Send>(
         config: GuiElemCfg,
+        get_con: get::Client<T>,
         line_height: f32,
         scroll_sensitivity_pixels: f64,
         scroll_sensitivity_lines: f64,
@@ -57,6 +62,7 @@ impl GuiScreen {
                 GuiElem::new(StatusBar::new(
                     GuiElemCfg::at(Rectangle::from_tuples((0.0, 0.9), (1.0, 1.0))),
                     true,
+                    get_con,
                 )),
                 GuiElem::new(Settings::new(
                     GuiElemCfg::default().disabled(),
@@ -69,7 +75,7 @@ impl GuiScreen {
                     GuiElemCfg::at(Rectangle::from_tuples((0.0, 0.0), (1.0, 0.9))),
                     vec![
                         GuiElem::new(Button::new(
-                            GuiElemCfg::at(Rectangle::from_tuples((0.5, 0.0), (0.75, 0.1))),
+                            GuiElemCfg::at(Rectangle::from_tuples((0.5, 0.0), (0.75, 0.03))),
                             |_| vec![GuiAction::OpenSettings(true)],
                             vec![GuiElem::new(Label::new(
                                 GuiElemCfg::default(),
@@ -80,7 +86,7 @@ impl GuiScreen {
                             ))],
                         )),
                         GuiElem::new(Button::new(
-                            GuiElemCfg::at(Rectangle::from_tuples((0.75, 0.0), (1.0, 0.1))),
+                            GuiElemCfg::at(Rectangle::from_tuples((0.75, 0.0), (1.0, 0.03))),
                             |_| vec![GuiAction::Exit],
                             vec![GuiElem::new(Label::new(
                                 GuiElemCfg::default(),
@@ -95,7 +101,7 @@ impl GuiScreen {
                             (0.5, 1.0),
                         )))),
                         GuiElem::new(QueueViewer::new(GuiElemCfg::at(Rectangle::from_tuples(
-                            (0.5, 0.1),
+                            (0.5, 0.03),
                             (1.0, 1.0),
                         )))),
                     ],
@@ -199,9 +205,10 @@ impl GuiElemTrait for GuiScreen {
             if !self.idle.0 || self.idle.1.is_none() {
                 if let Some(h) = &info.helper {
                     h.set_cursor_visible(!self.idle.0);
-                    for el in self.children.iter_mut().skip(1) {
-                        el.inner.config_mut().enabled = !self.idle.0;
+                    if self.settings.0 {
+                        self.children[1].inner.config_mut().enabled = !self.idle.0;
                     }
+                    self.children[2].inner.config_mut().enabled = !self.idle.0;
                 }
             }
             let p = transition(p1);
@@ -241,14 +248,18 @@ pub struct StatusBar {
     idle_mode: f32,
 }
 impl StatusBar {
-    pub fn new(config: GuiElemCfg, playing: bool) -> Self {
+    pub fn new<T: Read + Write + 'static + Sync + Send>(
+        config: GuiElemCfg,
+        playing: bool,
+        get_con: get::Client<T>,
+    ) -> Self {
         Self {
             config,
             children: vec![
-                GuiElem::new(CurrentSong::new(GuiElemCfg::at(Rectangle::new(
-                    Vec2::ZERO,
-                    Vec2::new(0.8, 1.0),
-                )))),
+                GuiElem::new(CurrentSong::new(
+                    GuiElemCfg::at(Rectangle::new(Vec2::ZERO, Vec2::new(0.8, 1.0))),
+                    get_con,
+                )),
                 GuiElem::new(PlayPauseToggle::new(
                     GuiElemCfg::at(Rectangle::from_tuples((0.85, 0.0), (0.95, 1.0))),
                     false,

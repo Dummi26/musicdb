@@ -124,7 +124,7 @@ impl Settings {
                                             (0.0, 0.0),
                                             (0.33, 1.0),
                                         )),
-                                        "Scroll Sensitivity (lines)".to_string(),
+                                        "Scroll Sensitivity".to_string(),
                                         Color::WHITE,
                                         None,
                                         Vec2::new(0.9, 0.5),

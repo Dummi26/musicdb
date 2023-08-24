@@ -1,6 +1,7 @@
 use std::{
     any::Any,
     eprintln,
+    io::{Read, Write},
     net::TcpStream,
     sync::{Arc, Mutex},
     time::Instant,
@@ -10,7 +11,7 @@ use std::{
 use musicdb_lib::{
     data::{database::Database, queue::Queue, AlbumId, ArtistId, SongId},
     load::ToFromBytes,
-    server::Command,
+    server::{get, Command},
 };
 use speedy2d::{
     color::Color,
@@ -33,11 +34,74 @@ pub enum GuiEvent {
     Exit,
 }
 
-pub fn main(
+pub fn main<T: Write + Read + 'static + Sync + Send>(
     database: Arc<Mutex<Database>>,
     connection: TcpStream,
+    get_con: get::Client<T>,
     event_sender_arc: Arc<Mutex<Option<UserEventSender<GuiEvent>>>>,
 ) {
+    let mut config_file = super::get_config_file_path();
+    config_file.push("config_gui.toml");
+    let mut font = None;
+    let mut line_height = 32.0;
+    let mut scroll_pixels_multiplier = 1.0;
+    let mut scroll_lines_multiplier = 3.0;
+    let mut scroll_pages_multiplier = 0.75;
+    match std::fs::read_to_string(&config_file) {
+        Ok(cfg) => {
+            if let Ok(table) = cfg.parse::<toml::Table>() {
+                if let Some(path) = table["font"].as_str() {
+                    if let Ok(bytes) = std::fs::read(path) {
+                        if let Ok(f) = Font::new(&bytes) {
+                            font = Some(f);
+                        } else {
+                            eprintln!("[toml] couldn't load font")
+                        }
+                    } else {
+                        eprintln!("[toml] couldn't read font file")
+                    }
+                }
+                if let Some(v) = table.get("line_height").and_then(|v| v.as_float()) {
+                    line_height = v as _;
+                }
+                if let Some(v) = table
+                    .get("scroll_pixels_multiplier")
+                    .and_then(|v| v.as_float())
+                {
+                    scroll_pixels_multiplier = v;
+                }
+                if let Some(v) = table
+                    .get("scroll_lines_multiplier")
+                    .and_then(|v| v.as_float())
+                {
+                    scroll_lines_multiplier = v;
+                }
+                if let Some(v) = table
+                    .get("scroll_pages_multiplier")
+                    .and_then(|v| v.as_float())
+                {
+                    scroll_pages_multiplier = v;
+                }
+            } else {
+                eprintln!("Couldn't parse config file {config_file:?} as toml!");
+            }
+        }
+        Err(e) => {
+            eprintln!("[exit] no config file found at {config_file:?}: {e}");
+            if let Some(p) = config_file.parent() {
+                _ = std::fs::create_dir_all(p);
+            }
+            _ = std::fs::write(&config_file, "font = \"\"");
+            std::process::exit(25);
+        }
+    }
+    let font = if let Some(v) = font {
+        v
+    } else {
+        eprintln!("[toml] required: font = <string>");
+        std::process::exit(30);
+    };
+
     let window = speedy2d::Window::<GuiEvent>::new_with_user_events(
         "MusicDB Client",
         WindowCreationOptions::new_fullscreen_borderless(),
@@ -45,7 +109,18 @@ pub fn main(
     .expect("couldn't open window");
     *event_sender_arc.lock().unwrap() = Some(window.create_user_event_sender());
     let sender = window.create_user_event_sender();
-    window.run_loop(Gui::new(database, connection, event_sender_arc, sender));
+    window.run_loop(Gui::new(
+        font,
+        database,
+        connection,
+        get_con,
+        event_sender_arc,
+        sender,
+        line_height,
+        scroll_pixels_multiplier,
+        scroll_lines_multiplier,
+        scroll_pages_multiplier,
+    ));
 }
 
 pub struct Gui {
@@ -69,11 +144,17 @@ pub struct Gui {
     pub scroll_pages_multiplier: f64,
 }
 impl Gui {
-    fn new(
+    fn new<T: Read + Write + 'static + Sync + Send>(
+        font: Font,
         database: Arc<Mutex<Database>>,
         connection: TcpStream,
+        get_con: get::Client<T>,
         event_sender_arc: Arc<Mutex<Option<UserEventSender<GuiEvent>>>>,
         event_sender: UserEventSender<GuiEvent>,
+        line_height: f32,
+        scroll_pixels_multiplier: f64,
+        scroll_lines_multiplier: f64,
+        scroll_pages_multiplier: f64,
     ) -> Self {
         database.lock().unwrap().update_endpoints.push(
             musicdb_lib::data::database::UpdateEndpoint::Custom(Box::new(move |cmd| match cmd {
@@ -87,7 +168,8 @@ impl Gui {
                 | Command::QueueAdd(..)
                 | Command::QueueInsert(..)
                 | Command::QueueRemove(..)
-                | Command::QueueGoto(..) => {
+                | Command::QueueGoto(..)
+                | Command::QueueSetShuffle(..) => {
                     if let Some(s) = &*event_sender_arc.lock().unwrap() {
                         _ = s.send_event(GuiEvent::UpdatedQueue);
                     }
@@ -96,6 +178,7 @@ impl Gui {
                 | Command::AddSong(_)
                 | Command::AddAlbum(_)
                 | Command::AddArtist(_)
+                | Command::AddCover(_)
                 | Command::ModifySong(_)
                 | Command::ModifyAlbum(_)
                 | Command::ModifyArtist(_) => {
@@ -105,10 +188,6 @@ impl Gui {
                 }
             })),
         );
-        let line_height = 32.0;
-        let scroll_pixels_multiplier = 1.0;
-        let scroll_lines_multiplier = 3.0;
-        let scroll_pages_multiplier = 0.75;
         Gui {
             event_sender,
             database,
@@ -117,6 +196,7 @@ impl Gui {
                 VirtualKeyCode::Escape,
                 GuiScreen::new(
                     GuiElemCfg::default(),
+                    get_con,
                     line_height,
                     scroll_pixels_multiplier,
                     scroll_lines_multiplier,
@@ -125,10 +205,7 @@ impl Gui {
             )),
             size: UVec2::ZERO,
             mouse_pos: Vec2::ZERO,
-            font: Font::new(include_bytes!(
-                "/usr/share/fonts/mozilla-fira/FiraSans-Regular.otf"
-            ))
-            .unwrap(),
+            font,
             // font: Font::new(include_bytes!("/usr/share/fonts/TTF/FiraSans-Regular.ttf")).unwrap(),
             last_draw: Instant::now(),
             modifiers: ModifiersState::default(),
@@ -328,6 +405,10 @@ pub struct DrawInfo<'a> {
     pub child_has_keyboard_focus: bool,
     /// the height of one line of text (in pixels)
     pub line_height: f32,
+    pub dragging: Option<(
+        Dragging,
+        Option<Box<dyn FnMut(&mut DrawInfo, &mut Graphics2D)>>,
+    )>,
 }
 
 /// Generic wrapper over anything that implements GuiElemTrait
@@ -679,9 +760,11 @@ impl WindowHandler<GuiEvent> for Gui {
             has_keyboard_focus: false,
             child_has_keyboard_focus: true,
             line_height: self.line_height,
+            dragging: self.dragging.take(),
         };
         self.gui.draw(&mut info, graphics);
         let actions = std::mem::replace(&mut info.actions, Vec::with_capacity(0));
+        self.dragging = info.dragging.take();
         if let Some((d, f)) = &mut self.dragging {
             if let Some(f) = f {
                 f(&mut info, graphics);
@@ -753,12 +836,15 @@ impl WindowHandler<GuiEvent> for Gui {
         distance: speedy2d::window::MouseScrollDistance,
     ) {
         let dist = match distance {
-            MouseScrollDistance::Pixels { y, .. } => (self.scroll_pixels_multiplier * y) as f32,
+            MouseScrollDistance::Pixels { y, .. } => {
+                (self.scroll_pixels_multiplier * y * self.scroll_lines_multiplier) as f32
+            }
             MouseScrollDistance::Lines { y, .. } => {
                 (self.scroll_lines_multiplier * y) as f32 * self.line_height
             }
             MouseScrollDistance::Pages { y, .. } => {
-                (self.scroll_pages_multiplier * y) as f32 * self.last_height
+                (self.scroll_pages_multiplier * y * self.scroll_lines_multiplier) as f32
+                    * self.last_height
             }
         };
         if let Some(a) = self.gui.mouse_wheel(dist, self.mouse_pos.clone()) {

@@ -8,5 +8,6 @@ edition = "2021"
 [dependencies]
 awedio = "0.2.0"
 base64 = "0.21.2"
+rand = "0.8.5"
 rc-u8-reader = "2.0.16"
 tokio = "1.29.1"

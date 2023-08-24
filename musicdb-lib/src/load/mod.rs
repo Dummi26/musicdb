@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     io::{Read, Write},
     path::PathBuf,
 };
@@ -77,6 +77,32 @@ where
         let mut buf = Vec::with_capacity(len);
         for _ in 0..len {
             buf.push(ToFromBytes::from_bytes(s)?);
+        }
+        Ok(buf)
+    }
+}
+impl<C> ToFromBytes for VecDeque<C>
+where
+    C: ToFromBytes,
+{
+    fn to_bytes<T>(&self, s: &mut T) -> Result<(), std::io::Error>
+    where
+        T: Write,
+    {
+        self.len().to_bytes(s)?;
+        for elem in self {
+            elem.to_bytes(s)?;
+        }
+        Ok(())
+    }
+    fn from_bytes<T>(s: &mut T) -> Result<Self, std::io::Error>
+    where
+        T: Read,
+    {
+        let len = ToFromBytes::from_bytes(s)?;
+        let mut buf = VecDeque::with_capacity(len);
+        for _ in 0..len {
+            buf.push_back(ToFromBytes::from_bytes(s)?);
         }
         Ok(buf)
     }

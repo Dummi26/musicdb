@@ -139,8 +139,8 @@ Error getting information about the provided path '{path_s}': {e}"
     } else {
         eprintln!(
             "[EXIT]
-musicdb - help
-musicdb <path to database file> <options> <options> <...>
+musicdb-server - help
+musicdb-server <path to database file> <options> <options> <...>
 options:
   --init <lib directory>
   --tcp <addr:port>

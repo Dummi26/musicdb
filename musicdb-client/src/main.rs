@@ -1,5 +1,6 @@
 use std::{
     eprintln, fs,
+    io::{BufReader, Write},
     net::{SocketAddr, TcpStream},
     path::PathBuf,
     sync::{Arc, Mutex},
@@ -10,12 +11,16 @@ use std::{
 use gui::GuiEvent;
 use musicdb_lib::{
     data::{
-        album::Album, artist::Artist, database::Database, queue::QueueContent, song::Song,
+        album::Album,
+        artist::Artist,
+        database::{Cover, Database},
+        queue::QueueContent,
+        song::Song,
         DatabaseLocation, GeneralData,
     },
     load::ToFromBytes,
     player::Player,
-    server::Command,
+    server::{get, Command},
 };
 #[cfg(feature = "speedy2d")]
 mod gui;
@@ -43,6 +48,22 @@ enum Mode {
     FillDb,
 }
 
+fn get_config_file_path() -> PathBuf {
+    if let Ok(config_home) = std::env::var("XDG_CONFIG_HOME") {
+        let mut config_home: PathBuf = config_home.into();
+        config_home.push("musicdb-client");
+        config_home
+    } else if let Ok(home) = std::env::var("HOME") {
+        let mut config_home: PathBuf = home.into();
+        config_home.push(".config");
+        config_home.push("musicdb-client");
+        config_home
+    } else {
+        eprintln!("No config directory!");
+        std::process::exit(24);
+    }
+}
+
 fn main() {
     let mut args = std::env::args().skip(1);
     let mode = match args.next().as_ref().map(|v| v.trim()) {
@@ -56,7 +77,9 @@ fn main() {
         }
     };
     let addr = args.next().unwrap_or("127.0.0.1:26314".to_string());
-    let mut con = TcpStream::connect(addr.parse::<SocketAddr>().unwrap()).unwrap();
+    let addr = addr.parse::<SocketAddr>().unwrap();
+    let mut con = TcpStream::connect(addr).unwrap();
+    writeln!(con, "main").unwrap();
     let database = Arc::new(Mutex::new(Database::new_clientside()));
     #[cfg(feature = "speedy2d")]
     let update_gui_sender: Arc<Mutex<Option<speedy2d::window::UserEventSender<GuiEvent>>>> =
@@ -111,7 +134,15 @@ fn main() {
                         v.send_event(GuiEvent::Refresh).unwrap();
                     }
                 });
-                gui::main(database, con, sender)
+                gui::main(
+                    database,
+                    con,
+                    get::Client::new(BufReader::new(
+                        TcpStream::connect(addr).expect("opening get client connection"),
+                    ))
+                    .expect("initializing get client connection"),
+                    sender,
+                )
             };
         }
         Mode::SyncPlayer => {
@@ -134,6 +165,7 @@ fn main() {
             let mut line = String::new();
             std::io::stdin().read_line(&mut line).unwrap();
             if line.trim().to_lowercase() == "yes" {
+                let mut covers = 0;
                 for artist in fs::read_dir(&dir)
                     .expect("reading lib-dir")
                     .filter_map(|v| v.ok())
@@ -147,6 +179,16 @@ fn main() {
                                 let mut album_id = None;
                                 let mut songs: Vec<_> = songs.filter_map(|v| v.ok()).collect();
                                 songs.sort_unstable_by_key(|v| v.file_name());
+                                let cover = songs.iter().map(|entry| entry.path()).find(|path| {
+                                    path.extension().is_some_and(|ext| {
+                                        ext.to_str().is_some_and(|ext| {
+                                            matches!(
+                                                ext.to_lowercase().trim(),
+                                                "png" | "jpg" | "jpeg"
+                                            )
+                                        })
+                                    })
+                                });
                                 for song in songs {
                                     match song.path().extension().map(|v| v.to_str()) {
                                         Some(Some(
@@ -229,11 +271,39 @@ fn main() {
                                                         drop(db);
                                                         if !adding_album {
                                                             adding_album = true;
+                                                            let cover = if let Some(cover) = &cover
+                                                            {
+                                                                eprintln!("Adding cover {cover:?}");
+                                                                Command::AddCover(Cover {
+                                                                    location: DatabaseLocation {
+                                                                        rel_path: PathBuf::from(
+                                                                            artist.file_name(),
+                                                                        )
+                                                                        .join(album.file_name())
+                                                                        .join(
+                                                                            cover
+                                                                                .file_name()
+                                                                                .unwrap(),
+                                                                        ),
+                                                                    },
+                                                                    data: Arc::new(Mutex::new((
+                                                                        false, None,
+                                                                    ))),
+                                                                })
+                                                                .to_bytes(&mut con)
+                                                                .expect(
+                                                                    "sending AddCover to db failed",
+                                                                );
+                                                                covers += 1;
+                                                                Some(covers - 1)
+                                                            } else {
+                                                                None
+                                                            };
                                                             Command::AddAlbum(Album {
                                                                 id: 0,
                                                                 name: album_name.clone(),
                                                                 artist: Some(artist_id),
-                                                                cover: None,
+                                                                cover,
                                                                 songs: vec![],
                                                                 general: GeneralData::default(),
                                                             })

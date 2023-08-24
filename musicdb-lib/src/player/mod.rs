@@ -67,7 +67,11 @@ impl Player {
         if let Some((source, _notif)) = &mut self.source {
             source.set_paused(true);
         }
-        self.current_song_id = SongOpt::New(None);
+        if let SongOpt::Some(id) | SongOpt::New(Some(id)) = self.current_song_id {
+            self.current_song_id = SongOpt::New(Some(id));
+        } else {
+            self.current_song_id = SongOpt::New(None);
+        }
     }
     pub fn update(&mut self, db: &mut Database) {
         if db.playing && self.source.is_none() {
@@ -76,7 +80,10 @@ impl Player {
                 self.current_song_id = SongOpt::New(Some(*song));
             } else {
                 // db.playing, but no song in queue...
+                db.apply_command(Command::Stop);
             }
+        } else if !db.playing && self.source.is_some() {
+            self.current_song_id = SongOpt::New(None);
         } else if let Some((_source, notif)) = &mut self.source {
             if let Ok(()) = notif.try_recv() {
                 // song has finished playing
@@ -103,34 +110,35 @@ impl Player {
         // new current song
         if let SongOpt::New(song_opt) = &self.current_song_id {
             // stop playback
-            eprintln!("[play] stopping playback");
+            // eprintln!("[play] stopping playback");
             self.manager.clear();
             if let Some(song_id) = song_opt {
-                if db.playing {
-                    // start playback again
-                    if let Some(song) = db.get_song(song_id) {
-                        eprintln!("[play] starting playback...");
-                        // add our song
-                        let ext = match &song.location.rel_path.extension() {
-                            Some(s) => s.to_str().unwrap_or(""),
-                            None => "",
-                        };
-                        let (sound, notif) = Self::sound_from_bytes(
-                            ext,
-                            song.cached_data_now(db).expect("no cached data"),
-                        )
-                        .unwrap()
-                        .pausable()
-                        .with_async_completion_notifier();
-                        // add it
-                        let (sound, controller) = sound.controllable();
-                        self.source = Some((controller, notif));
-                        // and play it
-                        self.manager.play(Box::new(sound));
-                        eprintln!("[play] started playback");
-                    } else {
-                        panic!("invalid song ID: current_song_id not found in DB!");
+                // start playback again
+                if let Some(song) = db.get_song(song_id) {
+                    // eprintln!("[play] starting playback...");
+                    // add our song
+                    let ext = match &song.location.rel_path.extension() {
+                        Some(s) => s.to_str().unwrap_or(""),
+                        None => "",
+                    };
+                    if let Some(bytes) = song.cached_data_now(db) {
+                        match Self::sound_from_bytes(ext, bytes) {
+                            Ok(v) => {
+                                let (sound, notif) = v.pausable().with_async_completion_notifier();
+                                // add it
+                                let (sound, controller) = sound.controllable();
+                                self.source = Some((controller, notif));
+                                // and play it
+                                self.manager.play(Box::new(sound));
+                            }
+                            Err(e) => {
+                                eprintln!("[player] Can't play, skipping! {e}");
+                                db.apply_command(Command::NextSong);
+                            }
+                        }
                     }
+                } else {
+                    panic!("invalid song ID: current_song_id not found in DB!");
                 }
                 self.current_song_id = SongOpt::Some(*song_id);
             } else {

@@ -189,6 +189,28 @@ impl LibraryBrowser {
                     )),
                     artist_height,
                 ));
+                for song_id in &artist.singles {
+                    if let Some(song) = db.songs().get(song_id) {
+                        if self.search_song.is_empty()
+                            || self
+                                .search_song_regex
+                                .as_ref()
+                                .is_some_and(|regex| regex.is_match(&song.title))
+                        {
+                            if let Some(g) = artist_gui.take() {
+                                gui_elements.push(g);
+                            }
+                            gui_elements.push((
+                                GuiElem::new(ListSong::new(
+                                    GuiElemCfg::default(),
+                                    *song_id,
+                                    song.title.clone(),
+                                )),
+                                song_height,
+                            ));
+                        }
+                    }
+                }
                 for album_id in &artist.albums {
                     if let Some(album) = db.albums().get(album_id) {
                         if self.search_album.is_empty()

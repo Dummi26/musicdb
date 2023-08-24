@@ -3,8 +3,8 @@ use std::{
     fs::{self, File},
     io::{BufReader, Write},
     path::PathBuf,
-    sync::{mpsc, Arc},
-    time::Instant,
+    sync::{mpsc, Arc, Mutex},
+    time::{Duration, Instant},
 };
 
 use crate::{load::ToFromBytes, server::Command};
@@ -18,16 +18,14 @@ use super::{
 };
 
 pub struct Database {
-    /// the path to the file used to save/load the data
-    db_file: PathBuf,
+    /// the path to the file used to save/load the data. empty if database is in client mode.
+    pub db_file: PathBuf,
     /// the path to the directory containing the actual music and cover image files
     pub lib_directory: PathBuf,
     artists: HashMap<ArtistId, Artist>,
     albums: HashMap<AlbumId, Album>,
     songs: HashMap<SongId, Song>,
-    covers: HashMap<CoverId, DatabaseLocation>,
-    // TODO! make sure this works out for the server AND clients
-    // cover_cache: HashMap<CoverId, Vec<u8>>,
+    covers: HashMap<CoverId, Cover>,
     // These will be used for autosave once that gets implemented
     db_data_file_change_first: Option<Instant>,
     db_data_file_change_last: Option<Instant>,
@@ -132,6 +130,21 @@ impl Database {
         }
         self.panic("database.artists all keys used - no more capacity for new artists!");
     }
+    /// adds a cover to the database.
+    /// assigns a new id, which it then returns.
+    pub fn add_cover_new(&mut self, cover: Cover) -> AlbumId {
+        self.add_cover_new_nomagic(cover)
+    }
+    /// used internally
+    fn add_cover_new_nomagic(&mut self, cover: Cover) -> AlbumId {
+        for key in 0.. {
+            if !self.covers.contains_key(&key) {
+                self.covers.insert(key, cover);
+                return key;
+            }
+        }
+        self.panic("database.artists all keys used - no more capacity for new artists!");
+    }
     /// updates an existing song in the database with the new value.
     /// uses song.id to find the correct song.
     /// if the id doesn't exist in the db, Err(()) is returned.
@@ -193,7 +206,13 @@ impl Database {
             Command::Pause => self.playing = false,
             Command::Stop => self.playing = false,
             Command::NextSong => {
-                self.queue.advance_index();
+                if !Queue::advance_index_db(self) {
+                    // end of queue
+                    self.apply_command(Command::Pause);
+                    let mut actions = Vec::new();
+                    self.queue.init(vec![], &mut actions);
+                    Queue::handle_actions(self, actions);
+                }
             }
             Command::Save => {
                 if let Err(e) = self.save_database(None) {
@@ -208,18 +227,37 @@ impl Database {
             }
             Command::QueueAdd(mut index, new_data) => {
                 if let Some(v) = self.queue.get_item_at_index_mut(&index, 0) {
-                    v.add_to_end(new_data);
+                    if let Some(i) = v.add_to_end(new_data) {
+                        index.push(i);
+                        if let Some(q) = self.queue.get_item_at_index_mut(&index, 0) {
+                            let mut actions = Vec::new();
+                            q.init(index, &mut actions);
+                            Queue::handle_actions(self, actions);
+                        }
+                    }
                 }
             }
-            Command::QueueInsert(mut index, pos, new_data) => {
+            Command::QueueInsert(mut index, pos, mut new_data) => {
                 if let Some(v) = self.queue.get_item_at_index_mut(&index, 0) {
+                    index.push(pos);
+                    let mut actions = Vec::new();
+                    new_data.init(index, &mut actions);
                     v.insert(new_data, pos);
+                    Queue::handle_actions(self, actions);
                 }
             }
             Command::QueueRemove(index) => {
                 self.queue.remove_by_index(&index, 0);
             }
-            Command::QueueGoto(index) => self.queue.set_index(&index, 0),
+            Command::QueueGoto(index) => Queue::set_index_db(self, &index),
+            Command::QueueSetShuffle(path, map, next) => {
+                if let Some(elem) = self.queue.get_item_at_index_mut(&path, 0) {
+                    if let QueueContent::Shuffle(_, m, _, n) = elem.content_mut() {
+                        *m = map;
+                        *n = next;
+                    }
+                }
+            }
             Command::AddSong(song) => {
                 self.add_song_new(song);
             }
@@ -229,6 +267,7 @@ impl Database {
             Command::AddArtist(artist) => {
                 self.add_artist_new(artist);
             }
+            Command::AddCover(cover) => _ = self.add_cover_new(cover),
             Command::ModifySong(song) => {
                 _ = self.update_song(song);
             }
@@ -302,6 +341,7 @@ impl Database {
             command_sender: None,
         })
     }
+    /// saves the database's contents. save path can be overridden
     pub fn save_database(&self, path: Option<PathBuf>) -> Result<PathBuf, std::io::Error> {
         let path = if let Some(p) = path {
             p
@@ -385,5 +425,76 @@ impl Database {
     }
     pub fn artists(&self) -> &HashMap<ArtistId, Artist> {
         &self.artists
+    }
+    pub fn covers(&self) -> &HashMap<CoverId, Cover> {
+        &self.covers
+    }
+    /// you should probably use a Command to do this...
+    pub fn songs_mut(&mut self) -> &mut HashMap<SongId, Song> {
+        &mut self.songs
+    }
+    /// you should probably use a Command to do this...
+    pub fn albums_mut(&mut self) -> &mut HashMap<AlbumId, Album> {
+        &mut self.albums
+    }
+    /// you should probably use a Command to do this...
+    pub fn artists_mut(&mut self) -> &mut HashMap<ArtistId, Artist> {
+        &mut self.artists
+    }
+    /// you should probably use a Command to do this...
+    pub fn covers_mut(&mut self) -> &mut HashMap<CoverId, Cover> {
+        &mut self.covers
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Cover {
+    pub location: DatabaseLocation,
+    pub data: Arc<Mutex<(bool, Option<(Instant, Vec<u8>)>)>>,
+}
+impl Cover {
+    pub fn get_bytes<O>(
+        &self,
+        path: impl FnOnce(&DatabaseLocation) -> PathBuf,
+        conv: impl FnOnce(&Vec<u8>) -> O,
+    ) -> Option<O> {
+        let mut data = loop {
+            let data = self.data.lock().unwrap();
+            if data.0 {
+                drop(data);
+                std::thread::sleep(Duration::from_secs(1));
+            } else {
+                break data;
+            }
+        };
+        if let Some((accessed, data)) = &mut data.1 {
+            *accessed = Instant::now();
+            Some(conv(&data))
+        } else {
+            match std::fs::read(path(&self.location)) {
+                Ok(bytes) => {
+                    data.1 = Some((Instant::now(), bytes));
+                    Some(conv(&data.1.as_ref().unwrap().1))
+                }
+                Err(_) => None,
+            }
+        }
+    }
+}
+impl ToFromBytes for Cover {
+    fn to_bytes<T>(&self, s: &mut T) -> Result<(), std::io::Error>
+    where
+        T: Write,
+    {
+        self.location.to_bytes(s)
+    }
+    fn from_bytes<T>(s: &mut T) -> Result<Self, std::io::Error>
+    where
+        T: std::io::Read,
+    {
+        Ok(Self {
+            location: ToFromBytes::from_bytes(s)?,
+            data: Arc::new(Mutex::new((false, None))),
+        })
     }
 }

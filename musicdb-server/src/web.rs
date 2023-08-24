@@ -78,6 +78,22 @@ pub struct AppHtml {
     queue_folder: Vec<HtmlPart>,
     /// can use: path, content, name
     queue_folder_current: Vec<HtmlPart>,
+    /// can use: path, total, current, inner
+    queue_loop: Vec<HtmlPart>,
+    /// can use: path, total, current, inner
+    queue_loop_current: Vec<HtmlPart>,
+    /// can use: path, current, inner
+    queue_loopinf: Vec<HtmlPart>,
+    /// can use: path, current, inner
+    queue_loopinf_current: Vec<HtmlPart>,
+    /// can use: path, content
+    queue_random: Vec<HtmlPart>,
+    /// can use: path, content
+    queue_random_current: Vec<HtmlPart>,
+    /// can use: path, content
+    queue_shuffle: Vec<HtmlPart>,
+    /// can use: path, content
+    queue_shuffle_current: Vec<HtmlPart>,
 }
 impl AppHtml {
     pub fn from_dir<P: AsRef<std::path::Path>>(dir: P) -> std::io::Result<Self> {
@@ -98,6 +114,22 @@ impl AppHtml {
             queue_folder: Self::parse(&std::fs::read_to_string(dir.join("queue_folder.html"))?),
             queue_folder_current: Self::parse(&std::fs::read_to_string(
                 dir.join("queue_folder_current.html"),
+            )?),
+            queue_loop: Self::parse(&std::fs::read_to_string(dir.join("queue_loop.html"))?),
+            queue_loop_current: Self::parse(&std::fs::read_to_string(
+                dir.join("queue_loop_current.html"),
+            )?),
+            queue_loopinf: Self::parse(&std::fs::read_to_string(dir.join("queue_loopinf.html"))?),
+            queue_loopinf_current: Self::parse(&std::fs::read_to_string(
+                dir.join("queue_loopinf_current.html"),
+            )?),
+            queue_random: Self::parse(&std::fs::read_to_string(dir.join("queue_random.html"))?),
+            queue_random_current: Self::parse(&std::fs::read_to_string(
+                dir.join("queue_random_current.html"),
+            )?),
+            queue_shuffle: Self::parse(&std::fs::read_to_string(dir.join("queue_shuffle.html"))?),
+            queue_shuffle_current: Self::parse(&std::fs::read_to_string(
+                dir.join("queue_shuffle_current.html"),
             )?),
         })
     }
@@ -317,7 +349,8 @@ async fn sse_handler(
                 | Command::ModifyArtist(..)
                 | Command::AddSong(..)
                 | Command::AddAlbum(..)
-                | Command::AddArtist(..) => Event::default().event("artists").data({
+                | Command::AddArtist(..)
+                | Command::AddCover(..) => Event::default().event("artists").data({
                     let db = state.db.lock().unwrap();
                     let mut a = db.artists().iter().collect::<Vec<_>>();
                     a.sort_unstable_by_key(|(_id, artist)| &artist.name);
@@ -352,7 +385,8 @@ async fn sse_handler(
                 | Command::QueueAdd(..)
                 | Command::QueueInsert(..)
                 | Command::QueueRemove(..)
-                | Command::QueueGoto(..) => {
+                | Command::QueueGoto(..)
+                | Command::QueueSetShuffle(..) => {
                     let db = state.db.lock().unwrap();
                     let current = db
                         .queue
@@ -370,6 +404,7 @@ async fn sse_handler(
                         &db.queue,
                         String::new(),
                         true,
+                        false,
                     );
                     Event::default().event("queue").data(
                         state
@@ -510,6 +545,7 @@ fn build_queue_content_build(
     queue: &Queue,
     path: String,
     current: bool,
+    skip_folder: bool,
 ) {
     // TODO: Do something for disabled ones too (they shouldn't just be hidden)
     if queue.enabled() {
@@ -533,10 +569,10 @@ fn build_queue_content_build(
                 }
             }
             QueueContent::Folder(ci, c, name) => {
-                if path.is_empty() {
+                if skip_folder || path.is_empty() {
                     for (i, c) in c.iter().enumerate() {
                         let current = current && *ci == i;
-                        build_queue_content_build(db, state, html, c, i.to_string(), current)
+                        build_queue_content_build(db, state, html, c, i.to_string(), current, false)
                     }
                 } else {
                     for v in if current {
@@ -559,12 +595,97 @@ fn build_queue_content_build(
                                             c,
                                             format!("{path}-{i}"),
                                             current,
+                                            false,
                                         )
                                     }
                                 }
                                 _ => {}
                             },
                         }
+                    }
+                }
+            }
+            QueueContent::Loop(total, cur, inner) => {
+                for v in match (*total, current) {
+                    (0, false) => &state.html.queue_loopinf,
+                    (0, true) => &state.html.queue_loopinf_current,
+                    (_, false) => &state.html.queue_loop,
+                    (_, true) => &state.html.queue_loop_current,
+                } {
+                    match v {
+                        HtmlPart::Plain(v) => html.push_str(v),
+                        HtmlPart::Insert(key) => match key.as_str() {
+                            "path" => html.push_str(&path),
+                            "total" => html.push_str(&format!("{total}")),
+                            "current" => html.push_str(&format!("{cur}")),
+                            "inner" => build_queue_content_build(
+                                db,
+                                state,
+                                html,
+                                &inner,
+                                format!("{path}-0"),
+                                current,
+                                true,
+                            ),
+                            _ => {}
+                        },
+                    }
+                }
+            }
+            QueueContent::Random(q) => {
+                for v in if current {
+                    &state.html.queue_random_current
+                } else {
+                    &state.html.queue_random
+                } {
+                    match v {
+                        HtmlPart::Plain(v) => html.push_str(v),
+                        HtmlPart::Insert(key) => match key.as_str() {
+                            "path" => html.push_str(&path),
+                            "content" => {
+                                for (i, v) in q.iter().enumerate() {
+                                    build_queue_content_build(
+                                        db,
+                                        state,
+                                        html,
+                                        &v,
+                                        format!("{path}-0"),
+                                        current && i == q.len().saturating_sub(2),
+                                        true,
+                                    )
+                                }
+                            }
+                            _ => {}
+                        },
+                    }
+                }
+            }
+            QueueContent::Shuffle(cur, map, content, _) => {
+                for v in if current {
+                    &state.html.queue_shuffle_current
+                } else {
+                    &state.html.queue_shuffle
+                } {
+                    match v {
+                        HtmlPart::Plain(v) => html.push_str(v),
+                        HtmlPart::Insert(key) => match key.as_str() {
+                            "path" => html.push_str(&path),
+                            "content" => {
+                                for (i, v) in map.iter().filter_map(|i| content.get(*i)).enumerate()
+                                {
+                                    build_queue_content_build(
+                                        db,
+                                        state,
+                                        html,
+                                        &v,
+                                        format!("{path}-0"),
+                                        current && i == *cur,
+                                        true,
+                                    )
+                                }
+                            }
+                            _ => {}
+                        },
                     }
                 }
             }
