@@ -40,14 +40,36 @@ pub struct GuiScreen {
     /// 0: StatusBar / Idle display
     /// 1: Settings
     /// 2: Panel for Main view
+    /// 3: Edit Panel
     children: Vec<GuiElem>,
     pub idle: (bool, Option<Instant>),
     pub settings: (bool, Option<Instant>),
+    pub edit_panel: (bool, Option<Instant>),
     pub last_interaction: Instant,
     idle_timeout: Option<f64>,
     pub prev_mouse_pos: Vec2,
 }
 impl GuiScreen {
+    pub fn open_edit(&mut self, mut edit: GuiElem) {
+        if !self.edit_panel.0 {
+            self.edit_panel = (true, Some(Instant::now()));
+            edit.inner.config_mut().pos = Rectangle::from_tuples((-0.5, 0.0), (0.0, 0.9));
+        } else {
+            edit.inner.config_mut().pos = Rectangle::from_tuples((0.0, 0.0), (0.5, 0.9));
+        }
+        if let Some(prev) = self.children.get_mut(3) {
+            prev.inner.config_mut().enabled = false;
+        }
+        self.children.insert(3, edit);
+    }
+    pub fn close_edit(&mut self) {
+        if self.children.len() > 4 {
+            self.children.remove(3);
+            self.children[3].inner.config_mut().enabled = true;
+        } else if self.edit_panel.0 {
+            self.edit_panel = (false, Some(Instant::now()));
+        }
+    }
     pub fn new<T: Read + Write + 'static + Sync + Send>(
         config: GuiElemCfg,
         get_con: get::Client<T>,
@@ -109,6 +131,7 @@ impl GuiScreen {
             ],
             idle: (false, None),
             settings: (false, None),
+            edit_panel: (false, None),
             last_interaction: Instant::now(),
             idle_timeout: Some(60.0),
             prev_mouse_pos: Vec2::ZERO,
@@ -193,7 +216,7 @@ impl GuiElemTrait for GuiScreen {
         }
         self.idle_check();
         // request_redraw for animations
-        if self.idle.1.is_some() | self.settings.1.is_some() {
+        if self.idle.1.is_some() || self.settings.1.is_some() || self.edit_panel.1.is_some() {
             if let Some(h) = &info.helper {
                 h.request_redraw()
             }
@@ -207,6 +230,11 @@ impl GuiElemTrait for GuiScreen {
                     h.set_cursor_visible(!self.idle.0);
                     if self.settings.0 {
                         self.children[1].inner.config_mut().enabled = !self.idle.0;
+                    }
+                    if self.edit_panel.0 {
+                        if let Some(c) = self.children.get_mut(3) {
+                            c.inner.config_mut().enabled = !self.idle.0;
+                        }
                     }
                     self.children[2].inner.config_mut().enabled = !self.idle.0;
                 }
@@ -228,6 +256,23 @@ impl GuiElemTrait for GuiScreen {
             let cfg = self.children[1].inner.config_mut();
             cfg.enabled = p > 0.0;
             cfg.pos = Rectangle::from_tuples((0.0, 0.9 - 0.9 * p), (1.0, 0.9));
+        }
+        // animations: edit_panel
+        if self.edit_panel.1.is_some() {
+            let p1 = Self::get_prog(&mut self.edit_panel, 0.3);
+            let p = transition(p1);
+            if let Some(c) = self.children.get_mut(3) {
+                c.inner.config_mut().enabled = p > 0.0;
+                c.inner.config_mut().pos =
+                    Rectangle::from_tuples((-0.5 + 0.5 * p, 0.0), (0.5 * p, 0.9));
+            }
+            if !self.edit_panel.0 && p == 0.0 {
+                while self.children.len() > 3 {
+                    self.children.pop();
+                }
+            }
+            self.children[2].inner.config_mut().pos =
+                Rectangle::from_tuples((0.5 * p, 0.0), (1.0 + 0.5 * p, 0.9));
         }
         // set idle timeout (only when settings are open)
         if self.settings.0 || self.settings.1.is_some() {

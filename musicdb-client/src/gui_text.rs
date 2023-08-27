@@ -148,7 +148,7 @@ impl TextField {
                     hint,
                     color_hint,
                     None,
-                    Vec2::new(0.0, 0.5),
+                    Vec2::new(0.5, 0.5),
                 )),
             ],
         }

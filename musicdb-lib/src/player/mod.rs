@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 
 use awedio::{
     backends::CpalBackend,
@@ -23,6 +23,7 @@ pub struct Player {
     )>,
     manager: Manager,
     current_song_id: SongOpt,
+    cached: HashSet<SongId>,
 }
 
 pub enum SongOpt {
@@ -40,6 +41,7 @@ impl Player {
             backend,
             source: None,
             current_song_id: SongOpt::None,
+            cached: HashSet::new(),
         })
     }
     pub fn handle_command(&mut self, command: &Command) {
@@ -121,6 +123,7 @@ impl Player {
                     };
                     if db.playing {
                         if let Some(bytes) = song.cached_data_now(db) {
+                            self.cached.insert(song.id);
                             match Self::sound_from_bytes(ext, bytes) {
                                 Ok(v) => {
                                     let (sound, notif) =
@@ -140,6 +143,7 @@ impl Player {
                     } else {
                         self.source = None;
                         song.cache_data_start_thread(&db);
+                        self.cached.insert(song.id);
                     }
                 } else {
                     panic!("invalid song ID: current_song_id not found in DB!");
@@ -148,8 +152,25 @@ impl Player {
             } else {
                 self.current_song_id = SongOpt::None;
             }
-            if let Some(Some(song)) = db.queue.get_next_song().map(|v| db.get_song(v)) {
+            let next_song = db.queue.get_next_song().and_then(|v| db.get_song(v));
+            for &id in &self.cached {
+                if Some(id) != next_song.map(|v| v.id)
+                    && !matches!(self.current_song_id, SongOpt::Some(v) if v == id)
+                {
+                    if let Some(song) = db.songs().get(&id) {
+                        if let Ok(()) = song.uncache_data() {
+                            self.cached.remove(&id);
+                            break;
+                        }
+                    } else {
+                        self.cached.remove(&id);
+                        break;
+                    }
+                }
+            }
+            if let Some(song) = next_song {
                 song.cache_data_start_thread(&db);
+                self.cached.insert(song.id);
             }
         }
     }

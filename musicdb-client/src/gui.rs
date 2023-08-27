@@ -367,6 +367,8 @@ pub enum GuiAction {
     OpenMain,
     SetIdle(bool),
     OpenSettings(bool),
+    OpenEditPanel(GuiElem),
+    CloseEditPanel,
     /// Build the GuiAction(s) later, when we have access to the Database (can turn an AlbumId into a QueueContent::Folder, etc)
     Build(Box<dyn FnOnce(&mut Database) -> Vec<Self>>),
     SendToServer(Command),
@@ -737,6 +739,38 @@ impl Gui {
                     if gui.inner.settings.0 {
                         gui.inner.settings = (false, Some(Instant::now()));
                     }
+                }
+            }
+            GuiAction::OpenEditPanel(p) => {
+                if let Some(gui) = self
+                    .gui
+                    .inner
+                    .any_mut()
+                    .downcast_mut::<WithFocusHotkey<GuiScreen>>()
+                {
+                    if gui.inner.idle.0 {
+                        gui.inner.idle = (false, Some(Instant::now()));
+                    }
+                    if gui.inner.settings.0 {
+                        gui.inner.settings = (false, Some(Instant::now()));
+                    }
+                    gui.inner.open_edit(p);
+                }
+            }
+            GuiAction::CloseEditPanel => {
+                if let Some(gui) = self
+                    .gui
+                    .inner
+                    .any_mut()
+                    .downcast_mut::<WithFocusHotkey<GuiScreen>>()
+                {
+                    if gui.inner.idle.0 {
+                        gui.inner.idle = (false, Some(Instant::now()));
+                    }
+                    if gui.inner.settings.0 {
+                        gui.inner.settings = (false, Some(Instant::now()));
+                    }
+                    gui.inner.close_edit();
                 }
             }
         }

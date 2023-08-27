@@ -27,6 +27,8 @@ mod gui;
 #[cfg(feature = "speedy2d")]
 mod gui_base;
 #[cfg(feature = "speedy2d")]
+mod gui_edit;
+#[cfg(feature = "speedy2d")]
 mod gui_library;
 #[cfg(feature = "speedy2d")]
 mod gui_playback;

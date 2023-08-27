@@ -48,8 +48,16 @@ impl Song {
             cached_data: Arc::new(Mutex::new(None)),
         }
     }
-    pub fn uncache_data(&self) {
-        *self.cached_data.lock().unwrap() = None;
+    pub fn uncache_data(&self) -> Result<(), ()> {
+        let mut cached = self.cached_data.lock().unwrap();
+        match cached.as_ref() {
+            Some(Ok(_data)) => {
+                *cached = None;
+                Ok(())
+            }
+            Some(Err(_thread)) => Err(()),
+            None => Ok(()),
+        }
     }
     /// If no data is cached yet and no caching thread is running, starts a thread to cache the data.
     pub fn cache_data_start_thread(&self, db: &Database) -> bool {

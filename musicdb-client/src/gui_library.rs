@@ -10,6 +10,7 @@ use speedy2d::{
 use crate::{
     gui::{Dragging, DrawInfo, GuiAction, GuiElem, GuiElemCfg, GuiElemTrait},
     gui_base::ScrollBox,
+    gui_edit::GuiEdit,
     gui_text::{Label, TextField},
     gui_wrappers::WithFocusHotkey,
 };
@@ -268,6 +269,7 @@ struct ListArtist {
     config: GuiElemCfg,
     id: ArtistId,
     children: Vec<GuiElem>,
+    mouse: bool,
     mouse_pos: Vec2,
 }
 impl ListArtist {
@@ -283,6 +285,7 @@ impl ListArtist {
             config: config.w_mouse(),
             id,
             children: vec![GuiElem::new(label)],
+            mouse: false,
             mouse_pos: Vec2::ZERO,
         }
     }
@@ -307,6 +310,13 @@ impl GuiElemTrait for ListArtist {
         Box::new(self.clone())
     }
     fn draw(&mut self, info: &mut DrawInfo, _g: &mut speedy2d::Graphics2D) {
+        if self.mouse {
+            if info.pos.contains(info.mouse_pos) {
+                return;
+            } else {
+                self.mouse = false;
+            }
+        }
         self.mouse_pos = Vec2::new(
             info.mouse_pos.x - self.config.pixel_pos.top_left().x,
             info.mouse_pos.y - self.config.pixel_pos.top_left().y,
@@ -314,6 +324,7 @@ impl GuiElemTrait for ListArtist {
     }
     fn mouse_down(&mut self, button: MouseButton) -> Vec<GuiAction> {
         if button == MouseButton::Left {
+            self.mouse = true;
             let mouse_pos = self.mouse_pos;
             let w = self.config.pixel_pos.width();
             let h = self.config.pixel_pos.height();
@@ -334,6 +345,17 @@ impl GuiElemTrait for ListArtist {
             vec![]
         }
     }
+    fn mouse_up(&mut self, button: MouseButton) -> Vec<GuiAction> {
+        if self.mouse && button == MouseButton::Left {
+            self.mouse = false;
+            vec![GuiAction::OpenEditPanel(GuiElem::new(GuiEdit::new(
+                GuiElemCfg::default(),
+                crate::gui_edit::Editable::Artist(self.id),
+            )))]
+        } else {
+            vec![]
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -341,6 +363,7 @@ struct ListAlbum {
     config: GuiElemCfg,
     id: AlbumId,
     children: Vec<GuiElem>,
+    mouse: bool,
     mouse_pos: Vec2,
 }
 impl ListAlbum {
@@ -356,6 +379,7 @@ impl ListAlbum {
             config: config.w_mouse(),
             id,
             children: vec![GuiElem::new(label)],
+            mouse: false,
             mouse_pos: Vec2::ZERO,
         }
     }
@@ -380,6 +404,13 @@ impl GuiElemTrait for ListAlbum {
         Box::new(self.clone())
     }
     fn draw(&mut self, info: &mut DrawInfo, _g: &mut speedy2d::Graphics2D) {
+        if self.mouse {
+            if info.pos.contains(info.mouse_pos) {
+                return;
+            } else {
+                self.mouse = false;
+            }
+        }
         self.mouse_pos = Vec2::new(
             info.mouse_pos.x - self.config.pixel_pos.top_left().x,
             info.mouse_pos.y - self.config.pixel_pos.top_left().y,
@@ -387,6 +418,7 @@ impl GuiElemTrait for ListAlbum {
     }
     fn mouse_down(&mut self, button: MouseButton) -> Vec<GuiAction> {
         if button == MouseButton::Left {
+            self.mouse = true;
             let mouse_pos = self.mouse_pos;
             let w = self.config.pixel_pos.width();
             let h = self.config.pixel_pos.height();
@@ -407,6 +439,17 @@ impl GuiElemTrait for ListAlbum {
             vec![]
         }
     }
+    fn mouse_up(&mut self, button: MouseButton) -> Vec<GuiAction> {
+        if self.mouse && button == MouseButton::Left {
+            self.mouse = false;
+            vec![GuiAction::OpenEditPanel(GuiElem::new(GuiEdit::new(
+                GuiElemCfg::default(),
+                crate::gui_edit::Editable::Album(self.id),
+            )))]
+        } else {
+            vec![]
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -414,6 +457,7 @@ struct ListSong {
     config: GuiElemCfg,
     id: SongId,
     children: Vec<GuiElem>,
+    mouse: bool,
     mouse_pos: Vec2,
 }
 impl ListSong {
@@ -429,6 +473,7 @@ impl ListSong {
             config: config.w_mouse(),
             id,
             children: vec![GuiElem::new(label)],
+            mouse: false,
             mouse_pos: Vec2::ZERO,
         }
     }
@@ -453,6 +498,13 @@ impl GuiElemTrait for ListSong {
         Box::new(self.clone())
     }
     fn draw(&mut self, info: &mut DrawInfo, _g: &mut speedy2d::Graphics2D) {
+        if self.mouse {
+            if info.pos.contains(info.mouse_pos) {
+                return;
+            } else {
+                self.mouse = false;
+            }
+        }
         self.mouse_pos = Vec2::new(
             info.mouse_pos.x - self.config.pixel_pos.top_left().x,
             info.mouse_pos.y - self.config.pixel_pos.top_left().y,
@@ -460,6 +512,7 @@ impl GuiElemTrait for ListSong {
     }
     fn mouse_down(&mut self, button: MouseButton) -> Vec<GuiAction> {
         if button == MouseButton::Left {
+            self.mouse = true;
             let mouse_pos = self.mouse_pos;
             let w = self.config.pixel_pos.width();
             let h = self.config.pixel_pos.height();
@@ -475,6 +528,17 @@ impl GuiElemTrait for ListSong {
                         Rectangle::from_tuples((x, y), (x + w / sw, y + h / sh));
                     el.draw(i, g)
                 })),
+            )))]
+        } else {
+            vec![]
+        }
+    }
+    fn mouse_up(&mut self, button: MouseButton) -> Vec<GuiAction> {
+        if self.mouse && button == MouseButton::Left {
+            self.mouse = false;
+            vec![GuiAction::OpenEditPanel(GuiElem::new(GuiEdit::new(
+                GuiElemCfg::default(),
+                crate::gui_edit::Editable::Song(self.id),
             )))]
         } else {
             vec![]

@@ -305,9 +305,9 @@ impl ToFromBytes for Command {
             0b01010000 => Self::AddSong(ToFromBytes::from_bytes(s)?),
             0b01010011 => Self::AddAlbum(ToFromBytes::from_bytes(s)?),
             0b01011100 => Self::AddArtist(ToFromBytes::from_bytes(s)?),
-            0b10010000 => Self::AddSong(ToFromBytes::from_bytes(s)?),
-            0b10010011 => Self::AddAlbum(ToFromBytes::from_bytes(s)?),
-            0b10011100 => Self::AddArtist(ToFromBytes::from_bytes(s)?),
+            0b10010000 => Self::ModifySong(ToFromBytes::from_bytes(s)?),
+            0b10010011 => Self::ModifyAlbum(ToFromBytes::from_bytes(s)?),
+            0b10011100 => Self::ModifyArtist(ToFromBytes::from_bytes(s)?),
             0b01011101 => Self::AddCover(ToFromBytes::from_bytes(s)?),
             0b00110001 => Self::SetLibraryDirectory(ToFromBytes::from_bytes(s)?),
             _ => {
