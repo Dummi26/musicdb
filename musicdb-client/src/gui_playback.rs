@@ -1,18 +1,13 @@
-use std::{
-    io::{Cursor, Read, Write},
-    thread::{self, JoinHandle},
-};
+use std::{collections::VecDeque, sync::Arc, time::Instant};
 
 use musicdb_lib::{
-    data::{queue::QueueContent, CoverId, SongId},
-    server::{get, Command},
+    data::{CoverId, SongId},
+    server::Command,
 };
-use speedy2d::{
-    color::Color, dimen::Vec2, image::ImageHandle, shape::Rectangle, window::MouseButton,
-};
+use speedy2d::{color::Color, dimen::Vec2, shape::Rectangle, window::MouseButton};
 
 use crate::{
-    gui::{adjust_area, adjust_pos, GuiAction, GuiElem, GuiElemCfg, GuiElemTrait},
+    gui::{adjust_area, adjust_pos, GuiAction, GuiCover, GuiElem, GuiElemCfg, GuiElemTrait},
     gui_text::Label,
 };
 
@@ -23,32 +18,16 @@ This file could probably have a better name.
 
 */
 
-pub struct CurrentSong<T: Read + Write> {
+#[derive(Clone)]
+pub struct CurrentSong {
     config: GuiElemCfg,
     children: Vec<GuiElem>,
-    get_con: Option<get::Client<T>>,
     prev_song: Option<SongId>,
     cover_pos: Rectangle,
-    cover_id: Option<CoverId>,
-    cover: Option<ImageHandle>,
-    new_cover: Option<JoinHandle<(get::Client<T>, Option<Vec<u8>>)>>,
+    covers: VecDeque<(CoverId, Option<(bool, Instant)>)>,
 }
-impl<T: Read + Write> Clone for CurrentSong<T> {
-    fn clone(&self) -> Self {
-        Self {
-            config: self.config.clone(),
-            children: self.children.clone(),
-            get_con: None,
-            prev_song: None,
-            cover_pos: self.cover_pos.clone(),
-            cover_id: None,
-            cover: None,
-            new_cover: None,
-        }
-    }
-}
-impl<T: Read + Write + 'static + Sync + Send> CurrentSong<T> {
-    pub fn new(config: GuiElemCfg, get_con: get::Client<T>) -> Self {
+impl CurrentSong {
+    pub fn new(config: GuiElemCfg) -> Self {
         Self {
             config,
             children: vec![
@@ -67,16 +46,13 @@ impl<T: Read + Write + 'static + Sync + Send> CurrentSong<T> {
                     Vec2::new(0.0, 0.0),
                 )),
             ],
-            get_con: Some(get_con),
             cover_pos: Rectangle::new(Vec2::ZERO, Vec2::ZERO),
-            cover_id: None,
+            covers: VecDeque::new(),
             prev_song: None,
-            cover: None,
-            new_cover: None,
         }
     }
 }
-impl<T: Read + Write + 'static + Sync + Send> GuiElemTrait for CurrentSong<T> {
+impl GuiElemTrait for CurrentSong {
     fn config(&self) -> &GuiElemCfg {
         &self.config
     }
@@ -108,97 +84,43 @@ impl<T: Read + Write + 'static + Sync + Send> GuiElemTrait for CurrentSong<T> {
             // no song, nothing in queue
             None
         } else {
-            self.cover = None;
+            // end of last song
             Some(None)
         };
-        // drawing stuff
-        if self.config.pixel_pos.size() != info.pos.size() {
-            let leftright = 0.05;
-            let topbottom = 0.05;
-            let mut width = 0.3;
-            let mut height = 1.0 - topbottom * 2.0;
-            if width * info.pos.width() < height * info.pos.height() {
-                height = width * info.pos.width() / info.pos.height();
-            } else {
-                width = height * info.pos.height() / info.pos.width();
-            }
-            let right = leftright + width + leftright;
-            self.cover_pos = Rectangle::from_tuples(
-                (leftright, 0.5 - 0.5 * height),
-                (leftright + width, 0.5 + 0.5 * height),
-            );
-            for el in self.children.iter_mut().take(2) {
-                let pos = &mut el.inner.config_mut().pos;
-                *pos = Rectangle::new(Vec2::new(right, pos.top_left().y), *pos.bottom_right());
-            }
-        }
-        if self.new_cover.as_ref().is_some_and(|v| v.is_finished()) {
-            let (get_con, cover) = self.new_cover.take().unwrap().join().unwrap();
-            self.get_con = Some(get_con);
-            if let Some(cover) = cover {
-                self.cover = g
-                    .create_image_from_file_bytes(
-                        None,
-                        speedy2d::image::ImageSmoothingMode::Linear,
-                        Cursor::new(cover),
-                    )
-                    .ok();
-            }
-        }
-        if let Some(cover) = &self.cover {
-            g.draw_rectangle_image(
-                Rectangle::new(
-                    Vec2::new(
-                        info.pos.top_left().x + info.pos.width() * self.cover_pos.top_left().x,
-                        info.pos.top_left().y + info.pos.height() * self.cover_pos.top_left().y,
-                    ),
-                    Vec2::new(
-                        info.pos.top_left().x + info.pos.width() * self.cover_pos.bottom_right().x,
-                        info.pos.top_left().y + info.pos.height() * self.cover_pos.bottom_right().y,
-                    ),
-                ),
-                cover,
-            );
-        }
         if let Some(new_song) = new_song {
             // if there is a new song:
             if self.prev_song != new_song {
                 self.config.redraw = true;
                 self.prev_song = new_song;
             }
+            // get cover
+            let get_cover = |song: Option<u64>| crate::get_cover(song?, info.database);
+            let cover = get_cover(new_song);
+            // fade out all covers
+            for (_, t) in &mut self.covers {
+                if !t.is_some_and(|t| t.0) {
+                    // not fading out yet, so make it start
+                    *t = Some((true, Instant::now()));
+                }
+            }
+            // cover fades in now.
+            if let Some(cover) = cover {
+                self.covers
+                    .push_back((cover, Some((false, Instant::now()))));
+            }
+            if let Some(next_cover) = get_cover(info.database.queue.get_next_song().cloned()) {
+                if !info.covers.contains_key(&next_cover) {
+                    info.covers.insert(
+                        next_cover,
+                        GuiCover::new(next_cover, Arc::clone(&info.get_con)),
+                    );
+                }
+            }
+            // redraw
             if self.config.redraw {
                 self.config.redraw = false;
                 let (name, subtext) = if let Some(song) = new_song {
                     if let Some(song) = info.database.get_song(&song) {
-                        let cover = if let Some(v) = song.cover {
-                            Some(v)
-                        } else if let Some(v) = song
-                            .album
-                            .as_ref()
-                            .and_then(|id| info.database.albums().get(id))
-                            .and_then(|album| album.cover)
-                        {
-                            Some(v)
-                        } else {
-                            None
-                        };
-                        if cover != self.cover_id {
-                            self.cover = None;
-                            if let Some(cover) = cover {
-                                if let Some(mut get_con) = self.get_con.take() {
-                                    self.new_cover = Some(thread::spawn(move || {
-                                        match get_con.cover_bytes(cover).unwrap() {
-                                            Ok(v) => (get_con, Some(v)),
-                                            Err(e) => {
-                                                eprintln!("couldn't get cover (response: {e})");
-                                                (get_con, None)
-                                            }
-                                        }
-                                    }));
-                                }
-                            }
-                            self.cover_id = cover;
-                        }
                         let sub = match (
                             song.artist
                                 .as_ref()
@@ -245,6 +167,107 @@ impl<T: Read + Write + 'static + Sync + Send> GuiElemTrait for CurrentSong<T> {
                     .content
                     .text() = subtext;
             }
+        }
+        // drawing stuff
+        if self.config.pixel_pos.size() != info.pos.size() {
+            let leftright = 0.05;
+            let topbottom = 0.05;
+            let mut width = 0.3;
+            let mut height = 1.0 - topbottom * 2.0;
+            if width * info.pos.width() < height * info.pos.height() {
+                height = width * info.pos.width() / info.pos.height();
+            } else {
+                width = height * info.pos.height() / info.pos.width();
+            }
+            let right = leftright + width + leftright;
+            self.cover_pos = Rectangle::from_tuples(
+                (leftright, 0.5 - 0.5 * height),
+                (leftright + width, 0.5 + 0.5 * height),
+            );
+            for el in self.children.iter_mut().take(2) {
+                let pos = &mut el.inner.config_mut().pos;
+                *pos = Rectangle::new(Vec2::new(right, pos.top_left().y), *pos.bottom_right());
+            }
+        }
+        let mut cover_to_remove = None;
+        for (cover_index, (cover_id, time)) in self.covers.iter_mut().enumerate() {
+            let pos = match time {
+                None => 1.0,
+                Some((false, t)) => {
+                    let el = t.elapsed().as_secs_f32();
+                    if el >= 1.0 {
+                        *time = None;
+                        1.0
+                    } else {
+                        if let Some(h) = &info.helper {
+                            h.request_redraw();
+                        }
+                        el
+                    }
+                }
+                Some((true, t)) => {
+                    let el = t.elapsed().as_secs_f32();
+                    if el >= 1.0 {
+                        cover_to_remove = Some(cover_index);
+                        2.0
+                    } else {
+                        if let Some(h) = &info.helper {
+                            h.request_redraw();
+                        }
+                        1.0 + el
+                    }
+                }
+            };
+            if let Some(cover) = info.covers.get_mut(cover_id) {
+                if let Some(cover) = cover.get_init(g) {
+                    let rect = Rectangle::new(
+                        Vec2::new(
+                            info.pos.top_left().x + info.pos.width() * self.cover_pos.top_left().x,
+                            info.pos.top_left().y + info.pos.height() * self.cover_pos.top_left().y,
+                        ),
+                        Vec2::new(
+                            info.pos.top_left().x
+                                + info.pos.width() * self.cover_pos.bottom_right().x,
+                            info.pos.top_left().y
+                                + info.pos.height() * self.cover_pos.bottom_right().y,
+                        ),
+                    );
+                    if pos == 1.0 {
+                        g.draw_rectangle_image(rect, &cover);
+                    } else {
+                        let prog = (pos - 1.0).abs();
+                        // shrink to half (0.5x0.5) size while moving left and fading out
+                        let lx = rect.top_left().x + rect.width() * prog * 0.25;
+                        let rx = rect.bottom_right().x - rect.width() * prog * 0.25;
+                        let ty = rect.top_left().y + rect.height() * prog * 0.25;
+                        let by = rect.bottom_right().y - rect.height() * prog * 0.25;
+                        let mut moved = rect.width() * prog * prog;
+                        if pos > 1.0 {
+                            moved = -moved;
+                        }
+                        g.draw_rectangle_image_tinted(
+                            Rectangle::from_tuples((lx + moved, ty), (rx + moved, by)),
+                            Color::from_rgba(
+                                1.0,
+                                1.0,
+                                1.0,
+                                if pos > 1.0 { 2.0 - pos } else { pos },
+                            ),
+                            &cover,
+                        );
+                    }
+                } else {
+                    // cover still loading, just wait
+                }
+            } else {
+                // cover not loading or loaded, start loading!
+                info.covers
+                    .insert(*cover_id, GuiCover::new(*cover_id, info.get_con.clone()));
+            }
+        }
+        // removing one cover per frame is good enough
+        if let Some(index) = cover_to_remove {
+            self.covers.remove(index);
         }
     }
 }

@@ -1,13 +1,19 @@
-use std::sync::{atomic::AtomicBool, mpsc, Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::{atomic::AtomicBool, mpsc, Arc, Mutex},
+};
 
 use musicdb_lib::{
-    data::{album::Album, artist::Artist, song::Song, AlbumId, ArtistId, SongId},
+    data::{
+        album::Album, artist::Artist, queue::QueueContent, song::Song, AlbumId, ArtistId, CoverId,
+        SongId,
+    },
     server::Command,
 };
 use speedy2d::{color::Color, dimen::Vec2, shape::Rectangle};
 
 use crate::{
-    gui::{GuiAction, GuiElem, GuiElemCfg, GuiElemTrait},
+    gui::{Dragging, DrawInfo, GuiAction, GuiElem, GuiElemCfg, GuiElemTrait},
     gui_base::{Button, Panel, ScrollBox},
     gui_text::{Label, TextField},
 };
@@ -18,37 +24,73 @@ pub struct GuiEdit {
     editable: Editable,
     editing: Editing,
     reload: bool,
+    rebuild_main: bool,
+    rebuild_changes: bool,
     send: bool,
     apply_change: mpsc::Sender<Box<dyn FnOnce(&mut Self)>>,
     change_recv: mpsc::Receiver<Box<dyn FnOnce(&mut Self)>>,
 }
 #[derive(Clone)]
 pub enum Editable {
-    Artist(ArtistId),
-    Album(AlbumId),
-    Song(SongId),
+    Artist(Vec<ArtistId>),
+    Album(Vec<AlbumId>),
+    Song(Vec<SongId>),
 }
 #[derive(Clone)]
 pub enum Editing {
     NotLoaded,
-    Artist(Artist),
-    Album(Album),
-    Song(Song),
+    Artist(Vec<Artist>, Vec<ArtistChange>),
+    Album(Vec<Album>, Vec<AlbumChange>),
+    Song(Vec<Song>, Vec<SongChange>),
 }
+#[derive(Clone)]
+pub enum ArtistChange {
+    SetName(String),
+    SetCover(Option<ArtistId>),
+    RemoveAlbum(AlbumId),
+    AddAlbum(AlbumId),
+    RemoveSong(SongId),
+    AddSong(SongId),
+}
+#[derive(Clone)]
+pub enum AlbumChange {
+    SetName(String),
+    SetCover(Option<ArtistId>),
+    RemoveSong(SongId),
+    AddSong(SongId),
+}
+#[derive(Clone)]
+pub enum SongChange {
+    SetTitle(String),
+    SetCover(Option<ArtistId>),
+}
+
 impl GuiEdit {
     pub fn new(config: GuiElemCfg, edit: Editable) -> Self {
         let (apply_change, change_recv) = mpsc::channel();
         let ac1 = apply_change.clone();
         let ac2 = apply_change.clone();
         Self {
-            config,
+            config: config.w_drag_target(),
             editable: edit,
             editing: Editing::NotLoaded,
             reload: true,
+            rebuild_main: true,
+            rebuild_changes: true,
             send: false,
             apply_change,
             change_recv,
             children: vec![
+                GuiElem::new(ScrollBox::new(
+                    GuiElemCfg::at(Rectangle::from_tuples((0.0, 0.0), (1.0, 0.6))),
+                    crate::gui_base::ScrollBoxSizeUnit::Pixels,
+                    vec![],
+                )),
+                GuiElem::new(ScrollBox::new(
+                    GuiElemCfg::at(Rectangle::from_tuples((0.0, 0.6), (1.0, 0.9))),
+                    crate::gui_base::ScrollBoxSizeUnit::Pixels,
+                    vec![],
+                )),
                 GuiElem::new(Button::new(
                     GuiElemCfg::at(Rectangle::from_tuples((0.0, 0.95), (0.33, 1.0))),
                     |_| vec![GuiAction::CloseEditPanel],
@@ -123,181 +165,536 @@ impl GuiElemTrait for GuiEdit {
             self.send = false;
             match &self.editing {
                 Editing::NotLoaded => {}
-                Editing::Artist(v) => info
-                    .actions
-                    .push(GuiAction::SendToServer(Command::ModifyArtist(v.clone()))),
-                Editing::Album(v) => info
-                    .actions
-                    .push(GuiAction::SendToServer(Command::ModifyAlbum(v.clone()))),
-                Editing::Song(v) => info
-                    .actions
-                    .push(GuiAction::SendToServer(Command::ModifySong(v.clone()))),
+                Editing::Artist(v, changes) => {
+                    for v in v {
+                        let mut v = v.clone();
+                        for change in changes.iter() {
+                            match change {
+                                ArtistChange::SetName(n) => v.name = n.clone(),
+                                ArtistChange::SetCover(c) => v.cover = c.clone(),
+                                ArtistChange::RemoveAlbum(id) => {
+                                    if let Some(i) = v.albums.iter().position(|id| id == id) {
+                                        v.albums.remove(i);
+                                    }
+                                }
+                                ArtistChange::AddAlbum(id) => {
+                                    if !v.albums.contains(id) {
+                                        v.albums.push(*id);
+                                    }
+                                }
+                                ArtistChange::RemoveSong(id) => {
+                                    if let Some(i) = v.singles.iter().position(|id| id == id) {
+                                        v.singles.remove(i);
+                                    }
+                                }
+                                ArtistChange::AddSong(id) => {
+                                    if !v.singles.contains(id) {
+                                        v.singles.push(*id);
+                                    }
+                                }
+                            }
+                        }
+                        info.actions
+                            .push(GuiAction::SendToServer(Command::ModifyArtist(v)));
+                    }
+                }
+                Editing::Album(v, changes) => {
+                    for v in v {
+                        let mut v = v.clone();
+                        for change in changes.iter() {
+                            todo!()
+                        }
+                        info.actions
+                            .push(GuiAction::SendToServer(Command::ModifyAlbum(v)));
+                    }
+                }
+                Editing::Song(v, changes) => {
+                    for v in v {
+                        let mut v = v.clone();
+                        for change in changes.iter() {
+                            todo!()
+                        }
+                        info.actions
+                            .push(GuiAction::SendToServer(Command::ModifySong(v)));
+                    }
+                }
             }
         }
         if self.reload {
             self.reload = false;
+            let prev = std::mem::replace(&mut self.editing, Editing::NotLoaded);
             self.editing = match &self.editable {
                 Editable::Artist(id) => {
-                    if let Some(v) = info.database.artists().get(id).cloned() {
-                        Editing::Artist(v)
+                    let v = id
+                        .iter()
+                        .filter_map(|id| info.database.artists().get(id).cloned())
+                        .collect::<Vec<_>>();
+                    if !v.is_empty() {
+                        Editing::Artist(
+                            v,
+                            if let Editing::Artist(_, c) = prev {
+                                c
+                            } else {
+                                vec![]
+                            },
+                        )
                     } else {
                         Editing::NotLoaded
                     }
                 }
                 Editable::Album(id) => {
-                    if let Some(v) = info.database.albums().get(id).cloned() {
-                        Editing::Album(v)
+                    let v = id
+                        .iter()
+                        .filter_map(|id| info.database.albums().get(id).cloned())
+                        .collect::<Vec<_>>();
+                    if !v.is_empty() {
+                        Editing::Album(
+                            v,
+                            if let Editing::Album(_, c) = prev {
+                                c
+                            } else {
+                                vec![]
+                            },
+                        )
                     } else {
                         Editing::NotLoaded
                     }
                 }
                 Editable::Song(id) => {
-                    if let Some(v) = info.database.songs().get(id).cloned() {
-                        Editing::Song(v)
+                    let v = id
+                        .iter()
+                        .filter_map(|id| info.database.songs().get(id).cloned())
+                        .collect::<Vec<_>>();
+                    if !v.is_empty() {
+                        Editing::Song(
+                            v,
+                            if let Editing::Song(_, c) = prev {
+                                c
+                            } else {
+                                vec![]
+                            },
+                        )
                     } else {
                         Editing::NotLoaded
                     }
                 }
             };
             self.config.redraw = true;
+            self.rebuild_main = true;
+            self.rebuild_changes = true;
+        }
+        if let Some(sb) = self.children[0].inner.any_mut().downcast_mut::<ScrollBox>() {
+            for (c, _) in sb.children.iter() {
+                if let Some(p) = c
+                    .inner
+                    .any()
+                    .downcast_ref::<Panel>()
+                    .and_then(|p| p.children.get(0))
+                    .and_then(|e| e.inner.any().downcast_ref::<TextField>())
+                {
+                    if p.label_input().content.will_redraw() {
+                        if let Some((key, _)) = p.label_hint().content.get_text().split_once(':') {
+                            match (&mut self.editing, key) {
+                                (Editing::Artist(_, changes), "name") => {
+                                    let mut c = changes.iter_mut();
+                                    loop {
+                                        if let Some(c) = c.next() {
+                                            if let ArtistChange::SetName(n) = c {
+                                                *n = p.label_input().content.get_text().clone();
+                                                break;
+                                            }
+                                        } else {
+                                            changes.push(ArtistChange::SetName(
+                                                p.label_input().content.get_text().clone(),
+                                            ));
+                                            break;
+                                        }
+                                    }
+                                    self.rebuild_changes = true;
+                                }
+                                (Editing::Artist(_, changes), "cover") => {
+                                    let mut c = changes.iter_mut();
+                                    loop {
+                                        if let Some(c) = c.next() {
+                                            if let ArtistChange::SetCover(n) = c {
+                                                *n =
+                                                    p.label_input().content.get_text().parse().ok();
+                                                break;
+                                            }
+                                        } else {
+                                            changes.push(ArtistChange::SetCover(
+                                                p.label_input().content.get_text().parse().ok(),
+                                            ));
+                                            break;
+                                        }
+                                    }
+                                    self.rebuild_changes = true;
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if self.rebuild_main {
+            self.rebuild_main = false;
+            self.rebuild_main(info);
+        }
+        if self.rebuild_changes {
+            self.rebuild_changes = false;
+            self.rebuild_changes(info);
         }
         if self.config.redraw {
             self.config.redraw = false;
-            let scrollbox = if self.children.len() > 3 {
-                let o = self.children.pop();
-                while self.children.len() > 3 {
-                    self.children.pop();
+            if let Some(sb) = self.children[0].inner.any_mut().downcast_mut::<ScrollBox>() {
+                for c in sb.children.iter_mut() {
+                    c.1 = info.line_height;
                 }
-                o
-            } else {
-                None
-            };
+            }
+        }
+    }
+    fn dragged(&mut self, dragged: Dragging) -> Vec<GuiAction> {
+        let dragged = match dragged {
+            Dragging::Artist(_) | Dragging::Album(_) | Dragging::Song(_) => dragged,
+            Dragging::Queue(q) => match q.content() {
+                QueueContent::Song(id) => Dragging::Song(*id),
+                _ => Dragging::Queue(q),
+            },
+        };
+        match dragged {
+            Dragging::Artist(id) => {
+                if let Editing::Artist(a, _) = &self.editing {
+                    self.editable = Editable::Artist(a.iter().map(|v| v.id).chain([id]).collect())
+                }
+            }
+            Dragging::Album(id) => {
+                if let Editing::Album(a, _) = &self.editing {
+                    self.editable = Editable::Album(a.iter().map(|v| v.id).chain([id]).collect())
+                }
+            }
+            Dragging::Song(id) => {
+                if let Editing::Song(a, _) = &self.editing {
+                    self.editable = Editable::Song(a.iter().map(|v| v.id).chain([id]).collect())
+                }
+            }
+            Dragging::Queue(_) => return vec![],
+        }
+        self.reload = true;
+        vec![]
+    }
+}
+impl GuiEdit {
+    fn rebuild_main(&mut self, info: &mut DrawInfo) {
+        if let Some(sb) = self.children[0].inner.any_mut().downcast_mut::<ScrollBox>() {
+            sb.children.clear();
+            sb.config_mut().redraw = true;
             match &self.editing {
-                Editing::NotLoaded => {
-                    self.children.push(GuiElem::new(Label::new(
-                        GuiElemCfg::default(),
-                        "nothing here".to_string(),
-                        Color::WHITE,
-                        None,
-                        Vec2::new(0.5, 0.5),
-                    )));
-                }
-                Editing::Artist(artist) => {
-                    self.children.push(GuiElem::new(Label::new(
-                        GuiElemCfg::at(Rectangle::from_tuples((0.0, 0.0), (0.8, 0.08))),
-                        artist.name.clone(),
-                        Color::WHITE,
-                        None,
-                        Vec2::new(0.1, 0.5),
-                    )));
-                    self.children.push(GuiElem::new(Label::new(
-                        GuiElemCfg::at(Rectangle::from_tuples((0.8, 0.0), (1.0, 0.04))),
-                        "Artist".to_string(),
-                        Color::WHITE,
-                        None,
-                        Vec2::new(0.8, 0.5),
-                    )));
-                    self.children.push(GuiElem::new(Label::new(
-                        GuiElemCfg::at(Rectangle::from_tuples((0.8, 0.04), (1.0, 0.08))),
-                        format!("#{}", artist.id),
-                        Color::WHITE,
-                        None,
-                        Vec2::new(0.8, 0.5),
-                    )));
-                    let mut elems = vec![];
-                    elems.push((
+                Editing::NotLoaded => {}
+                Editing::Artist(v, _) => {
+                    // name
+                    let mut names = v
+                        .iter()
+                        .map(|v| &v.name)
+                        .collect::<HashSet<_>>()
+                        .into_iter()
+                        .collect::<Vec<_>>();
+                    names.sort_unstable();
+                    let name = if names.len() == 1 {
+                        format!("name: {}", names[0])
+                    } else {
+                        let mut name = format!("name: {}", names[0]);
+                        for n in names.iter().skip(1) {
+                            name.push_str(" / ");
+                            name.push_str(n);
+                        }
+                        name
+                    };
+                    sb.children.push((
                         GuiElem::new(Panel::new(
                             GuiElemCfg::default(),
-                            vec![
-                                GuiElem::new(Label::new(
-                                    GuiElemCfg::at(Rectangle::from_tuples((0.0, 0.0), (0.6, 1.0))),
-                                    format!(
-                                        "{} album{}",
-                                        artist.albums.len(),
-                                        if artist.albums.len() != 1 { "s" } else { "" }
-                                    ),
-                                    Color::LIGHT_GRAY,
-                                    None,
-                                    Vec2::new(0.0, 0.5),
-                                )),
-                                GuiElem::new(TextField::new(
-                                    GuiElemCfg::at(Rectangle::from_tuples((0.6, 0.0), (0.8, 1.0))),
-                                    "id".to_string(),
-                                    Color::DARK_GRAY,
-                                    Color::WHITE,
-                                )),
-                                GuiElem::new(Button::new(
-                                    GuiElemCfg::at(Rectangle::from_tuples((0.8, 0.0), (1.0, 1.0))),
-                                    {
-                                        let apply_change = self.apply_change.clone();
-                                        let my_index = elems.len();
-                                        move |_| {
-                                            _ = apply_change.send(Box::new(move |s| {
-                                                s.config.redraw = true;
-                                                if let Ok(id) = s
-                                                    .children
-                                                    .last_mut()
-                                                    .unwrap()
-                                                    .inner
-                                                    .any_mut()
-                                                    .downcast_mut::<ScrollBox>()
-                                                    .unwrap()
-                                                    .children[my_index]
-                                                    .0
-                                                    .inner
-                                                    .children()
-                                                    .nth(1)
-                                                    .unwrap()
-                                                    .inner
-                                                    .children()
-                                                    .next()
-                                                    .unwrap()
-                                                    .inner
-                                                    .any()
-                                                    .downcast_ref::<Label>()
-                                                    .unwrap()
-                                                    .content
-                                                    .get_text()
-                                                    .parse::<AlbumId>()
-                                                {
-                                                    if let Editing::Artist(artist) = &mut s.editing
-                                                    {
-                                                        artist.albums.push(id);
-                                                    }
-                                                }
-                                            }));
-                                            vec![]
-                                        }
-                                    },
-                                    vec![GuiElem::new(Label::new(
-                                        GuiElemCfg::default(),
-                                        "add".to_string(),
-                                        Color::LIGHT_GRAY,
-                                        None,
-                                        Vec2::new(0.0, 0.5),
-                                    ))],
-                                )),
-                            ],
+                            vec![GuiElem::new(TextField::new(
+                                GuiElemCfg::default(),
+                                name,
+                                Color::LIGHT_GRAY,
+                                Color::WHITE,
+                            ))],
                         )),
                         info.line_height,
                     ));
-                    for &album in &artist.albums {
-                        elems.push((
-                            GuiElem::new(Button::new(
+                    // cover
+                    let covers = v.iter().filter_map(|v| v.cover).collect::<Vec<_>>();
+                    let cover = if covers.is_empty() {
+                        format!("cover: None")
+                    } else {
+                        let mut cover = format!("cover: {}", covers[0]);
+                        for c in covers.iter().skip(1) {
+                            cover.push('/');
+                            cover.push_str(&format!("{c}"));
+                        }
+                        cover
+                    };
+                    sb.children.push((
+                        GuiElem::new(Panel::new(
+                            GuiElemCfg::default(),
+                            vec![GuiElem::new(TextField::new(
                                 GuiElemCfg::default(),
+                                cover,
+                                Color::LIGHT_GRAY,
+                                Color::WHITE,
+                            ))],
+                        )),
+                        info.line_height,
+                    ));
+                    // albums
+                    let mut albums = HashMap::new();
+                    for v in v {
+                        for album in &v.albums {
+                            if let Some(count) = albums.get_mut(album) {
+                                *count += 1;
+                            } else {
+                                albums.insert(*album, 1);
+                            }
+                        }
+                    }
+                    {
+                        fn get_id(s: &mut GuiEdit) -> Option<AlbumId> {
+                            s.children[0]
+                                .inner
+                                .children()
+                                .collect::<Vec<_>>()
+                                .into_iter()
+                                .rev()
+                                .nth(2)
+                                .unwrap()
+                                .inner
+                                .any_mut()
+                                .downcast_mut::<Panel>()
+                                .unwrap()
+                                .children()
+                                .next()
+                                .unwrap()
+                                .inner
+                                .any_mut()
+                                .downcast_mut::<TextField>()
+                                .unwrap()
+                                .label_input()
+                                .content
+                                .get_text()
+                                .parse()
+                                .ok()
+                        }
+                        let add_button = {
+                            let apply_change = self.apply_change.clone();
+                            GuiElem::new(Button::new(
+                                GuiElemCfg::at(Rectangle::from_tuples((0.8, 0.0), (0.9, 1.0))),
                                 move |_| {
-                                    vec![GuiAction::OpenEditPanel(GuiElem::new(GuiEdit::new(
-                                        GuiElemCfg::default(),
-                                        Editable::Album(album),
-                                    )))]
+                                    _ = apply_change.send(Box::new(move |s| {
+                                        if let Some(album_id) = get_id(s) {
+                                        if let Editing::Artist(_, c) = &mut s.editing {
+                                            if let Some(i) = c.iter().position(|c| {
+                                                matches!(c, ArtistChange::AddAlbum(id) if *id == album_id)
+                                            }) {
+                                                c.remove(i);
+                                            }
+                                            c.push(ArtistChange::AddAlbum(album_id));
+                                        s.rebuild_changes = true;}
+                                        }
+                                    }));
+                                    vec![]
                                 },
                                 vec![GuiElem::new(Label::new(
                                     GuiElemCfg::default(),
-                                    if let Some(a) = info.database.albums().get(&album) {
-                                        format!("Album: {}", a.name)
-                                    } else {
-                                        format!("Album #{album}")
-                                    },
+                                    format!("add"),
+                                    Color::GREEN,
+                                    None,
+                                    Vec2::new(0.5, 0.5),
+                                ))],
+                            ))
+                        };
+                        let remove_button = {
+                            let apply_change = self.apply_change.clone();
+                            GuiElem::new(Button::new(
+                                GuiElemCfg::at(Rectangle::from_tuples((0.9, 0.0), (1.0, 1.0))),
+                                move |_| {
+                                    _ = apply_change.send(Box::new(move |s| {
+                                        if let Some(album_id) = get_id(s) {
+                                        if let Editing::Artist(_, c) = &mut s.editing {
+                                            if let Some(i) = c.iter().position(|c| {
+                                                matches!(c, ArtistChange::RemoveAlbum(id) if *id == album_id)
+                                            }) {
+                                                c.remove(i);
+                                            }
+                                            c.push(ArtistChange::RemoveAlbum(album_id));
+                                        s.rebuild_changes = true;}
+                                        }
+                                    }));
+                                    vec![]
+                                },
+                                vec![GuiElem::new(Label::new(
+                                    GuiElemCfg::default(),
+                                    format!("remove"),
+                                    Color::RED,
+                                    None,
+                                    Vec2::new(0.5, 0.5),
+                                ))],
+                            ))
+                        };
+                        let name = GuiElem::new(TextField::new(
+                            GuiElemCfg::at(Rectangle::from_tuples((0.0, 0.0), (0.8, 1.0))),
+                            "add or remove album by id".to_string(),
+                            Color::LIGHT_GRAY,
+                            Color::WHITE,
+                        ));
+                        sb.children.push((
+                            GuiElem::new(Panel::new(
+                                GuiElemCfg::default(),
+                                vec![name, add_button, remove_button],
+                            )),
+                            info.line_height * 2.0,
+                        ));
+                    }
+                    for (album_id, count) in albums {
+                        let album = info.database.albums().get(&album_id);
+                        let add_button = if count == v.len() {
+                            None
+                        } else {
+                            let apply_change = self.apply_change.clone();
+                            Some(GuiElem::new(Button::new(
+                                GuiElemCfg::at(Rectangle::from_tuples((0.8, 0.0), (0.9, 1.0))),
+                                move |_| {
+                                    _ = apply_change.send(Box::new(move |s| {
+                                        if let Editing::Artist(_, c) = &mut s.editing {
+                                            if let Some(i) = c.iter().position(|c| {
+                                                matches!(c, ArtistChange::AddAlbum(id) if *id == album_id)
+                                            }) {
+                                                c.remove(i);
+                                            }
+                                            c.push(ArtistChange::AddAlbum(album_id));
+                                        s.rebuild_changes = true;
+                                        }
+                                    }));
+                                    vec![]
+                                },
+                                vec![GuiElem::new(Label::new(
+                                    GuiElemCfg::default(),
+                                    format!("add"),
+                                    Color::GREEN,
+                                    None,
+                                    Vec2::new(0.5, 0.5),
+                                ))],
+                            )))
+                        };
+                        let remove_button = {
+                            let apply_change = self.apply_change.clone();
+                            GuiElem::new(Button::new(
+                                GuiElemCfg::at(Rectangle::from_tuples((0.9, 0.0), (1.0, 1.0))),
+                                move |_| {
+                                    _ = apply_change.send(Box::new(move |s| {
+                                        if let Editing::Artist(_, c) = &mut s.editing {
+                                            if let Some(i) = c.iter().position(|c| {
+                                                matches!(c, ArtistChange::RemoveAlbum(id) if *id == album_id)
+                                            }) {
+                                                c.remove(i);
+                                            }
+                                            c.push(ArtistChange::RemoveAlbum(album_id));
+                                        s.rebuild_changes = true;
+                                        }
+                                    }));
+                                    vec![]
+                                },
+                                vec![GuiElem::new(Label::new(
+                                    GuiElemCfg::default(),
+                                    format!("remove"),
+                                    Color::RED,
+                                    None,
+                                    Vec2::new(0.5, 0.5),
+                                ))],
+                            ))
+                        };
+                        let name = GuiElem::new(Button::new(
+                            GuiElemCfg::at(Rectangle::from_tuples(
+                                (0.0, 0.0),
+                                (if add_button.is_some() { 0.8 } else { 0.9 }, 1.0),
+                            )),
+                            move |_| {
+                                vec![GuiAction::OpenEditPanel(GuiElem::new(GuiEdit::new(
+                                    GuiElemCfg::default(),
+                                    Editable::Album(vec![album_id]),
+                                )))]
+                            },
+                            vec![GuiElem::new(Label::new(
+                                GuiElemCfg::default(),
+                                if let Some(a) = album {
+                                    a.name.clone()
+                                } else {
+                                    format!("#{album_id}")
+                                },
+                                Color::WHITE,
+                                None,
+                                Vec2::new(0.0, 0.5),
+                            ))],
+                        ));
+                        sb.children.push((
+                            GuiElem::new(Panel::new(
+                                GuiElemCfg::default(),
+                                if let Some(add_button) = add_button {
+                                    vec![name, add_button, remove_button]
+                                } else {
+                                    vec![name, remove_button]
+                                },
+                            )),
+                            info.line_height,
+                        ));
+                    }
+                }
+                Editing::Album(v, _) => {}
+                Editing::Song(v, _) => {}
+            }
+        }
+    }
+    fn rebuild_changes(&mut self, info: &mut DrawInfo) {
+        if let Some(sb) = self.children[1].inner.any_mut().downcast_mut::<ScrollBox>() {
+            sb.children.clear();
+            sb.config_mut().redraw = true;
+            match &self.editing {
+                Editing::NotLoaded => {}
+                Editing::Artist(_, a) => {
+                    for (i, v) in a.iter().enumerate() {
+                        let text = match v {
+                            ArtistChange::SetName(v) => format!("set name to \"{v}\""),
+                            ArtistChange::SetCover(c) => {
+                                if let Some(c) = c {
+                                    format!("set cover to {c}")
+                                } else {
+                                    "remove cover".to_string()
+                                }
+                            }
+                            ArtistChange::RemoveAlbum(v) => format!("remove album {v}"),
+                            ArtistChange::AddAlbum(v) => format!("add album {v}"),
+                            ArtistChange::RemoveSong(v) => format!("remove song {v}"),
+                            ArtistChange::AddSong(v) => format!("add song {v}"),
+                        };
+                        let s = self.apply_change.clone();
+                        sb.children.push((
+                            GuiElem::new(Button::new(
+                                GuiElemCfg::default(),
+                                move |_| {
+                                    _ = s.send(Box::new(move |s| {
+                                        if !s.rebuild_changes {
+                                            if let Editing::Artist(_, v) = &mut s.editing {
+                                                if i < v.len() {
+                                                    v.remove(i);
+                                                }
+                                                s.rebuild_changes = true;
+                                            }
+                                        }
+                                    }));
+                                    vec![]
+                                },
+                                vec![GuiElem::new(Label::new(
+                                    GuiElemCfg::default(),
+                                    text,
                                     Color::WHITE,
                                     None,
                                     Vec2::new(0.0, 0.5),
@@ -306,48 +703,9 @@ impl GuiElemTrait for GuiEdit {
                             info.line_height,
                         ));
                     }
-                    self.children.push(if let Some(mut sb) = scrollbox {
-                        if let Some(s) = sb.inner.any_mut().downcast_mut::<ScrollBox>() {
-                            s.children = elems;
-                            s.config_mut().redraw = true;
-                            sb
-                        } else {
-                            GuiElem::new(ScrollBox::new(
-                                GuiElemCfg::at(Rectangle::from_tuples((0.0, 0.08), (1.0, 1.0))),
-                                crate::gui_base::ScrollBoxSizeUnit::Pixels,
-                                elems,
-                            ))
-                        }
-                    } else {
-                        GuiElem::new(ScrollBox::new(
-                            GuiElemCfg::at(Rectangle::from_tuples((0.0, 0.08), (1.0, 1.0))),
-                            crate::gui_base::ScrollBoxSizeUnit::Pixels,
-                            elems,
-                        ))
-                    });
                 }
-                Editing::Album(album) => {
-                    self.children.push(GuiElem::new(Label::new(
-                        GuiElemCfg::default(),
-                        format!("Album: {}", album.name),
-                        Color::WHITE,
-                        None,
-                        Vec2::new(0.5, 0.5),
-                    )));
-                }
-                Editing::Song(song) => {
-                    self.children.push(GuiElem::new(Label::new(
-                        GuiElemCfg::default(),
-                        format!("Song: {}", song.title),
-                        Color::WHITE,
-                        None,
-                        Vec2::new(0.5, 0.5),
-                    )));
-                }
+                _ => todo!(),
             }
-        };
-        match self.editing {
-            _ => {}
         }
     }
 }

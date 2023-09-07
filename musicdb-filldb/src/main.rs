@@ -1,19 +1,18 @@
 use std::{
-    collections::{HashMap, HashSet},
-    fs::{self, FileType},
+    collections::HashMap,
+    fs,
     io::Write,
-    ops::IndexMut,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
 
 use id3::TagLike;
 use musicdb_lib::data::{
-    album::{self, Album},
+    album::Album,
     artist::Artist,
     database::{Cover, Database},
     song::Song,
-    DatabaseLocation, GeneralData,
+    CoverId, DatabaseLocation, GeneralData,
 };
 
 fn main() {
@@ -63,7 +62,6 @@ fn main() {
                         general: GeneralData::default(),
                     });
                     artists.insert(artist.to_string(), (artist_id, HashMap::new()));
-                    eprintln!("Artist #{artist_id}: {artist}");
                     artist_id
                 } else {
                     artists.get(artist).unwrap().0
@@ -83,7 +81,6 @@ fn main() {
                             album.to_string(),
                             (album_id, song.0.parent().map(|dir| dir.to_path_buf())),
                         );
-                        eprintln!("Album #{album_id}: {album}");
                         album_id
                     } else {
                         let album = albums.get_mut(album).unwrap();
@@ -110,7 +107,7 @@ fn main() {
             .title()
             .map(|title| title.to_string())
             .unwrap_or_else(|| song.0.file_stem().unwrap().to_string_lossy().into_owned());
-        let song_id = database.add_song_new(Song {
+        database.add_song_new(Song {
             id: 0,
             title: title.clone(),
             location: DatabaseLocation {
@@ -123,51 +120,39 @@ fn main() {
             general: GeneralData::default(),
             cached_data: Arc::new(Mutex::new(None)),
         });
-        eprintln!("Song #{song_id}: \"{title}\" @ {path:?}");
     }
     eprintln!("searching for covers...");
-    for (artist, (_artist_id, albums)) in &artists {
-        for (album, (album_id, album_dir)) in albums {
+    let mut single_images = HashMap::new();
+    for (i1, (_artist, (artist_id, albums))) in artists.iter().enumerate() {
+        eprint!("\rartist {}/{}", i1 + 1, artists.len());
+        for (_album, (album_id, album_dir)) in albums {
             if let Some(album_dir) = album_dir {
-                let mut cover = None;
-                if let Ok(files) = fs::read_dir(album_dir) {
-                    for file in files {
-                        if let Ok(file) = file {
-                            if let Ok(metadata) = file.metadata() {
-                                if metadata.is_file() {
-                                    let path = file.path();
-                                    if matches!(
-                                        path.extension().and_then(|v| v.to_str()),
-                                        Some("png" | "jpg" | "jpeg")
-                                    ) {
-                                        if cover.is_none()
-                                            || cover
-                                                .as_ref()
-                                                .is_some_and(|(_, size)| *size < metadata.len())
-                                        {
-                                            cover = Some((path, metadata.len()));
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                if let Some((path, _)) = cover {
-                    let rel_path = path.strip_prefix(&lib_dir).unwrap().to_path_buf();
-                    let cover_id = database.add_cover_new(Cover {
-                        location: DatabaseLocation {
-                            rel_path: rel_path.clone(),
-                        },
-                        data: Arc::new(Mutex::new((false, None))),
-                    });
-                    eprintln!("Cover #{cover_id}: {artist} - {album} -> {rel_path:?}");
+                if let Some(cover_id) = get_cover(&mut database, &lib_dir, album_dir) {
                     database.albums_mut().get_mut(album_id).unwrap().cover = Some(cover_id);
                 }
             }
         }
+        if let Some(artist) = database.artists().get(artist_id) {
+            for song in artist.singles.clone() {
+                if let Some(dir) = AsRef::<Path>::as_ref(&lib_dir)
+                    .join(&database.songs().get(&song).unwrap().location.rel_path)
+                    .parent()
+                {
+                    let cover_id = if let Some(cover_id) = single_images.get(dir) {
+                        Some(*cover_id)
+                    } else if let Some(cover_id) = get_cover(&mut database, &lib_dir, dir) {
+                        single_images.insert(dir.to_owned(), cover_id);
+                        Some(cover_id)
+                    } else {
+                        None
+                    };
+                    let song = database.songs_mut().get_mut(&song).unwrap();
+                    song.cover = cover_id;
+                }
+            }
+        }
     }
-    eprintln!("saving dbfile...");
+    eprintln!("\nsaving dbfile...");
     database.save_database(None).unwrap();
     eprintln!("done!");
 }
@@ -198,5 +183,42 @@ impl OnceNewline {
         if std::mem::replace(&mut self.0, false) {
             eprintln!();
         }
+    }
+}
+
+fn get_cover(database: &mut Database, lib_dir: &str, abs_dir: impl AsRef<Path>) -> Option<CoverId> {
+    let mut cover = None;
+    if let Ok(files) = fs::read_dir(abs_dir) {
+        for file in files {
+            if let Ok(file) = file {
+                if let Ok(metadata) = file.metadata() {
+                    if metadata.is_file() {
+                        let path = file.path();
+                        if path.extension().and_then(|v| v.to_str()).is_some_and(|v| {
+                            matches!(v.to_lowercase().as_str(), "png" | "jpg" | "jpeg")
+                        }) {
+                            if cover.is_none()
+                                || cover
+                                    .as_ref()
+                                    .is_some_and(|(_, size)| *size < metadata.len())
+                            {
+                                cover = Some((path, metadata.len()));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if let Some((path, _)) = cover {
+        let rel_path = path.strip_prefix(&lib_dir).unwrap().to_path_buf();
+        Some(database.add_cover_new(Cover {
+            location: DatabaseLocation {
+                rel_path: rel_path.clone(),
+            },
+            data: Arc::new(Mutex::new((false, None))),
+        }))
+    } else {
+        None
     }
 }

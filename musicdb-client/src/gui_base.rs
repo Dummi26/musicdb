@@ -123,6 +123,9 @@ pub struct ScrollBox {
     /// 0.max(height_bottom - 1)
     max_scroll: f32,
     last_height_px: f32,
+    mouse_in_scrollbar: bool,
+    mouse_scrolling: bool,
+    mouse_scroll_margin_right: f32,
 }
 #[derive(Clone)]
 pub enum ScrollBoxSizeUnit {
@@ -131,13 +134,13 @@ pub enum ScrollBoxSizeUnit {
 }
 impl ScrollBox {
     pub fn new(
-        mut config: GuiElemCfg,
+        config: GuiElemCfg,
         size_unit: ScrollBoxSizeUnit,
         children: Vec<(GuiElem, f32)>,
     ) -> Self {
         // config.redraw = true;
         Self {
-            config: config.w_scroll(),
+            config: config.w_scroll().w_mouse(),
             children,
             size_unit,
             scroll_target: 0.0,
@@ -146,6 +149,9 @@ impl ScrollBox {
             height_bottom: 0.0,
             max_scroll: 0.0,
             last_height_px: 0.0,
+            mouse_in_scrollbar: false,
+            mouse_scrolling: false,
+            mouse_scroll_margin_right: 0.0,
         }
     }
 }
@@ -160,11 +166,13 @@ impl GuiElemTrait for ScrollBox {
         Box::new(
             self.children
                 .iter_mut()
-                .rev()
                 .map(|(v, _)| v)
                 .skip_while(|v| v.inner.config().pos.bottom_right().y < 0.0)
-                .take_while(|v| v.inner.config().pos.top_left().y < 1.0),
+                .take_while(|v| v.inner.config().pos.top_left().y <= 1.0),
         )
+    }
+    fn draw_rev(&self) -> bool {
+        false
     }
     fn any(&self) -> &dyn std::any::Any {
         self
@@ -196,6 +204,8 @@ impl GuiElemTrait for ScrollBox {
         }
         // recalculate positions
         if self.config.redraw {
+            self.mouse_scroll_margin_right = info.line_height * 0.2;
+            let max_x = 1.0 - self.mouse_scroll_margin_right / info.pos.width();
             self.config.redraw = false;
             let mut y_pos = -self.scroll_display;
             for (e, h) in self.children.iter_mut() {
@@ -206,7 +216,10 @@ impl GuiElemTrait for ScrollBox {
                     cfg.enabled = true;
                     cfg.pos = Rectangle::new(
                         Vec2::new(cfg.pos.top_left().x, 0.0f32.max(y_rel)),
-                        Vec2::new(cfg.pos.bottom_right().x, 1.0f32.min(y_rel + h_rel)),
+                        Vec2::new(
+                            cfg.pos.bottom_right().x.min(max_x),
+                            1.0f32.min(y_rel + h_rel),
+                        ),
                     );
                 } else {
                     e.inner.config_mut().enabled = false;
@@ -217,12 +230,57 @@ impl GuiElemTrait for ScrollBox {
             self.max_scroll =
                 0.0f32.max(self.height_bottom - self.size_unit.from_rel(0.75, info.pos.height()));
         }
+        // scroll bar
+        self.mouse_in_scrollbar = info.mouse_pos.y >= info.pos.top_left().y
+            && info.mouse_pos.y <= info.pos.bottom_right().y
+            && info.mouse_pos.x <= info.pos.bottom_right().x
+            && info.mouse_pos.x >= (info.pos.bottom_right().x - self.mouse_scroll_margin_right);
+        if self.mouse_scrolling {
+            self.scroll_target = (self.max_scroll * (info.mouse_pos.y - info.pos.top_left().y)
+                / info.pos.height())
+            .max(0.0)
+            .min(self.max_scroll);
+        }
+        if self.mouse_in_scrollbar
+            || self.mouse_scrolling
+            || (self.scroll_display - self.scroll_target).abs()
+                > self.size_unit.from_abs(1.0, info.pos.height())
+        {
+            let y1 = info.pos.top_left().y
+                + info.pos.height() * self.scroll_display.min(self.scroll_target) / self.max_scroll
+                - 1.0;
+            let y2 = info.pos.top_left().y
+                + info.pos.height() * self.scroll_display.max(self.scroll_target) / self.max_scroll
+                + 1.0;
+            g.draw_rectangle(
+                Rectangle::from_tuples(
+                    (
+                        info.pos.bottom_right().x - self.mouse_scroll_margin_right,
+                        y1,
+                    ),
+                    (info.pos.bottom_right().x, y2),
+                ),
+                Color::WHITE,
+            );
+        }
     }
     fn mouse_wheel(&mut self, diff: f32) -> Vec<crate::gui::GuiAction> {
         self.scroll_target = (self.scroll_target
             - self.size_unit.from_abs(diff as f32, self.last_height_px))
         .max(0.0);
         Vec::with_capacity(0)
+    }
+    fn mouse_down(&mut self, button: MouseButton) -> Vec<GuiAction> {
+        if button == MouseButton::Left && self.mouse_in_scrollbar {
+            self.mouse_scrolling = true;
+        }
+        vec![]
+    }
+    fn mouse_up(&mut self, button: MouseButton) -> Vec<GuiAction> {
+        if button == MouseButton::Left {
+            self.mouse_scrolling = false;
+        }
+        vec![]
     }
 }
 impl ScrollBoxSizeUnit {

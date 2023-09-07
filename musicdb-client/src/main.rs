@@ -13,10 +13,10 @@ use musicdb_lib::{
     data::{
         album::Album,
         artist::Artist,
-        database::{Cover, Database},
+        database::{ClientIo, Cover, Database},
         queue::QueueContent,
         song::Song,
-        DatabaseLocation, GeneralData,
+        CoverId, DatabaseLocation, GeneralData, SongId,
     },
     load::ToFromBytes,
     player::Player,
@@ -43,27 +43,32 @@ mod gui_text;
 #[cfg(feature = "speedy2d")]
 mod gui_wrappers;
 
+#[derive(Clone, Copy)]
 enum Mode {
     Cli,
     Gui,
     SyncPlayer,
-    FillDb,
+    SyncPlayerWithoutData,
 }
 
 fn get_config_file_path() -> PathBuf {
-    if let Ok(config_home) = std::env::var("XDG_CONFIG_HOME") {
-        let mut config_home: PathBuf = config_home.into();
-        config_home.push("musicdb-client");
-        config_home
-    } else if let Ok(home) = std::env::var("HOME") {
-        let mut config_home: PathBuf = home.into();
-        config_home.push(".config");
-        config_home.push("musicdb-client");
-        config_home
-    } else {
-        eprintln!("No config directory!");
-        std::process::exit(24);
-    }
+    directories::ProjectDirs::from("", "", "musicdb-client")
+        .unwrap()
+        .config_dir()
+        .to_path_buf()
+    // if let Ok(config_home) = std::env::var("XDG_CONFIG_HOME") {
+    //     let mut config_home: PathBuf = config_home.into();
+    //     config_home.push("musicdb-client");
+    //     config_home
+    // } else if let Ok(home) = std::env::var("HOME") {
+    //     let mut config_home: PathBuf = home.into();
+    //     config_home.push(".config");
+    //     config_home.push("musicdb-client");
+    //     config_home
+    // } else {
+    //     eprintln!("No config directory!");
+    //     std::process::exit(24);
+    // }
 }
 
 fn main() {
@@ -72,9 +77,9 @@ fn main() {
         Some("cli") => Mode::Cli,
         Some("gui") => Mode::Gui,
         Some("syncplayer") => Mode::SyncPlayer,
-        Some("filldb") => Mode::FillDb,
+        Some("syncplayernd") => Mode::SyncPlayerWithoutData,
         _ => {
-            println!("Run with argument <cli/gui/syncplayer/filldb>!");
+            println!("Run with argument <cli/gui/syncplayer/syncplayernd>!");
             return;
         }
     };
@@ -88,16 +93,22 @@ fn main() {
         Arc::new(Mutex::new(None));
     #[cfg(feature = "speedy2d")]
     let sender = Arc::clone(&update_gui_sender);
-    let wants_player = matches!(mode, Mode::SyncPlayer);
     let con_thread = {
         let database = Arc::clone(&database);
         let mut con = con.try_clone().unwrap();
         // this is all you need to keep the db in sync
         thread::spawn(move || {
-            let mut player = if wants_player {
+            let mut player = if matches!(mode, Mode::SyncPlayer | Mode::SyncPlayerWithoutData) {
                 Some(Player::new().unwrap())
             } else {
                 None
+            };
+            if matches!(mode, Mode::SyncPlayerWithoutData) {
+                let mut db = database.lock().unwrap();
+                let client_con: Box<dyn ClientIo> = Box::new(TcpStream::connect(addr).unwrap());
+                db.remote_server_as_song_file_source = Some(Arc::new(Mutex::new(
+                    musicdb_lib::server::get::Client::new(BufReader::new(client_con)).unwrap(),
+                )));
             };
             loop {
                 if let Some(player) = &mut player {
@@ -147,200 +158,8 @@ fn main() {
                 )
             };
         }
-        Mode::SyncPlayer => {
+        Mode::SyncPlayer | Mode::SyncPlayerWithoutData => {
             con_thread.join().unwrap();
-        }
-        Mode::FillDb => {
-            // wait for init
-            let dir = loop {
-                let db = database.lock().unwrap();
-                if !db.lib_directory.as_os_str().is_empty() {
-                    break db.lib_directory.clone();
-                }
-                drop(db);
-                std::thread::sleep(Duration::from_millis(300));
-            };
-            eprintln!("
-  WARN: This will add all audio files in the lib-dir to the library, even if they were already added!
-        lib-dir: {:?}
-        If you really want to continue, type Yes.", dir);
-            let mut line = String::new();
-            std::io::stdin().read_line(&mut line).unwrap();
-            if line.trim().to_lowercase() == "yes" {
-                let mut covers = 0;
-                for artist in fs::read_dir(&dir)
-                    .expect("reading lib-dir")
-                    .filter_map(|v| v.ok())
-                {
-                    if let Ok(albums) = fs::read_dir(artist.path()) {
-                        let artist_name = artist.file_name().to_string_lossy().into_owned();
-                        let mut artist_id = None;
-                        for album in albums.filter_map(|v| v.ok()) {
-                            if let Ok(songs) = fs::read_dir(album.path()) {
-                                let album_name = album.file_name().to_string_lossy().into_owned();
-                                let mut album_id = None;
-                                let mut songs: Vec<_> = songs.filter_map(|v| v.ok()).collect();
-                                songs.sort_unstable_by_key(|v| v.file_name());
-                                let cover = songs.iter().map(|entry| entry.path()).find(|path| {
-                                    path.extension().is_some_and(|ext| {
-                                        ext.to_str().is_some_and(|ext| {
-                                            matches!(
-                                                ext.to_lowercase().trim(),
-                                                "png" | "jpg" | "jpeg"
-                                            )
-                                        })
-                                    })
-                                });
-                                for song in songs {
-                                    match song.path().extension().map(|v| v.to_str()) {
-                                        Some(Some(
-                                            "mp3" | "wav" | "wma" | "aac" | "flac" | "m4a" | "m4p"
-                                            | "ogg" | "oga" | "mogg" | "opus" | "tta",
-                                        )) => {
-                                            println!("> {:?}", song.path());
-                                            let song_name =
-                                                song.file_name().to_string_lossy().into_owned();
-                                            println!(
-                                                "  {}  -  {}  -  {}",
-                                                song_name, artist_name, album_name
-                                            );
-                                            // get artist id
-                                            let artist_id = if let Some(v) = artist_id {
-                                                v
-                                            } else {
-                                                let mut adding_artist = false;
-                                                loop {
-                                                    let db = database.lock().unwrap();
-                                                    let artists = db
-                                                        .artists()
-                                                        .iter()
-                                                        .filter(|(_, v)| v.name == artist_name)
-                                                        .collect::<Vec<_>>();
-                                                    if artists.len() > 1 {
-                                                        eprintln!("Choosing the first of {} artists named {}.", artists.len(), artist_name);
-                                                    }
-                                                    if let Some((id, _)) = artists.first() {
-                                                        artist_id = Some(**id);
-                                                        break **id;
-                                                    } else {
-                                                        drop(db);
-                                                        if !adding_artist {
-                                                            adding_artist = true;
-                                                            Command::AddArtist(Artist {
-                                                                id: 0,
-                                                                name: artist_name.clone(),
-                                                                cover: None,
-                                                                albums: vec![],
-                                                                singles: vec![],
-                                                                general: GeneralData::default(),
-                                                            })
-                                                            .to_bytes(&mut con)
-                                                            .expect(
-                                                                "sending AddArtist to db failed",
-                                                            );
-                                                        }
-                                                        std::thread::sleep(Duration::from_millis(
-                                                            300,
-                                                        ));
-                                                    };
-                                                }
-                                            };
-                                            // get album id
-                                            let album_id = if let Some(v) = album_id {
-                                                v
-                                            } else {
-                                                let mut adding_album = false;
-                                                loop {
-                                                    let db = database.lock().unwrap();
-                                                    let albums = db
-                                                        .artists()
-                                                        .get(&artist_id)
-                                                        .expect("artist_id not valid (bug)")
-                                                        .albums
-                                                        .iter()
-                                                        .filter_map(|v| {
-                                                            Some((v, db.albums().get(&v)?))
-                                                        })
-                                                        .filter(|(_, v)| v.name == album_name)
-                                                        .collect::<Vec<_>>();
-                                                    if albums.len() > 1 {
-                                                        eprintln!("Choosing the first of {} albums named {} by the artist {}.", albums.len(), album_name, artist_name);
-                                                    }
-                                                    if let Some((id, _)) = albums.first() {
-                                                        album_id = Some(**id);
-                                                        break **id;
-                                                    } else {
-                                                        drop(db);
-                                                        if !adding_album {
-                                                            adding_album = true;
-                                                            let cover = if let Some(cover) = &cover
-                                                            {
-                                                                eprintln!("Adding cover {cover:?}");
-                                                                Command::AddCover(Cover {
-                                                                    location: DatabaseLocation {
-                                                                        rel_path: PathBuf::from(
-                                                                            artist.file_name(),
-                                                                        )
-                                                                        .join(album.file_name())
-                                                                        .join(
-                                                                            cover
-                                                                                .file_name()
-                                                                                .unwrap(),
-                                                                        ),
-                                                                    },
-                                                                    data: Arc::new(Mutex::new((
-                                                                        false, None,
-                                                                    ))),
-                                                                })
-                                                                .to_bytes(&mut con)
-                                                                .expect(
-                                                                    "sending AddCover to db failed",
-                                                                );
-                                                                covers += 1;
-                                                                Some(covers - 1)
-                                                            } else {
-                                                                None
-                                                            };
-                                                            Command::AddAlbum(Album {
-                                                                id: 0,
-                                                                name: album_name.clone(),
-                                                                artist: Some(artist_id),
-                                                                cover,
-                                                                songs: vec![],
-                                                                general: GeneralData::default(),
-                                                            })
-                                                            .to_bytes(&mut con)
-                                                            .expect("sending AddAlbum to db failed");
-                                                        }
-                                                        std::thread::sleep(Duration::from_millis(
-                                                            300,
-                                                        ));
-                                                    };
-                                                }
-                                            };
-                                            Command::AddSong(Song::new(
-                                                DatabaseLocation {
-                                                    rel_path: PathBuf::from(artist.file_name())
-                                                        .join(album.file_name())
-                                                        .join(song.file_name()),
-                                                },
-                                                song_name,
-                                                Some(album_id),
-                                                Some(artist_id),
-                                                vec![],
-                                                None,
-                                            ))
-                                            .to_bytes(&mut con)
-                                            .expect("sending AddSong to db failed");
-                                        }
-                                        _ => {}
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
         }
     }
 }
@@ -505,4 +324,13 @@ pub fn accumulate<F: FnMut() -> Option<T>, T>(mut f: F) -> Vec<T> {
         }
     }
     o
+}
+
+fn get_cover(song: SongId, database: &Database) -> Option<CoverId> {
+    let song = database.get_song(&song)?;
+    if let Some(v) = song.cover {
+        Some(v)
+    } else {
+        database.albums().get(song.album.as_ref()?)?.cover
+    }
 }

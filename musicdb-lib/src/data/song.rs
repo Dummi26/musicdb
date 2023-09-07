@@ -1,7 +1,7 @@
 use std::{
     fmt::Display,
     io::{Read, Write},
-    path::Path,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex},
     thread::JoinHandle,
 };
@@ -9,7 +9,8 @@ use std::{
 use crate::load::ToFromBytes;
 
 use super::{
-    database::Database, AlbumId, ArtistId, CoverId, DatabaseLocation, GeneralData, SongId,
+    database::{ClientIo, Database},
+    AlbumId, ArtistId, CoverId, DatabaseLocation, GeneralData, SongId,
 };
 
 #[derive(Clone, Debug)]
@@ -67,11 +68,13 @@ impl Song {
             Some(Err(_)) | Some(Ok(_)) => false,
         };
         if start_thread {
-            let path = db.get_path(&self.location);
+            let src = if let Some(dlcon) = &db.remote_server_as_song_file_source {
+                Err((self.id, Arc::clone(dlcon)))
+            } else {
+                Ok(db.get_path(&self.location))
+            };
             *cd = Some(Err(std::thread::spawn(move || {
-                eprintln!("[info] thread started");
-                let data = Self::load_data(&path)?;
-                eprintln!("[info] thread stopping after loading {path:?}");
+                let data = Self::load_data(src)?;
                 Some(Arc::new(data))
             })));
             true
@@ -97,7 +100,12 @@ impl Song {
         let mut cd = self.cached_data.lock().unwrap();
         *cd = match cd.take() {
             None => {
-                if let Some(v) = Self::load_data(db.get_path(&self.location)) {
+                let src = if let Some(dlcon) = &db.remote_server_as_song_file_source {
+                    Err((self.id, Arc::clone(dlcon)))
+                } else {
+                    Ok(db.get_path(&self.location))
+                };
+                if let Some(v) = Self::load_data(src) {
                     Some(Ok(Arc::new(v)))
                 } else {
                     None
@@ -113,16 +121,43 @@ impl Song {
         drop(cd);
         self.cached_data()
     }
-    fn load_data<P: AsRef<Path>>(path: P) -> Option<Vec<u8>> {
-        eprintln!("[info] loading song from {:?}", path.as_ref());
-        match std::fs::read(&path) {
-            Ok(v) => {
-                eprintln!("[info] loaded song from {:?}", path.as_ref());
-                Some(v)
+    fn load_data(
+        src: Result<
+            PathBuf,
+            (
+                SongId,
+                Arc<Mutex<crate::server::get::Client<Box<dyn ClientIo>>>>,
+            ),
+        >,
+    ) -> Option<Vec<u8>> {
+        match src {
+            Ok(path) => {
+                eprintln!("[info] loading song from {:?}", path);
+                match std::fs::read(&path) {
+                    Ok(v) => {
+                        eprintln!("[info] loaded song from {:?}", path);
+                        Some(v)
+                    }
+                    Err(e) => {
+                        eprintln!("[info] error loading {:?}: {e:?}", path);
+                        None
+                    }
+                }
             }
-            Err(e) => {
-                eprintln!("[info] error loading {:?}: {e:?}", path.as_ref());
-                None
+            Err((id, dlcon)) => {
+                eprintln!("[info] loading song {id}");
+                match dlcon
+                    .lock()
+                    .unwrap()
+                    .song_file(id, true)
+                    .expect("problem with downloader connection...")
+                {
+                    Ok(data) => Some(data),
+                    Err(e) => {
+                        eprintln!("[info] error loading song {id}: {e}");
+                        None
+                    }
+                }
             }
         }
     }

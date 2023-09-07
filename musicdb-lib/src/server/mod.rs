@@ -6,7 +6,7 @@ use std::{
     net::{SocketAddr, TcpListener},
     path::PathBuf,
     sync::{mpsc, Arc, Mutex},
-    thread::{self, JoinHandle},
+    thread,
     time::Duration,
 };
 
@@ -17,6 +17,7 @@ use crate::{
         database::{Cover, Database, UpdateEndpoint},
         queue::Queue,
         song::Song,
+        AlbumId, ArtistId, SongId,
     },
     load::ToFromBytes,
     player::Player,
@@ -46,6 +47,9 @@ pub enum Command {
     AddCover(Cover),
     ModifySong(Song),
     ModifyAlbum(Album),
+    RemoveSong(SongId),
+    RemoveAlbum(AlbumId),
+    RemoveArtist(ArtistId),
     ModifyArtist(Artist),
     SetLibraryDirectory(PathBuf),
 }
@@ -262,6 +266,18 @@ impl ToFromBytes for Command {
                 s.write_all(&[0b10011100])?;
                 artist.to_bytes(s)?;
             }
+            Self::RemoveSong(song) => {
+                s.write_all(&[0b11010000])?;
+                song.to_bytes(s)?;
+            }
+            Self::RemoveAlbum(album) => {
+                s.write_all(&[0b11010011])?;
+                album.to_bytes(s)?;
+            }
+            Self::RemoveArtist(artist) => {
+                s.write_all(&[0b11011100])?;
+                artist.to_bytes(s)?;
+            }
             Self::SetLibraryDirectory(path) => {
                 s.write_all(&[0b00110001])?;
                 path.to_bytes(s)?;
@@ -308,6 +324,9 @@ impl ToFromBytes for Command {
             0b10010000 => Self::ModifySong(ToFromBytes::from_bytes(s)?),
             0b10010011 => Self::ModifyAlbum(ToFromBytes::from_bytes(s)?),
             0b10011100 => Self::ModifyArtist(ToFromBytes::from_bytes(s)?),
+            0b11010000 => Self::RemoveSong(ToFromBytes::from_bytes(s)?),
+            0b11010011 => Self::RemoveAlbum(ToFromBytes::from_bytes(s)?),
+            0b11011100 => Self::RemoveArtist(ToFromBytes::from_bytes(s)?),
             0b01011101 => Self::AddCover(ToFromBytes::from_bytes(s)?),
             0b00110001 => Self::SetLibraryDirectory(ToFromBytes::from_bytes(s)?),
             _ => {

@@ -70,9 +70,8 @@ impl GuiScreen {
             self.edit_panel = (false, Some(Instant::now()));
         }
     }
-    pub fn new<T: Read + Write + 'static + Sync + Send>(
+    pub fn new(
         config: GuiElemCfg,
-        get_con: get::Client<T>,
         line_height: f32,
         scroll_sensitivity_pixels: f64,
         scroll_sensitivity_lines: f64,
@@ -84,7 +83,6 @@ impl GuiScreen {
                 GuiElem::new(StatusBar::new(
                     GuiElemCfg::at(Rectangle::from_tuples((0.0, 0.9), (1.0, 1.0))),
                     true,
-                    get_con,
                 )),
                 GuiElem::new(Settings::new(
                     GuiElemCfg::default().disabled(),
@@ -293,18 +291,14 @@ pub struct StatusBar {
     idle_mode: f32,
 }
 impl StatusBar {
-    pub fn new<T: Read + Write + 'static + Sync + Send>(
-        config: GuiElemCfg,
-        playing: bool,
-        get_con: get::Client<T>,
-    ) -> Self {
+    pub fn new(config: GuiElemCfg, playing: bool) -> Self {
         Self {
             config,
             children: vec![
-                GuiElem::new(CurrentSong::new(
-                    GuiElemCfg::at(Rectangle::new(Vec2::ZERO, Vec2::new(0.8, 1.0))),
-                    get_con,
-                )),
+                GuiElem::new(CurrentSong::new(GuiElemCfg::at(Rectangle::new(
+                    Vec2::ZERO,
+                    Vec2::new(0.8, 1.0),
+                )))),
                 GuiElem::new(PlayPauseToggle::new(
                     GuiElemCfg::at(Rectangle::from_tuples((0.85, 0.0), (0.95, 1.0))),
                     false,

@@ -350,7 +350,7 @@ impl GuiElemTrait for ListArtist {
             self.mouse = false;
             vec![GuiAction::OpenEditPanel(GuiElem::new(GuiEdit::new(
                 GuiElemCfg::default(),
-                crate::gui_edit::Editable::Artist(self.id),
+                crate::gui_edit::Editable::Artist(vec![self.id]),
             )))]
         } else {
             vec![]
@@ -444,7 +444,7 @@ impl GuiElemTrait for ListAlbum {
             self.mouse = false;
             vec![GuiAction::OpenEditPanel(GuiElem::new(GuiEdit::new(
                 GuiElemCfg::default(),
-                crate::gui_edit::Editable::Album(self.id),
+                crate::gui_edit::Editable::Album(vec![self.id]),
             )))]
         } else {
             vec![]
@@ -538,7 +538,7 @@ impl GuiElemTrait for ListSong {
             self.mouse = false;
             vec![GuiAction::OpenEditPanel(GuiElem::new(GuiEdit::new(
                 GuiElemCfg::default(),
-                crate::gui_edit::Editable::Song(self.id),
+                crate::gui_edit::Editable::Song(vec![self.id]),
             )))]
         } else {
             vec![]

@@ -1,15 +1,17 @@
 use std::{
     any::Any,
+    collections::HashMap,
     eprintln,
-    io::{Read, Write},
+    io::Cursor,
     net::TcpStream,
     sync::{Arc, Mutex},
+    thread::JoinHandle,
     time::Instant,
     usize,
 };
 
 use musicdb_lib::{
-    data::{database::Database, queue::Queue, AlbumId, ArtistId, SongId},
+    data::{database::Database, queue::Queue, AlbumId, ArtistId, CoverId, SongId},
     load::ToFromBytes,
     server::{get, Command},
 };
@@ -17,6 +19,7 @@ use speedy2d::{
     color::Color,
     dimen::{UVec2, Vec2},
     font::Font,
+    image::ImageHandle,
     shape::Rectangle,
     window::{
         KeyScancode, ModifiersState, MouseButton, MouseScrollDistance, UserEventSender,
@@ -34,10 +37,10 @@ pub enum GuiEvent {
     Exit,
 }
 
-pub fn main<T: Write + Read + 'static + Sync + Send>(
+pub fn main(
     database: Arc<Mutex<Database>>,
     connection: TcpStream,
-    get_con: get::Client<T>,
+    get_con: get::Client<TcpStream>,
     event_sender_arc: Arc<Mutex<Option<UserEventSender<GuiEvent>>>>,
 ) {
     let mut config_file = super::get_config_file_path();
@@ -104,7 +107,10 @@ pub fn main<T: Write + Read + 'static + Sync + Send>(
 
     let window = speedy2d::Window::<GuiEvent>::new_with_user_events(
         "MusicDB Client",
-        WindowCreationOptions::new_fullscreen_borderless(),
+        WindowCreationOptions::new_windowed(
+            speedy2d::window::WindowSize::MarginPhysicalPixels(0),
+            None,
+        ),
     )
     .expect("couldn't open window");
     *event_sender_arc.lock().unwrap() = Some(window.create_user_event_sender());
@@ -113,7 +119,7 @@ pub fn main<T: Write + Read + 'static + Sync + Send>(
         font,
         database,
         connection,
-        get_con,
+        Arc::new(Mutex::new(get_con)),
         event_sender_arc,
         sender,
         line_height,
@@ -127,10 +133,12 @@ pub struct Gui {
     pub event_sender: UserEventSender<GuiEvent>,
     pub database: Arc<Mutex<Database>>,
     pub connection: TcpStream,
+    pub get_con: Arc<Mutex<get::Client<TcpStream>>>,
     pub gui: GuiElem,
     pub size: UVec2,
     pub mouse_pos: Vec2,
     pub font: Font,
+    pub covers: Option<HashMap<CoverId, GuiCover>>,
     pub last_draw: Instant,
     pub modifiers: ModifiersState,
     pub dragging: Option<(
@@ -144,11 +152,11 @@ pub struct Gui {
     pub scroll_pages_multiplier: f64,
 }
 impl Gui {
-    fn new<T: Read + Write + 'static + Sync + Send>(
+    fn new(
         font: Font,
         database: Arc<Mutex<Database>>,
         connection: TcpStream,
-        get_con: get::Client<T>,
+        get_con: Arc<Mutex<get::Client<TcpStream>>>,
         event_sender_arc: Arc<Mutex<Option<UserEventSender<GuiEvent>>>>,
         event_sender: UserEventSender<GuiEvent>,
         line_height: f32,
@@ -192,11 +200,11 @@ impl Gui {
             event_sender,
             database,
             connection,
+            get_con,
             gui: GuiElem::new(WithFocusHotkey::new_noshift(
                 VirtualKeyCode::Escape,
                 GuiScreen::new(
                     GuiElemCfg::default(),
-                    get_con,
                     line_height,
                     scroll_pixels_multiplier,
                     scroll_lines_multiplier,
@@ -206,6 +214,7 @@ impl Gui {
             size: UVec2::ZERO,
             mouse_pos: Vec2::ZERO,
             font,
+            covers: Some(HashMap::new()),
             // font: Font::new(include_bytes!("/usr/share/fonts/TTF/FiraSans-Regular.ttf")).unwrap(),
             last_draw: Instant::now(),
             modifiers: ModifiersState::default(),
@@ -226,8 +235,12 @@ pub trait GuiElemTrait {
     fn config(&self) -> &GuiElemCfg;
     fn config_mut(&mut self) -> &mut GuiElemCfg;
     /// note: drawing happens from the last to the first element, while priority is from first to last.
-    /// if you wish to add a "high priority" child to a Vec<GuiElem> using push, .rev() the iterator in this method.
+    /// if you wish to add a "high priority" child to a Vec<GuiElem> using push, .rev() the iterator in this method and change draw_rev to false.
     fn children(&mut self) -> Box<dyn Iterator<Item = &mut GuiElem> + '_>;
+    /// defaults to true.
+    fn draw_rev(&self) -> bool {
+        true
+    }
     fn any(&self) -> &dyn Any;
     fn any_mut(&mut self) -> &mut dyn Any;
     fn clone_gui(&self) -> Box<dyn GuiElemTrait>;
@@ -381,6 +394,7 @@ pub enum GuiAction {
         )>,
     ),
     SetLineHeight(f32),
+    LoadCover(CoverId),
     /// Run a custom closure with mutable access to the Gui struct
     Do(Box<dyn FnMut(&mut Gui)>),
     Exit,
@@ -403,6 +417,8 @@ pub struct DrawInfo<'a> {
     /// compare this to `pos` to find the mouse's relative position.
     pub mouse_pos: Vec2,
     pub helper: Option<&'a mut WindowHelper<GuiEvent>>,
+    pub get_con: Arc<Mutex<get::Client<TcpStream>>>,
+    pub covers: &'a mut HashMap<CoverId, GuiCover>,
     pub has_keyboard_focus: bool,
     pub child_has_keyboard_focus: bool,
     /// the height of one line of text (in pixels)
@@ -456,16 +472,23 @@ impl GuiElem {
         let focus_path = info.child_has_keyboard_focus;
         // children (in reverse order - first element has the highest priority)
         let kbd_focus_index = self.inner.config().keyboard_focus_index;
-        for (i, c) in self
-            .inner
-            .children()
-            .collect::<Vec<_>>()
-            .into_iter()
-            .enumerate()
-            .rev()
-        {
-            info.child_has_keyboard_focus = focus_path && i == kbd_focus_index;
-            c.draw(info, g);
+        if self.inner.draw_rev() {
+            for (i, c) in self
+                .inner
+                .children()
+                .collect::<Vec<_>>()
+                .into_iter()
+                .enumerate()
+                .rev()
+            {
+                info.child_has_keyboard_focus = focus_path && i == kbd_focus_index;
+                c.draw(info, g);
+            }
+        } else {
+            for (i, c) in self.inner.children().enumerate() {
+                info.child_has_keyboard_focus = focus_path && i == kbd_focus_index;
+                c.draw(info, g);
+            }
         }
         // reset pt. 2
         info.child_has_keyboard_focus = focus_path;
@@ -697,6 +720,12 @@ impl Gui {
                 self.gui
                     .recursive_all(&mut |e| e.inner.config_mut().redraw = true);
             }
+            GuiAction::LoadCover(id) => {
+                self.covers
+                    .as_mut()
+                    .unwrap()
+                    .insert(id, GuiCover::new(id, Arc::clone(&self.get_con)));
+            }
             GuiAction::Do(mut f) => f(self),
             GuiAction::Exit => _ = self.event_sender.send_event(GuiEvent::Exit),
             GuiAction::SetIdle(v) => {
@@ -784,12 +813,15 @@ impl WindowHandler<GuiEvent> for Gui {
             Color::BLACK,
         );
         let mut dblock = self.database.lock().unwrap();
+        let mut covers = self.covers.take().unwrap();
         let mut info = DrawInfo {
             actions: Vec::with_capacity(0),
             pos: Rectangle::new(Vec2::ZERO, self.size.into_f32()),
             database: &mut *dblock,
             font: &self.font,
             mouse_pos: self.mouse_pos,
+            get_con: Arc::clone(&self.get_con),
+            covers: &mut covers,
             helper: Some(helper),
             has_keyboard_focus: false,
             child_has_keyboard_focus: true,
@@ -827,7 +859,9 @@ impl WindowHandler<GuiEvent> for Gui {
                 }
             }
         }
+        // cleanup
         drop(info);
+        self.covers = Some(covers);
         drop(dblock);
         for a in actions {
             self.exec_gui_action(a);
@@ -1011,5 +1045,64 @@ impl WindowHandler<GuiEvent> for Gui {
         self.size = size_pixels;
         self.gui
             .recursive_all(&mut |e| e.inner.config_mut().redraw = true);
+    }
+}
+
+pub enum GuiCover {
+    Loading(JoinHandle<Option<Vec<u8>>>),
+    Loaded(ImageHandle),
+    Error,
+}
+impl GuiCover {
+    pub fn new(id: CoverId, get_con: Arc<Mutex<get::Client<TcpStream>>>) -> Self {
+        Self::Loading(std::thread::spawn(move || {
+            get_con
+                .lock()
+                .unwrap()
+                .cover_bytes(id)
+                .ok()
+                .and_then(|v| v.ok())
+        }))
+    }
+    pub fn get(&self) -> Option<ImageHandle> {
+        match self {
+            Self::Loaded(handle) => Some(handle.clone()),
+            Self::Loading(_) | Self::Error => None,
+        }
+    }
+    pub fn get_init(&mut self, g: &mut Graphics2D) -> Option<ImageHandle> {
+        match self {
+            Self::Loaded(handle) => Some(handle.clone()),
+            Self::Error => None,
+            Self::Loading(t) => {
+                if t.is_finished() {
+                    let s = std::mem::replace(self, Self::Error);
+                    if let Self::Loading(t) = s {
+                        match t.join().unwrap() {
+                            Some(bytes) => match g.create_image_from_file_bytes(
+                                None,
+                                speedy2d::image::ImageSmoothingMode::Linear,
+                                Cursor::new(bytes),
+                            ) {
+                                Ok(handle) => {
+                                    *self = Self::Loaded(handle.clone());
+                                    Some(handle)
+                                }
+                                Err(e) => {
+                                    eprintln!("[info] couldn't load cover from bytes: {e}");
+                                    None
+                                }
+                            },
+                            None => None,
+                        }
+                    } else {
+                        *self = s;
+                        None
+                    }
+                } else {
+                    None
+                }
+            }
+        }
     }
 }

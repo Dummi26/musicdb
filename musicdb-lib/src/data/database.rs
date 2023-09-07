@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     fs::{self, File},
-    io::{BufReader, Write},
+    io::{BufReader, Read, Write},
     path::PathBuf,
     sync::{mpsc, Arc, Mutex},
     time::{Duration, Instant},
@@ -36,7 +36,11 @@ pub struct Database {
     /// true if a song is/should be playing
     pub playing: bool,
     pub command_sender: Option<mpsc::Sender<Command>>,
+    pub remote_server_as_song_file_source:
+        Option<Arc<Mutex<crate::server::get::Client<Box<dyn ClientIo>>>>>,
 }
+pub trait ClientIo: Read + Write + Send {}
+impl<T: Read + Write + Send> ClientIo for T {}
 // for custom server implementations, this enum should allow you to deal with updates from any context (writers such as tcp streams, sync/async mpsc senders, or via closure as a fallback)
 pub enum UpdateEndpoint {
     Bytes(Box<dyn Write + Sync + Send>),
@@ -52,6 +56,9 @@ impl Database {
         // make a backup
         // exit
         panic!("DatabasePanic: {msg}");
+    }
+    pub fn is_client(&self) -> bool {
+        self.db_file.as_os_str().is_empty()
     }
     pub fn get_path(&self, location: &DatabaseLocation) -> PathBuf {
         self.lib_directory.join(&location.rel_path)
@@ -177,6 +184,28 @@ impl Database {
         self.songs.insert(song.id, song)
     }
 
+    pub fn remove_song(&mut self, song: SongId) -> Option<Song> {
+        if let Some(removed) = self.songs.remove(&song) {
+            Some(removed)
+        } else {
+            None
+        }
+    }
+    pub fn remove_album(&mut self, song: SongId) -> Option<Song> {
+        if let Some(removed) = self.songs.remove(&song) {
+            Some(removed)
+        } else {
+            None
+        }
+    }
+    pub fn remove_artist(&mut self, song: SongId) -> Option<Song> {
+        if let Some(removed) = self.songs.remove(&song) {
+            Some(removed)
+        } else {
+            None
+        }
+    }
+
     pub fn init_connection<T: Write>(&self, con: &mut T) -> Result<(), std::io::Error> {
         // TODO! this is slow because it clones everything - there has to be a better way...
         Command::SyncDatabase(
@@ -277,6 +306,15 @@ impl Database {
             Command::ModifyArtist(artist) => {
                 _ = self.update_artist(artist);
             }
+            Command::RemoveSong(song) => {
+                _ = self.remove_song(song);
+            }
+            Command::RemoveAlbum(album) => {
+                _ = self.remove_album(album);
+            }
+            Command::RemoveArtist(artist) => {
+                _ = self.remove_artist(artist);
+            }
             Command::SetLibraryDirectory(new_dir) => {
                 self.lib_directory = new_dir;
             }
@@ -303,6 +341,7 @@ impl Database {
             update_endpoints: vec![],
             playing: false,
             command_sender: None,
+            remote_server_as_song_file_source: None,
         }
     }
     pub fn new_empty(path: PathBuf, lib_dir: PathBuf) -> Self {
@@ -319,6 +358,7 @@ impl Database {
             update_endpoints: vec![],
             playing: false,
             command_sender: None,
+            remote_server_as_song_file_source: None,
         }
     }
     pub fn load_database(path: PathBuf) -> Result<Self, std::io::Error> {
@@ -339,6 +379,7 @@ impl Database {
             update_endpoints: vec![],
             playing: false,
             command_sender: None,
+            remote_server_as_song_file_source: None,
         })
     }
     /// saves the database's contents. save path can be overridden

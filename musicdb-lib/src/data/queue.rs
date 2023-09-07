@@ -229,7 +229,7 @@ impl Queue {
         for action in actions {
             match action {
                 QueueAction::AddRandomSong(path) => {
-                    if !db.db_file.as_os_str().is_empty() {
+                    if !db.is_client() {
                         if let Some(song) = db.songs().keys().choose(&mut rand::thread_rng()) {
                             db.apply_command(Command::QueueAdd(
                                 path,
@@ -239,7 +239,7 @@ impl Queue {
                     }
                 }
                 QueueAction::SetShuffle(path, shuf, next) => {
-                    if !db.db_file.as_os_str().is_empty() {
+                    if !db.is_client() {
                         db.apply_command(Command::QueueSetShuffle(path, shuf, next));
                     }
                 }

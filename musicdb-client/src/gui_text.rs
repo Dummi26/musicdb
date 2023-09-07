@@ -46,6 +46,10 @@ impl Content {
     pub fn color(&mut self) -> &mut Color {
         &mut self.color
     }
+    /// returns true if the text needs to be redrawn, probably because it was changed.
+    pub fn will_redraw(&self) -> bool {
+        self.formatted.is_none()
+    }
 }
 impl Label {
     pub fn new(
@@ -148,10 +152,22 @@ impl TextField {
                     hint,
                     color_hint,
                     None,
-                    Vec2::new(0.5, 0.5),
+                    Vec2::new(0.0, 0.5),
                 )),
             ],
         }
+    }
+    pub fn label_input(&self) -> &Label {
+        self.children[0].inner.any().downcast_ref().unwrap()
+    }
+    pub fn label_input_mut(&mut self) -> &mut Label {
+        self.children[0].inner.any_mut().downcast_mut().unwrap()
+    }
+    pub fn label_hint(&self) -> &Label {
+        self.children[1].inner.any().downcast_ref().unwrap()
+    }
+    pub fn label_hint_mut(&mut self) -> &mut Label {
+        self.children[1].inner.any_mut().downcast_mut().unwrap()
     }
 }
 impl GuiElemTrait for TextField {

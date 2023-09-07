@@ -4,7 +4,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use crate::data::{database::Database, CoverId};
+use crate::data::{database::Database, CoverId, SongId};
 
 pub struct Client<T: Write + Read>(BufReader<T>);
 impl<T: Write + Read> Client<T> {
@@ -17,6 +17,34 @@ impl<T: Write + Read> Client<T> {
             self.0.get_mut(),
             "{}",
             con_get_encode_string(&format!("cover-bytes\n{id}"))
+        )?;
+        let mut response = String::new();
+        self.0.read_line(&mut response)?;
+        let response = con_get_decode_line(&response);
+        if response.starts_with("len: ") {
+            if let Ok(len) = response[4..].trim().parse() {
+                let mut bytes = vec![0; len];
+                self.0.read_exact(&mut bytes)?;
+                Ok(Ok(bytes))
+            } else {
+                Ok(Err(response))
+            }
+        } else {
+            Ok(Err(response))
+        }
+    }
+    pub fn song_file(
+        &mut self,
+        id: SongId,
+        blocking: bool,
+    ) -> Result<Result<Vec<u8>, String>, std::io::Error> {
+        writeln!(
+            self.0.get_mut(),
+            "{}",
+            con_get_encode_string(&format!(
+                "song-file{}\n{id}",
+                if blocking { "-blocking" } else { "" }
+            ))
         )?;
         let mut response = String::new();
         self.0.read_line(&mut response)?;
@@ -70,6 +98,40 @@ pub fn handle_one_connection_as_get(
                             }
                         } else {
                             writeln!(connection.get_mut(), "no cover")?;
+                        }
+                    }
+                    "song-file" => {
+                        if let Some(bytes) =
+                            request
+                                .next()
+                                .and_then(|id| id.parse().ok())
+                                .and_then(|id| {
+                                    db.lock()
+                                        .unwrap()
+                                        .get_song(&id)
+                                        .and_then(|song| song.cached_data())
+                                })
+                        {
+                            writeln!(connection.get_mut(), "len: {}", bytes.len())?;
+                            connection.get_mut().write_all(&bytes)?;
+                        } else {
+                            writeln!(connection.get_mut(), "no data")?;
+                        }
+                    }
+                    "song-file-blocking" => {
+                        if let Some(bytes) =
+                            request
+                                .next()
+                                .and_then(|id| id.parse().ok())
+                                .and_then(|id| {
+                                    let db = db.lock().unwrap();
+                                    db.get_song(&id).and_then(|song| song.cached_data_now(&db))
+                                })
+                        {
+                            writeln!(connection.get_mut(), "len: {}", bytes.len())?;
+                            connection.get_mut().write_all(&bytes)?;
+                        } else {
+                            writeln!(connection.get_mut(), "no data")?;
                         }
                     }
                     _ => {}
