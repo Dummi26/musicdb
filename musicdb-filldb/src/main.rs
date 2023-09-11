@@ -47,65 +47,83 @@ fn main() {
     }
     eprintln!("\nloaded metadata of {} files.", songs.len());
     let mut database = Database::new_empty(PathBuf::from("dbfile"), PathBuf::from(&lib_dir));
+    let unknown_artist = database.add_artist_new(Artist {
+        id: 0,
+        name: format!("<unknown>"),
+        cover: None,
+        albums: vec![],
+        singles: vec![],
+        general: GeneralData::default(),
+    });
     eprintln!("searching for artists...");
     let mut artists = HashMap::new();
     for song in songs {
-        let (artist_id, album_id) =
-            if let Some(artist) = song.1.album_artist().or_else(|| song.1.artist()) {
-                let artist_id = if !artists.contains_key(artist) {
-                    let artist_id = database.add_artist_new(Artist {
+        let (artist_id, album_id) = if let Some(artist) = song
+            .1
+            .album_artist()
+            .or_else(|| song.1.artist())
+            .filter(|v| !v.trim().is_empty())
+        {
+            let artist_id = if !artists.contains_key(artist) {
+                let artist_id = database.add_artist_new(Artist {
+                    id: 0,
+                    name: artist.to_string(),
+                    cover: None,
+                    albums: vec![],
+                    singles: vec![],
+                    general: GeneralData::default(),
+                });
+                artists.insert(artist.to_string(), (artist_id, HashMap::new()));
+                artist_id
+            } else {
+                artists.get(artist).unwrap().0
+            };
+            if let Some(album) = song.1.album() {
+                let (_, albums) = artists.get_mut(artist).unwrap();
+                let album_id = if !albums.contains_key(album) {
+                    let album_id = database.add_album_new(Album {
                         id: 0,
-                        name: artist.to_string(),
+                        artist: artist_id,
+                        name: album.to_string(),
                         cover: None,
-                        albums: vec![],
-                        singles: vec![],
+                        songs: vec![],
                         general: GeneralData::default(),
                     });
-                    artists.insert(artist.to_string(), (artist_id, HashMap::new()));
-                    artist_id
+                    albums.insert(
+                        album.to_string(),
+                        (album_id, song.0.parent().map(|dir| dir.to_path_buf())),
+                    );
+                    album_id
                 } else {
-                    artists.get(artist).unwrap().0
+                    let album = albums.get_mut(album).unwrap();
+                    if album
+                        .1
+                        .as_ref()
+                        .is_some_and(|dir| Some(dir.as_path()) != song.0.parent())
+                    {
+                        // album directory is inconsistent
+                        album.1 = None;
+                    }
+                    album.0
                 };
-                if let Some(album) = song.1.album() {
-                    let (_, albums) = artists.get_mut(artist).unwrap();
-                    let album_id = if !albums.contains_key(album) {
-                        let album_id = database.add_album_new(Album {
-                            id: 0,
-                            artist: Some(artist_id),
-                            name: album.to_string(),
-                            cover: None,
-                            songs: vec![],
-                            general: GeneralData::default(),
-                        });
-                        albums.insert(
-                            album.to_string(),
-                            (album_id, song.0.parent().map(|dir| dir.to_path_buf())),
-                        );
-                        album_id
-                    } else {
-                        let album = albums.get_mut(album).unwrap();
-                        if album
-                            .1
-                            .as_ref()
-                            .is_some_and(|dir| Some(dir.as_path()) != song.0.parent())
-                        {
-                            // album directory is inconsistent
-                            album.1 = None;
-                        }
-                        album.0
-                    };
-                    (Some(artist_id), Some(album_id))
-                } else {
-                    (Some(artist_id), None)
-                }
+                (artist_id, Some(album_id))
             } else {
-                (None, None)
-            };
+                (artist_id, None)
+            }
+        } else {
+            (unknown_artist, None)
+        };
         let path = song.0.strip_prefix(&lib_dir).unwrap();
         let title = song
             .1
             .title()
-            .map(|title| title.to_string())
+            .map_or(None, |title| {
+                if title.trim().is_empty() {
+                    None
+                } else {
+                    Some(title.to_string())
+                }
+            })
             .unwrap_or_else(|| song.0.file_stem().unwrap().to_string_lossy().into_owned());
         database.add_song_new(Song {
             id: 0,
@@ -152,7 +170,15 @@ fn main() {
             }
         }
     }
-    eprintln!("\nsaving dbfile...");
+    eprintln!();
+    if let Some(uka) = database.artists().get(&unknown_artist) {
+        if uka.albums.is_empty() && uka.singles.is_empty() {
+            database.artists_mut().remove(&unknown_artist);
+        } else {
+            eprintln!("Added the <unknown> artist as a fallback!");
+        }
+    }
+    eprintln!("saving dbfile...");
     database.save_database(None).unwrap();
     eprintln!("done!");
 }

@@ -8,7 +8,7 @@ use super::{AlbumId, ArtistId, CoverId, GeneralData, SongId};
 pub struct Album {
     pub id: AlbumId,
     pub name: String,
-    pub artist: Option<ArtistId>,
+    pub artist: ArtistId,
     pub cover: Option<CoverId>,
     pub songs: Vec<SongId>,
     pub general: GeneralData,

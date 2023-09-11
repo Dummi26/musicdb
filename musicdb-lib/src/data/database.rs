@@ -121,7 +121,7 @@ impl Database {
     pub fn add_album_new(&mut self, album: Album) -> AlbumId {
         let artist = album.artist.clone();
         let id = self.add_album_new_nomagic(album);
-        if let Some(Some(artist)) = artist.map(|v| self.artists.get_mut(&v)) {
+        if let Some(artist) = self.artists.get_mut(&artist) {
             artist.albums.push(id);
         }
         id

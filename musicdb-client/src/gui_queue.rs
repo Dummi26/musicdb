@@ -404,9 +404,7 @@ impl QueueSong {
                         (None, None) => String::new(),
                         (Some(artist), None) => format!("by {}", artist.name),
                         (None, Some(album)) => {
-                            if let Some(artist) =
-                                album.artist.as_ref().and_then(|id| db.artists().get(id))
-                            {
+                            if let Some(artist) = db.artists().get(&album.artist) {
                                 format!("on {} by {}", album.name, artist.name)
                             } else {
                                 format!("on {}", album.name)

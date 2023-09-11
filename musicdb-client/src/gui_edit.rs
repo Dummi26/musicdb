@@ -46,11 +46,8 @@ pub enum Editing {
 #[derive(Clone)]
 pub enum ArtistChange {
     SetName(String),
-    SetCover(Option<ArtistId>),
-    RemoveAlbum(AlbumId),
+    SetCover(Option<CoverId>),
     AddAlbum(AlbumId),
-    RemoveSong(SongId),
-    AddSong(SongId),
 }
 #[derive(Clone)]
 pub enum AlbumChange {
@@ -163,39 +160,59 @@ impl GuiElemTrait for GuiEdit {
         }
         if self.send {
             self.send = false;
-            match &self.editing {
+            self.rebuild_main = true;
+            self.rebuild_changes = true;
+            self.config.redraw = true;
+            match &mut self.editing {
                 Editing::NotLoaded => {}
                 Editing::Artist(v, changes) => {
-                    for v in v {
-                        let mut v = v.clone();
-                        for change in changes.iter() {
-                            match change {
-                                ArtistChange::SetName(n) => v.name = n.clone(),
-                                ArtistChange::SetCover(c) => v.cover = c.clone(),
-                                ArtistChange::RemoveAlbum(id) => {
-                                    if let Some(i) = v.albums.iter().position(|id| id == id) {
-                                        v.albums.remove(i);
-                                    }
+                    for change in changes.iter() {
+                        match change {
+                            ArtistChange::SetName(n) => {
+                                for artist in v.iter_mut() {
+                                    artist.name = n.clone();
+                                    info.actions.push(GuiAction::SendToServer(
+                                        Command::ModifyArtist(artist.clone()),
+                                    ));
                                 }
-                                ArtistChange::AddAlbum(id) => {
-                                    if !v.albums.contains(id) {
-                                        v.albums.push(*id);
-                                    }
+                            }
+                            ArtistChange::SetCover(c) => {
+                                for artist in v.iter_mut() {
+                                    artist.cover = c.clone();
+                                    info.actions.push(GuiAction::SendToServer(
+                                        Command::ModifyArtist(artist.clone()),
+                                    ));
                                 }
-                                ArtistChange::RemoveSong(id) => {
-                                    if let Some(i) = v.singles.iter().position(|id| id == id) {
-                                        v.singles.remove(i);
+                            }
+                            ArtistChange::AddAlbum(id) => {
+                                // use the first artist for the artist fields
+                                let mut editing = v.first().unwrap().clone();
+                                if let Some(album) = info.database.albums().get(id) {
+                                    let mut album = album.clone();
+                                    // find the previous artist for this album and remove them
+                                    if let Some(prev) = info.database.artists().get(&album.artist) {
+                                        let mut prev = prev.clone();
+                                        if let Some(i) = prev.albums.iter().position(|v| v == id) {
+                                            prev.albums.remove(i);
+                                            info.actions.push(GuiAction::SendToServer(
+                                                Command::ModifyArtist(prev),
+                                            ));
+                                        }
                                     }
-                                }
-                                ArtistChange::AddSong(id) => {
-                                    if !v.singles.contains(id) {
-                                        v.singles.push(*id);
+                                    // update the artist field on the album so it points to the new artist
+                                    album.artist = editing.id;
+                                    info.actions
+                                        .push(GuiAction::SendToServer(Command::ModifyAlbum(album)));
+                                    // add the album to the artist we are editing
+                                    if !editing.albums.contains(id) {
+                                        editing.albums.push(*id);
+                                        info.actions.push(GuiAction::SendToServer(
+                                            Command::ModifyArtist(editing),
+                                        ));
                                     }
                                 }
                             }
                         }
-                        info.actions
-                            .push(GuiAction::SendToServer(Command::ModifyArtist(v)));
                     }
                 }
                 Editing::Album(v, changes) => {
@@ -487,18 +504,19 @@ impl GuiEdit {
                         let add_button = {
                             let apply_change = self.apply_change.clone();
                             GuiElem::new(Button::new(
-                                GuiElemCfg::at(Rectangle::from_tuples((0.8, 0.0), (0.9, 1.0))),
+                                GuiElemCfg::at(Rectangle::from_tuples((0.9, 0.0), (1.0, 1.0))),
                                 move |_| {
                                     _ = apply_change.send(Box::new(move |s| {
                                         if let Some(album_id) = get_id(s) {
-                                        if let Editing::Artist(_, c) = &mut s.editing {
-                                            if let Some(i) = c.iter().position(|c| {
-                                                matches!(c, ArtistChange::AddAlbum(id) if *id == album_id)
-                                            }) {
-                                                c.remove(i);
+                                            if let Editing::Artist(_, c) = &mut s.editing {
+                                                if let Some(i) = c.iter().position(|c| {
+                                                    matches!(c, ArtistChange::AddAlbum(id) if *id == album_id)
+                                                }) {
+                                                    c.remove(i);
+                                                }
+                                                c.push(ArtistChange::AddAlbum(album_id));
+                                                s.rebuild_changes = true;
                                             }
-                                            c.push(ArtistChange::AddAlbum(album_id));
-                                        s.rebuild_changes = true;}
                                         }
                                     }));
                                     vec![]
@@ -507,116 +525,26 @@ impl GuiEdit {
                                     GuiElemCfg::default(),
                                     format!("add"),
                                     Color::GREEN,
-                                    None,
-                                    Vec2::new(0.5, 0.5),
-                                ))],
-                            ))
-                        };
-                        let remove_button = {
-                            let apply_change = self.apply_change.clone();
-                            GuiElem::new(Button::new(
-                                GuiElemCfg::at(Rectangle::from_tuples((0.9, 0.0), (1.0, 1.0))),
-                                move |_| {
-                                    _ = apply_change.send(Box::new(move |s| {
-                                        if let Some(album_id) = get_id(s) {
-                                        if let Editing::Artist(_, c) = &mut s.editing {
-                                            if let Some(i) = c.iter().position(|c| {
-                                                matches!(c, ArtistChange::RemoveAlbum(id) if *id == album_id)
-                                            }) {
-                                                c.remove(i);
-                                            }
-                                            c.push(ArtistChange::RemoveAlbum(album_id));
-                                        s.rebuild_changes = true;}
-                                        }
-                                    }));
-                                    vec![]
-                                },
-                                vec![GuiElem::new(Label::new(
-                                    GuiElemCfg::default(),
-                                    format!("remove"),
-                                    Color::RED,
                                     None,
                                     Vec2::new(0.5, 0.5),
                                 ))],
                             ))
                         };
                         let name = GuiElem::new(TextField::new(
-                            GuiElemCfg::at(Rectangle::from_tuples((0.0, 0.0), (0.8, 1.0))),
-                            "add or remove album by id".to_string(),
+                            GuiElemCfg::at(Rectangle::from_tuples((0.0, 0.0), (0.9, 1.0))),
+                            "add album by id".to_string(),
                             Color::LIGHT_GRAY,
                             Color::WHITE,
                         ));
                         sb.children.push((
-                            GuiElem::new(Panel::new(
-                                GuiElemCfg::default(),
-                                vec![name, add_button, remove_button],
-                            )),
+                            GuiElem::new(Panel::new(GuiElemCfg::default(), vec![name, add_button])),
                             info.line_height * 2.0,
                         ));
                     }
                     for (album_id, count) in albums {
                         let album = info.database.albums().get(&album_id);
-                        let add_button = if count == v.len() {
-                            None
-                        } else {
-                            let apply_change = self.apply_change.clone();
-                            Some(GuiElem::new(Button::new(
-                                GuiElemCfg::at(Rectangle::from_tuples((0.8, 0.0), (0.9, 1.0))),
-                                move |_| {
-                                    _ = apply_change.send(Box::new(move |s| {
-                                        if let Editing::Artist(_, c) = &mut s.editing {
-                                            if let Some(i) = c.iter().position(|c| {
-                                                matches!(c, ArtistChange::AddAlbum(id) if *id == album_id)
-                                            }) {
-                                                c.remove(i);
-                                            }
-                                            c.push(ArtistChange::AddAlbum(album_id));
-                                        s.rebuild_changes = true;
-                                        }
-                                    }));
-                                    vec![]
-                                },
-                                vec![GuiElem::new(Label::new(
-                                    GuiElemCfg::default(),
-                                    format!("add"),
-                                    Color::GREEN,
-                                    None,
-                                    Vec2::new(0.5, 0.5),
-                                ))],
-                            )))
-                        };
-                        let remove_button = {
-                            let apply_change = self.apply_change.clone();
-                            GuiElem::new(Button::new(
-                                GuiElemCfg::at(Rectangle::from_tuples((0.9, 0.0), (1.0, 1.0))),
-                                move |_| {
-                                    _ = apply_change.send(Box::new(move |s| {
-                                        if let Editing::Artist(_, c) = &mut s.editing {
-                                            if let Some(i) = c.iter().position(|c| {
-                                                matches!(c, ArtistChange::RemoveAlbum(id) if *id == album_id)
-                                            }) {
-                                                c.remove(i);
-                                            }
-                                            c.push(ArtistChange::RemoveAlbum(album_id));
-                                        s.rebuild_changes = true;
-                                        }
-                                    }));
-                                    vec![]
-                                },
-                                vec![GuiElem::new(Label::new(
-                                    GuiElemCfg::default(),
-                                    format!("remove"),
-                                    Color::RED,
-                                    None,
-                                    Vec2::new(0.5, 0.5),
-                                ))],
-                            ))
-                        };
                         let name = GuiElem::new(Button::new(
-                            GuiElemCfg::at(Rectangle::from_tuples(
-                                (0.0, 0.0),
-                                (if add_button.is_some() { 0.8 } else { 0.9 }, 1.0),
-                            )),
+                            GuiElemCfg::at(Rectangle::from_tuples((0.0, 0.0), (1.0, 1.0))),
                             move |_| {
                                 vec![GuiAction::OpenEditPanel(GuiElem::new(GuiEdit::new(
                                     GuiElemCfg::default(),
@@ -636,14 +564,7 @@ impl GuiEdit {
                             ))],
                         ));
                         sb.children.push((
-                            GuiElem::new(Panel::new(
-                                GuiElemCfg::default(),
-                                if let Some(add_button) = add_button {
-                                    vec![name, add_button, remove_button]
-                                } else {
-                                    vec![name, remove_button]
-                                },
-                            )),
+                            GuiElem::new(Panel::new(GuiElemCfg::default(), vec![name])),
                             info.line_height,
                         ));
                     }
@@ -670,10 +591,7 @@ impl GuiEdit {
                                     "remove cover".to_string()
                                 }
                             }
-                            ArtistChange::RemoveAlbum(v) => format!("remove album {v}"),
                             ArtistChange::AddAlbum(v) => format!("add album {v}"),
-                            ArtistChange::RemoveSong(v) => format!("remove song {v}"),
-                            ArtistChange::AddSong(v) => format!("add song {v}"),
                         };
                         let s = self.apply_change.clone();
                         sb.children.push((
