@@ -80,7 +80,7 @@ impl Database {
         if let Some(Some(album)) = album.map(|v| self.albums.get_mut(&v)) {
             album.songs.push(id);
         } else {
-            if let Some(Some(artist)) = artist.map(|v| self.artists.get_mut(&v)) {
+            if let Some(artist) = self.artists.get_mut(&artist) {
                 artist.singles.push(id);
             }
         }

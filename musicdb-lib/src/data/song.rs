@@ -19,7 +19,7 @@ pub struct Song {
     pub location: DatabaseLocation,
     pub title: String,
     pub album: Option<AlbumId>,
-    pub artist: Option<ArtistId>,
+    pub artist: ArtistId,
     pub more_artists: Vec<ArtistId>,
     pub cover: Option<CoverId>,
     pub general: GeneralData,
@@ -33,7 +33,7 @@ impl Song {
         location: DatabaseLocation,
         title: String,
         album: Option<AlbumId>,
-        artist: Option<ArtistId>,
+        artist: ArtistId,
         more_artists: Vec<ArtistId>,
         cover: Option<CoverId>,
     ) -> Self {
@@ -165,11 +165,9 @@ impl Song {
 impl Display for Song {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.title)?;
-        match (self.artist, self.album) {
-            (Some(artist), Some(album)) => write!(f, " (by {artist} on {album})")?,
-            (None, Some(album)) => write!(f, " (on {album})")?,
-            (Some(artist), None) => write!(f, " (by {artist})")?,
-            (None, None) => {}
+        match self.album {
+            Some(album) => write!(f, " (by {} on {album})", self.artist)?,
+            None => write!(f, " (by {})", self.artist)?,
         }
         Ok(())
     }

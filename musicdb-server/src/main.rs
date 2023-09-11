@@ -7,7 +7,7 @@ use std::{
     thread,
 };
 
-use musicdb_lib::server::{run_server, Command};
+use musicdb_lib::server::run_server;
 
 use musicdb_lib::data::database::Database;
 

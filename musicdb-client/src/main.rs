@@ -192,7 +192,7 @@ impl<'a> Looper<'a> {
                         location: self.read_line("The songs file is located, relative to the library root, at...").into(),
                         title: self.read_line("The songs title is..."),
                         album: self.read_line_ido("The song is part of the album with the id... (empty for None)"),
-                        artist: self.read_line_ido("The song is made by the artist with the id... (empty for None)"),
+                        artist: self.read_line_id("The song is made by the artist with the id..."),
                         more_artists: accumulate(|| self.read_line_ido("The song is made with support by other artist, one of which has the id... (will ask repeatedly; leave empty once done)")),
                         cover: self.read_line_ido("The song should use the cover with the id... (empty for None - will default to album or artist cover, if available)"),
                         general: GeneralData::default(),
@@ -223,8 +223,8 @@ impl<'a> Looper<'a> {
                                     song.album = self.read_line_ido("");
                                 }
                                 "artist" => {
-                                    println!("prev: '{}'", song.artist.map_or(String::new(), |v| v.to_string()));
-                                    song.artist = self.read_line_ido("");
+                                    println!("prev: '{}'", song.artist);
+                                    song.artist = self.read_line_id("");
                                 }
                                 "location" => {
                                     println!("prev: '{:?}'", song.location);

@@ -122,9 +122,7 @@ impl GuiElemTrait for CurrentSong {
                 let (name, subtext) = if let Some(song) = new_song {
                     if let Some(song) = info.database.get_song(&song) {
                         let sub = match (
-                            song.artist
-                                .as_ref()
-                                .and_then(|id| info.database.artists().get(id)),
+                            info.database.artists().get(&song.artist),
                             song.album
                                 .as_ref()
                                 .and_then(|id| info.database.albums().get(id)),

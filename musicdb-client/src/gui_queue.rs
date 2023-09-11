@@ -398,7 +398,7 @@ impl QueueSong {
                 GuiElem::new(Label::new(
                     GuiElemCfg::at(Rectangle::from_tuples((sub_offset, 0.57), (1.0, 1.0))),
                     match (
-                        song.artist.as_ref().and_then(|id| db.artists().get(id)),
+                        db.artists().get(&song.artist),
                         song.album.as_ref().and_then(|id| db.albums().get(id)),
                     ) {
                         (None, None) => String::new(),
