@@ -94,7 +94,7 @@ pub fn main(
             if let Some(p) = config_file.parent() {
                 _ = std::fs::create_dir_all(p);
             }
-            _ = std::fs::write(&config_file, "font = \"\"");
+            _ = std::fs::write(&config_file, "font = ''");
             std::process::exit(25);
         }
     }
