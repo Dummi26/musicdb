@@ -36,13 +36,17 @@ pub struct QueueViewer {
     config: GuiElemCfg,
     children: Vec<GuiElem>,
 }
+const QP_QUEUE1: f32 = 0.0;
+const QP_QUEUE2: f32 = 0.95;
+const QP_INV1: f32 = QP_QUEUE2;
+const QP_INV2: f32 = 1.0;
 impl QueueViewer {
     pub fn new(config: GuiElemCfg) -> Self {
         Self {
             config,
             children: vec![
                 GuiElem::new(ScrollBox::new(
-                    GuiElemCfg::at(Rectangle::from_tuples((0.0, 0.0665), (1.0, 1.0))),
+                    GuiElemCfg::at(Rectangle::from_tuples((0.0, QP_QUEUE1), (1.0, QP_QUEUE2))),
                     crate::gui_base::ScrollBoxSizeUnit::Pixels,
                     vec![(
                         GuiElem::new(Label::new(
@@ -56,10 +60,10 @@ impl QueueViewer {
                     )],
                 )),
                 GuiElem::new(QueueEmptySpaceDragHandler::new(GuiElemCfg::at(
-                    Rectangle::from_tuples((0.0, 0.0665), (1.0, 1.0)),
+                    Rectangle::from_tuples((0.0, QP_QUEUE1), (1.0, QP_QUEUE2)),
                 ))),
                 GuiElem::new(Panel::new(
-                    GuiElemCfg::at(Rectangle::from_tuples((0.0, 0.0), (1.0, 0.0665))),
+                    GuiElemCfg::at(Rectangle::from_tuples((0.0, QP_INV1), (1.0, QP_INV2))),
                     vec![
                         GuiElem::new(
                             QueueLoop::new(

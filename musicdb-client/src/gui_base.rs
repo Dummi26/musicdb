@@ -308,11 +308,11 @@ impl ScrollBoxSizeUnit {
 pub struct Button {
     config: GuiElemCfg,
     pub children: Vec<GuiElem>,
-    action: Arc<dyn Fn(&Self) -> Vec<GuiAction> + 'static>,
+    action: Arc<dyn Fn(&mut Self) -> Vec<GuiAction> + 'static>,
 }
 impl Button {
     /// automatically adds w_mouse to config
-    pub fn new<F: Fn(&Self) -> Vec<GuiAction> + 'static>(
+    pub fn new<F: Fn(&mut Self) -> Vec<GuiAction> + 'static>(
         config: GuiElemCfg,
         action: F,
         children: Vec<GuiElem>,
@@ -345,7 +345,7 @@ impl GuiElemTrait for Button {
     }
     fn mouse_pressed(&mut self, button: MouseButton) -> Vec<GuiAction> {
         if button == MouseButton::Left {
-            (self.action)(self)
+            (self.action.clone())(self)
         } else {
             vec![]
         }

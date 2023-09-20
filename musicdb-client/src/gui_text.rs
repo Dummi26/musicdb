@@ -32,6 +32,14 @@ pub struct Content {
     formatted: Option<Rc<FormattedTextBlock>>,
 }
 impl Content {
+    pub fn new(text: String, color: Color) -> Self {
+        Self {
+            text,
+            color,
+            background: None,
+            formatted: None,
+        }
+    }
     pub fn get_text(&self) -> &String {
         &self.text
     }
@@ -129,7 +137,7 @@ impl GuiElemTrait for Label {
 
 // TODO! this, but requires keyboard events first
 
-/// a single-line text fields for users to type text into.
+/// a single-line text field for users to type text into.
 #[derive(Clone)]
 pub struct TextField {
     config: GuiElemCfg,
@@ -245,5 +253,110 @@ impl GuiElemTrait for TextField {
             }
         }
         vec![]
+    }
+}
+
+/// More advanced version of `Label`.
+/// Allows stringing together multiple `Content`s in one line.
+#[derive(Clone)]
+pub struct AdvancedLabel {
+    config: GuiElemCfg,
+    children: Vec<GuiElem>,
+    /// 0.0 => align to top/left
+    /// 0.5 => center
+    /// 1.0 => align to bottom/right
+    pub align: Vec2,
+    /// (Content, Size-Scale, Height)
+    /// Size-Scale and Height should default to 1.0.
+    pub content: Vec<(Content, f32, f32)>,
+    /// the position from where content drawing starts.
+    /// recalculated when layouting is performed.
+    content_pos: Vec2,
+    content_height: f32,
+}
+impl AdvancedLabel {
+    pub fn new(config: GuiElemCfg, align: Vec2, content: Vec<(Content, f32, f32)>) -> Self {
+        Self {
+            config,
+            children: vec![],
+            align,
+            content,
+            content_pos: Vec2::ZERO,
+            content_height: 0.0,
+        }
+    }
+}
+impl GuiElemTrait for AdvancedLabel {
+    fn config(&self) -> &GuiElemCfg {
+        &self.config
+    }
+    fn config_mut(&mut self) -> &mut GuiElemCfg {
+        &mut self.config
+    }
+    fn children(&mut self) -> Box<dyn Iterator<Item = &mut GuiElem> + '_> {
+        Box::new(self.children.iter_mut())
+    }
+    fn any(&self) -> &dyn std::any::Any {
+        self
+    }
+    fn any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+    fn clone_gui(&self) -> Box<dyn GuiElemTrait> {
+        Box::new(self.clone())
+    }
+    fn draw(&mut self, info: &mut crate::gui::DrawInfo, g: &mut speedy2d::Graphics2D) {
+        if self.config.redraw
+            || self.config.pixel_pos.size() != info.pos.size()
+            || self.content.iter().any(|(c, _, _)| c.will_redraw())
+        {
+            self.config.redraw = false;
+            let mut len = 0.0;
+            let mut height = 0.0;
+            for (c, scale, _) in &self.content {
+                let mut size = info
+                    .font
+                    .layout_text(&c.text, 1.0, TextOptions::new())
+                    .size();
+                len += size.x * scale;
+                if size.y * scale > height {
+                    height = size.y * scale;
+                }
+            }
+            if len > 0.0 && height > 0.0 {
+                let scale1 = info.pos.width() / len;
+                let scale2 = info.pos.height() / height;
+                let scale;
+                self.content_pos = if scale1 < scale2 {
+                    // use all available width
+                    scale = scale1;
+                    self.content_height = height * scale;
+                    let pad = info.pos.height() - self.content_height;
+                    Vec2::new(0.0, pad * self.align.y)
+                } else {
+                    // use all available height
+                    scale = scale2;
+                    self.content_height = info.pos.height();
+                    let pad = info.pos.width() - len * scale;
+                    Vec2::new(pad * self.align.x, 0.0)
+                };
+                for (c, s, _) in &mut self.content {
+                    c.formatted = Some(info.font.layout_text(
+                        &c.text,
+                        scale * (*s),
+                        TextOptions::new(),
+                    ));
+                }
+            }
+        }
+        let pos_y = info.pos.top_left().y + self.content_pos.y;
+        let mut pos_x = info.pos.top_left().x + self.content_pos.x;
+        for (c, _, h) in &self.content {
+            if let Some(f) = &c.formatted {
+                let y = pos_y + (self.content_height - f.height()) * h;
+                g.draw_text(Vec2::new(pos_x, y), c.color, f);
+                pos_x += f.width();
+            }
+        }
     }
 }

@@ -140,12 +140,18 @@ fn main() {
         });
     }
     eprintln!("searching for covers...");
+    let mut multiple_cover_options = vec![];
     let mut single_images = HashMap::new();
     for (i1, (_artist, (artist_id, albums))) in artists.iter().enumerate() {
         eprint!("\rartist {}/{}", i1 + 1, artists.len());
         for (_album, (album_id, album_dir)) in albums {
             if let Some(album_dir) = album_dir {
-                if let Some(cover_id) = get_cover(&mut database, &lib_dir, album_dir) {
+                if let Some(cover_id) = get_cover(
+                    &mut database,
+                    &lib_dir,
+                    album_dir,
+                    &mut multiple_cover_options,
+                ) {
                     database.albums_mut().get_mut(album_id).unwrap().cover = Some(cover_id);
                 }
             }
@@ -158,7 +164,9 @@ fn main() {
                 {
                     let cover_id = if let Some(cover_id) = single_images.get(dir) {
                         Some(*cover_id)
-                    } else if let Some(cover_id) = get_cover(&mut database, &lib_dir, dir) {
+                    } else if let Some(cover_id) =
+                        get_cover(&mut database, &lib_dir, dir, &mut multiple_cover_options)
+                    {
                         single_images.insert(dir.to_owned(), cover_id);
                         Some(cover_id)
                     } else {
@@ -171,6 +179,13 @@ fn main() {
         }
     }
     eprintln!();
+    if !multiple_cover_options.is_empty() {
+        eprintln!("> Found more than one cover in the following directories: ");
+        for dir in multiple_cover_options {
+            eprintln!(">> {}", dir.to_string_lossy());
+        }
+        eprintln!("> Default behavior is using the largest image file found.");
+    }
     if let Some(uka) = database.artists().get(&unknown_artist) {
         if uka.albums.is_empty() && uka.singles.is_empty() {
             database.artists_mut().remove(&unknown_artist);
@@ -212,9 +227,15 @@ impl OnceNewline {
     }
 }
 
-fn get_cover(database: &mut Database, lib_dir: &str, abs_dir: impl AsRef<Path>) -> Option<CoverId> {
+fn get_cover(
+    database: &mut Database,
+    lib_dir: &str,
+    abs_dir: impl AsRef<Path>,
+    multiple_options_list: &mut Vec<PathBuf>,
+) -> Option<CoverId> {
+    let mut multiple = false;
     let mut cover = None;
-    if let Ok(files) = fs::read_dir(abs_dir) {
+    if let Ok(files) = fs::read_dir(&abs_dir) {
         for file in files {
             if let Ok(file) = file {
                 if let Ok(metadata) = file.metadata() {
@@ -228,6 +249,9 @@ fn get_cover(database: &mut Database, lib_dir: &str, abs_dir: impl AsRef<Path>) 
                                     .as_ref()
                                     .is_some_and(|(_, size)| *size < metadata.len())
                             {
+                                if cover.is_some() {
+                                    multiple = true;
+                                }
                                 cover = Some((path, metadata.len()));
                             }
                         }
@@ -235,6 +259,9 @@ fn get_cover(database: &mut Database, lib_dir: &str, abs_dir: impl AsRef<Path>) 
                 }
             }
         }
+    }
+    if multiple {
+        multiple_options_list.push(abs_dir.as_ref().to_path_buf());
     }
     if let Some((path, _)) = cover {
         let rel_path = path.strip_prefix(&lib_dir).unwrap().to_path_buf();

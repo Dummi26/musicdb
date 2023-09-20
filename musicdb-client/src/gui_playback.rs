@@ -8,7 +8,7 @@ use speedy2d::{color::Color, dimen::Vec2, shape::Rectangle, window::MouseButton}
 
 use crate::{
     gui::{adjust_area, adjust_pos, GuiAction, GuiCover, GuiElem, GuiElemCfg, GuiElemTrait},
-    gui_text::Label,
+    gui_text::{AdvancedLabel, Content, Label},
 };
 
 /*
@@ -25,6 +25,7 @@ pub struct CurrentSong {
     prev_song: Option<SongId>,
     cover_pos: Rectangle,
     covers: VecDeque<(CoverId, Option<(bool, Instant)>)>,
+    text_updated: Option<Instant>,
 }
 impl CurrentSong {
     pub fn new(config: GuiElemCfg) -> Self {
@@ -38,18 +39,38 @@ impl CurrentSong {
                     None,
                     Vec2::new(0.0, 1.0),
                 )),
-                GuiElem::new(Label::new(
+                GuiElem::new(AdvancedLabel::new(
                     GuiElemCfg::at(Rectangle::from_tuples((0.4, 0.5), (1.0, 1.0))),
-                    "".to_owned(),
-                    Color::from_int_rgb(120, 120, 120),
-                    None,
                     Vec2::new(0.0, 0.0),
+                    vec![],
                 )),
             ],
             cover_pos: Rectangle::new(Vec2::ZERO, Vec2::ZERO),
             covers: VecDeque::new(),
             prev_song: None,
+            text_updated: None,
         }
+    }
+    pub fn set_idle_mode(&mut self, idle_mode: f32) {
+        // ...
+    }
+    fn color_title(a: f32) -> Color {
+        Self::color_with_alpha(&Color::WHITE, a)
+    }
+    fn color_artist(a: f32) -> Color {
+        Color::from_rgba(0.32, 0.20, 0.49, a)
+    }
+    fn color_album(a: f32) -> Color {
+        Color::from_rgba(0.03, 0.24, 0.18, a)
+    }
+    fn color_by(a: f32) -> Color {
+        Self::color_with_alpha(&Color::DARK_GRAY, a)
+    }
+    fn color_on(a: f32) -> Color {
+        Self::color_with_alpha(&Color::DARK_GRAY, a)
+    }
+    fn color_with_alpha(c: &Color, a: f32) -> Color {
+        Color::from_rgba(c.r(), c.g(), c.b(), a)
     }
 }
 impl GuiElemTrait for CurrentSong {
@@ -127,39 +148,130 @@ impl GuiElemTrait for CurrentSong {
                                 .as_ref()
                                 .and_then(|id| info.database.albums().get(id)),
                         ) {
-                            (None, None) => String::new(),
-                            (Some(artist), None) => format!("by {}", artist.name),
-                            (None, Some(album)) => {
-                                if let Some(artist) = info.database.artists().get(&album.artist) {
-                                    format!("on {} by {}", album.name, artist.name)
-                                } else {
-                                    format!("on {}", album.name)
-                                }
-                            }
-                            (Some(artist), Some(album)) => {
-                                format!("by {} on {}", artist.name, album.name)
-                            }
+                            (None, None) => vec![],
+                            (Some(artist), None) => vec![
+                                (
+                                    Content::new("by ".to_owned(), Self::color_by(0.0)),
+                                    1.0,
+                                    1.0,
+                                ),
+                                (
+                                    Content::new(artist.name.to_owned(), Self::color_artist(0.0)),
+                                    1.0,
+                                    1.0,
+                                ),
+                            ],
+                            (None, Some(album)) => vec![
+                                (Content::new(String::new(), Color::TRANSPARENT), 0.0, 1.0),
+                                (
+                                    Content::new("on ".to_owned(), Self::color_on(0.0)),
+                                    1.0,
+                                    1.0,
+                                ),
+                                (
+                                    Content::new(album.name.to_owned(), Self::color_album(0.0)),
+                                    1.0,
+                                    1.0,
+                                ),
+                            ],
+                            (Some(artist), Some(album)) => vec![
+                                (
+                                    Content::new("by ".to_owned(), Self::color_by(0.0)),
+                                    1.0,
+                                    1.0,
+                                ),
+                                (
+                                    Content::new(
+                                        format!("{} ", artist.name),
+                                        Self::color_artist(0.0),
+                                    ),
+                                    1.0,
+                                    1.0,
+                                ),
+                                (
+                                    Content::new("on ".to_owned(), Self::color_on(0.0)),
+                                    1.0,
+                                    1.0,
+                                ),
+                                (
+                                    Content::new(album.name.to_owned(), Self::color_album(0.0)),
+                                    1.0,
+                                    1.0,
+                                ),
+                            ],
                         };
                         (song.title.clone(), sub)
                     } else {
                         (
                             "< song not in db >".to_owned(),
-                            "maybe restart the client to resync the database?".to_owned(),
+                            vec![(
+                                Content::new(
+                                    "you may need to restart the client to resync the database"
+                                        .to_owned(),
+                                    Color::from_rgb(0.8, 0.5, 0.5),
+                                ),
+                                1.0,
+                                1.0,
+                            )],
                         )
                     }
                 } else {
-                    (String::new(), String::new())
+                    (String::new(), vec![])
                 };
                 *self.children[0]
                     .try_as_mut::<Label>()
                     .unwrap()
                     .content
                     .text() = name;
-                *self.children[1]
-                    .try_as_mut::<Label>()
+                self.children[1]
+                    .try_as_mut::<AdvancedLabel>()
                     .unwrap()
-                    .content
-                    .text() = subtext;
+                    .content = subtext;
+                self.text_updated = Some(Instant::now());
+            }
+        }
+        if let Some(updated) = &self.text_updated {
+            if let Some(h) = &info.helper {
+                h.request_redraw();
+            }
+            let prog = updated.elapsed().as_secs_f32();
+            *self.children[0]
+                .try_as_mut::<Label>()
+                .unwrap()
+                .content
+                .color() = Self::color_title((prog / 1.5).min(1.0));
+            let subtext = self.children[1].try_as_mut::<AdvancedLabel>().unwrap();
+            match subtext.content.len() {
+                2 => {
+                    *subtext.content[0].0.color() = Self::color_by(prog.min(1.0));
+                    *subtext.content[1].0.color() =
+                        Self::color_artist((prog.max(0.5) - 0.5).min(1.0));
+                    if prog >= 1.5 {
+                        self.text_updated = None;
+                    }
+                }
+                3 => {
+                    *subtext.content[0].0.color() = Self::color_on(prog.min(1.0));
+                    *subtext.content[1].0.color() =
+                        Self::color_album((prog.max(0.5) - 0.5).min(1.0));
+                    if prog >= 1.5 {
+                        self.text_updated = None;
+                    }
+                }
+                4 => {
+                    *subtext.content[0].0.color() = Self::color_by(prog.min(1.0));
+                    *subtext.content[1].0.color() =
+                        Self::color_artist((prog.max(0.5) - 0.5).min(1.0));
+                    *subtext.content[2].0.color() = Self::color_on((prog.max(1.0) - 1.0).min(1.0));
+                    *subtext.content[3].0.color() =
+                        Self::color_album((prog.max(1.5) - 1.5).min(1.0));
+                    if prog >= 2.5 {
+                        self.text_updated = None;
+                    }
+                }
+                _ => {
+                    self.text_updated = None;
+                }
             }
         }
         // drawing stuff

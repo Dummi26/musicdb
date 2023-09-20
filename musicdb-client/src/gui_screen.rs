@@ -78,7 +78,7 @@ impl GuiScreen {
         scroll_sensitivity_pages: f64,
     ) -> Self {
         Self {
-            config: config.w_keyboard_watch(),
+            config: config.w_keyboard_watch().w_mouse(),
             children: vec![
                 GuiElem::new(StatusBar::new(
                     GuiElemCfg::at(Rectangle::from_tuples((0.0, 0.9), (1.0, 1.0))),
@@ -95,7 +95,7 @@ impl GuiScreen {
                     GuiElemCfg::at(Rectangle::from_tuples((0.0, 0.0), (1.0, 0.9))),
                     vec![
                         GuiElem::new(Button::new(
-                            GuiElemCfg::at(Rectangle::from_tuples((0.5, 0.0), (0.75, 0.03))),
+                            GuiElemCfg::at(Rectangle::from_tuples((0.75, 0.0), (0.875, 0.03))),
                             |_| vec![GuiAction::OpenSettings(true)],
                             vec![GuiElem::new(Label::new(
                                 GuiElemCfg::default(),
@@ -106,7 +106,7 @@ impl GuiScreen {
                             ))],
                         )),
                         GuiElem::new(Button::new(
-                            GuiElemCfg::at(Rectangle::from_tuples((0.75, 0.0), (1.0, 0.03))),
+                            GuiElemCfg::at(Rectangle::from_tuples((0.875, 0.0), (1.0, 0.03))),
                             |_| vec![GuiAction::Exit],
                             vec![GuiElem::new(Label::new(
                                 GuiElemCfg::default(),
@@ -124,6 +124,29 @@ impl GuiScreen {
                             (0.5, 0.03),
                             (1.0, 1.0),
                         )))),
+                        GuiElem::new(Button::new(
+                            GuiElemCfg::at(Rectangle::from_tuples((0.5, 0.0), (0.75, 0.03))),
+                            |_| {
+                                vec![GuiAction::SendToServer(
+                                    musicdb_lib::server::Command::QueueUpdate(
+                                        vec![],
+                                        musicdb_lib::data::queue::QueueContent::Folder(
+                                            0,
+                                            vec![],
+                                            String::new(),
+                                        )
+                                        .into(),
+                                    ),
+                                )]
+                            },
+                            vec![GuiElem::new(Label::new(
+                                GuiElemCfg::default(),
+                                "Clear Queue".to_string(),
+                                Color::WHITE,
+                                None,
+                                Vec2::new(0.5, 0.5),
+                            ))],
+                        )),
                     ],
                 )),
             ],
@@ -203,7 +226,11 @@ impl GuiElemTrait for GuiScreen {
         self.not_idle();
         vec![]
     }
-    fn draw(&mut self, info: &mut DrawInfo, g: &mut Graphics2D) {
+    fn mouse_down(&mut self, _button: speedy2d::window::MouseButton) -> Vec<GuiAction> {
+        self.not_idle();
+        vec![]
+    }
+    fn draw(&mut self, info: &mut DrawInfo, _g: &mut Graphics2D) {
         // idle stuff
         if self.prev_mouse_pos != info.mouse_pos {
             self.prev_mouse_pos = info.mouse_pos;
@@ -289,6 +316,7 @@ pub struct StatusBar {
     config: GuiElemCfg,
     children: Vec<GuiElem>,
     idle_mode: f32,
+    idle_prev: f32,
 }
 impl StatusBar {
     pub fn new(config: GuiElemCfg, playing: bool) -> Self {
@@ -301,16 +329,30 @@ impl StatusBar {
                 )))),
                 GuiElem::new(PlayPauseToggle::new(
                     GuiElemCfg::at(Rectangle::from_tuples((0.85, 0.0), (0.95, 1.0))),
-                    false,
+                    playing,
                 )),
-                GuiElem::new(Panel::with_background(
-                    GuiElemCfg::default(),
-                    vec![],
-                    Color::BLACK,
-                )),
+                GuiElem::new(Panel::new(GuiElemCfg::default(), vec![])),
             ],
             idle_mode: 0.0,
+            idle_prev: 0.0,
         }
+    }
+    const fn index_current_song() -> usize {
+        0
+    }
+    const fn index_play_pause_toggle() -> usize {
+        1
+    }
+    const fn index_bgpanel() -> usize {
+        2
+    }
+    pub fn set_background(&mut self, bg: Option<Color>) {
+        self.children[Self::index_bgpanel()]
+            .inner
+            .any_mut()
+            .downcast_mut::<Panel>()
+            .unwrap()
+            .background = bg;
     }
 }
 impl GuiElemTrait for StatusBar {
@@ -333,6 +375,8 @@ impl GuiElemTrait for StatusBar {
         Box::new(self.clone())
     }
     fn draw(&mut self, info: &mut DrawInfo, g: &mut Graphics2D) {
+        // the line that separates this section from the rest of the ui.
+        // fades away when idle_mode approaches 1.0
         if self.idle_mode < 1.0 {
             g.draw_line(
                 info.pos.top_left(),
@@ -340,6 +384,29 @@ impl GuiElemTrait for StatusBar {
                 2.0,
                 Color::from_rgba(1.0, 1.0, 1.0, 1.0 - self.idle_mode),
             );
+        }
+        if self.idle_mode != self.idle_prev {
+            // if exiting the moving stage, set background to transparent.
+            // if entering the moving stage, set background to black.
+            if self.idle_mode == 1.0 || self.idle_mode == 0.0 {
+                self.set_background(None);
+            } else if self.idle_prev == 1.0 || self.idle_prev == 0.0 {
+                self.set_background(Some(Color::BLACK));
+            }
+            // position the text
+            let current_song = self.children[Self::index_current_song()]
+                .inner
+                .any_mut()
+                .downcast_mut::<CurrentSong>()
+                .unwrap();
+            current_song.set_idle_mode(self.idle_mode);
+            let play_pause = self.children[Self::index_play_pause_toggle()]
+                .inner
+                .any_mut()
+                .downcast_mut::<PlayPauseToggle>()
+                .unwrap();
+            // - - - - -
+            self.idle_prev = self.idle_mode;
         }
     }
 }
