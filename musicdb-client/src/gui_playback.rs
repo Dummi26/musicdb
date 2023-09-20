@@ -31,20 +31,11 @@ impl CurrentSong {
     pub fn new(config: GuiElemCfg) -> Self {
         Self {
             config,
-            children: vec![
-                GuiElem::new(Label::new(
-                    GuiElemCfg::at(Rectangle::from_tuples((0.4, 0.0), (1.0, 0.5))),
-                    "".to_owned(),
-                    Color::from_int_rgb(180, 180, 210),
-                    None,
-                    Vec2::new(0.0, 1.0),
-                )),
-                GuiElem::new(AdvancedLabel::new(
-                    GuiElemCfg::at(Rectangle::from_tuples((0.4, 0.5), (1.0, 1.0))),
-                    Vec2::new(0.0, 0.0),
-                    vec![],
-                )),
-            ],
+            children: vec![GuiElem::new(AdvancedLabel::new(
+                GuiElemCfg::at(Rectangle::from_tuples((0.4, 0.0), (1.0, 1.0))),
+                Vec2::new(0.0, 0.5),
+                vec![],
+            ))],
             cover_pos: Rectangle::new(Vec2::ZERO, Vec2::ZERO),
             covers: VecDeque::new(),
             prev_song: None,
@@ -140,139 +131,34 @@ impl GuiElemTrait for CurrentSong {
             // redraw
             if self.config.redraw {
                 self.config.redraw = false;
-                let (name, subtext) = if let Some(song) = new_song {
-                    if let Some(song) = info.database.get_song(&song) {
-                        let sub = match (
-                            info.database.artists().get(&song.artist),
-                            song.album
-                                .as_ref()
-                                .and_then(|id| info.database.albums().get(id)),
-                        ) {
-                            (None, None) => vec![],
-                            (Some(artist), None) => vec![
-                                (
-                                    Content::new("by ".to_owned(), Self::color_by(0.0)),
-                                    1.0,
-                                    1.0,
-                                ),
-                                (
-                                    Content::new(artist.name.to_owned(), Self::color_artist(0.0)),
-                                    1.0,
-                                    1.0,
-                                ),
-                            ],
-                            (None, Some(album)) => vec![
-                                (Content::new(String::new(), Color::TRANSPARENT), 0.0, 1.0),
-                                (
-                                    Content::new("on ".to_owned(), Self::color_on(0.0)),
-                                    1.0,
-                                    1.0,
-                                ),
-                                (
-                                    Content::new(album.name.to_owned(), Self::color_album(0.0)),
-                                    1.0,
-                                    1.0,
-                                ),
-                            ],
-                            (Some(artist), Some(album)) => vec![
-                                (
-                                    Content::new("by ".to_owned(), Self::color_by(0.0)),
-                                    1.0,
-                                    1.0,
-                                ),
-                                (
-                                    Content::new(
-                                        format!("{} ", artist.name),
-                                        Self::color_artist(0.0),
-                                    ),
-                                    1.0,
-                                    1.0,
-                                ),
-                                (
-                                    Content::new("on ".to_owned(), Self::color_on(0.0)),
-                                    1.0,
-                                    1.0,
-                                ),
-                                (
-                                    Content::new(album.name.to_owned(), Self::color_album(0.0)),
-                                    1.0,
-                                    1.0,
-                                ),
-                            ],
-                        };
-                        (song.title.clone(), sub)
-                    } else {
-                        (
-                            "< song not in db >".to_owned(),
-                            vec![(
-                                Content::new(
-                                    "you may need to restart the client to resync the database"
-                                        .to_owned(),
-                                    Color::from_rgb(0.8, 0.5, 0.5),
-                                ),
-                                1.0,
-                                1.0,
-                            )],
-                        )
-                    }
-                } else {
-                    (String::new(), vec![])
-                };
-                *self.children[0]
-                    .try_as_mut::<Label>()
-                    .unwrap()
-                    .content
-                    .text() = name;
-                self.children[1]
-                    .try_as_mut::<AdvancedLabel>()
-                    .unwrap()
-                    .content = subtext;
-                self.text_updated = Some(Instant::now());
+                if let Some(song) = new_song {
+                    let status_bar_text = info
+                        .gui_config
+                        .status_bar_text
+                        .gen(&info.database, info.database.get_song(&song));
+                    self.children[0]
+                        .try_as_mut::<AdvancedLabel>()
+                        .unwrap()
+                        .content = status_bar_text;
+                    self.text_updated = Some(Instant::now());
+                }
             }
         }
         if let Some(updated) = &self.text_updated {
             if let Some(h) = &info.helper {
                 h.request_redraw();
             }
-            let prog = updated.elapsed().as_secs_f32();
-            *self.children[0]
-                .try_as_mut::<Label>()
+            let mut prog = updated.elapsed().as_secs_f32();
+            if prog >= 1.0 {
+                prog = 1.0;
+                self.text_updated = None;
+            }
+            self.children[0]
+                .try_as_mut::<AdvancedLabel>()
                 .unwrap()
                 .content
-                .color() = Self::color_title((prog / 1.5).min(1.0));
-            let subtext = self.children[1].try_as_mut::<AdvancedLabel>().unwrap();
-            match subtext.content.len() {
-                2 => {
-                    *subtext.content[0].0.color() = Self::color_by(prog.min(1.0));
-                    *subtext.content[1].0.color() =
-                        Self::color_artist((prog.max(0.5) - 0.5).min(1.0));
-                    if prog >= 1.5 {
-                        self.text_updated = None;
-                    }
-                }
-                3 => {
-                    *subtext.content[0].0.color() = Self::color_on(prog.min(1.0));
-                    *subtext.content[1].0.color() =
-                        Self::color_album((prog.max(0.5) - 0.5).min(1.0));
-                    if prog >= 1.5 {
-                        self.text_updated = None;
-                    }
-                }
-                4 => {
-                    *subtext.content[0].0.color() = Self::color_by(prog.min(1.0));
-                    *subtext.content[1].0.color() =
-                        Self::color_artist((prog.max(0.5) - 0.5).min(1.0));
-                    *subtext.content[2].0.color() = Self::color_on((prog.max(1.0) - 1.0).min(1.0));
-                    *subtext.content[3].0.color() =
-                        Self::color_album((prog.max(1.5) - 1.5).min(1.0));
-                    if prog >= 2.5 {
-                        self.text_updated = None;
-                    }
-                }
-                _ => {
-                    self.text_updated = None;
-                }
-            }
+                .iter_mut()
+                .count();
         }
         // drawing stuff
         if self.config.pixel_pos.size() != info.pos.size() {

@@ -58,6 +58,13 @@ fn main() {
     eprintln!("searching for artists...");
     let mut artists = HashMap::new();
     for song in songs {
+        let mut general = GeneralData::default();
+        if let Some(year) = song.1.year() {
+            general.tags.push(format!("Year={year}"));
+        }
+        if let Some(genre) = song.1.genre_parsed() {
+            general.tags.push(format!("Genre={genre}"));
+        }
         let (artist_id, album_id) = if let Some(artist) = song
             .1
             .album_artist()
@@ -135,7 +142,7 @@ fn main() {
             artist: artist_id,
             more_artists: vec![],
             cover: None,
-            general: GeneralData::default(),
+            general,
             cached_data: Arc::new(Mutex::new(None)),
         });
     }

@@ -268,21 +268,19 @@ pub struct AdvancedLabel {
     pub align: Vec2,
     /// (Content, Size-Scale, Height)
     /// Size-Scale and Height should default to 1.0.
-    pub content: Vec<(Content, f32, f32)>,
+    pub content: Vec<Vec<(Content, f32, f32)>>,
     /// the position from where content drawing starts.
     /// recalculated when layouting is performed.
     content_pos: Vec2,
-    content_height: f32,
 }
 impl AdvancedLabel {
-    pub fn new(config: GuiElemCfg, align: Vec2, content: Vec<(Content, f32, f32)>) -> Self {
+    pub fn new(config: GuiElemCfg, align: Vec2, content: Vec<Vec<(Content, f32, f32)>>) -> Self {
         Self {
             config,
             children: vec![],
             align,
             content,
             content_pos: Vec2::ZERO,
-            content_height: 0.0,
         }
     }
 }
@@ -308,55 +306,77 @@ impl GuiElemTrait for AdvancedLabel {
     fn draw(&mut self, info: &mut crate::gui::DrawInfo, g: &mut speedy2d::Graphics2D) {
         if self.config.redraw
             || self.config.pixel_pos.size() != info.pos.size()
-            || self.content.iter().any(|(c, _, _)| c.will_redraw())
+            || self
+                .content
+                .iter()
+                .any(|v| v.iter().any(|(c, _, _)| c.will_redraw()))
         {
             self.config.redraw = false;
-            let mut len = 0.0;
-            let mut height = 0.0;
-            for (c, scale, _) in &self.content {
-                let mut size = info
-                    .font
-                    .layout_text(&c.text, 1.0, TextOptions::new())
-                    .size();
-                len += size.x * scale;
-                if size.y * scale > height {
-                    height = size.y * scale;
+            let mut max_len = 0.0;
+            let mut total_height = 0.0;
+            for line in &self.content {
+                let mut len = 0.0;
+                let mut height = 0.0;
+                for (c, scale, _) in line {
+                    let size = info
+                        .font
+                        .layout_text(&c.text, 1.0, TextOptions::new())
+                        .size();
+                    len += size.x * scale;
+                    if size.y * scale > height {
+                        height = size.y * scale;
+                    }
                 }
+                if len > max_len {
+                    max_len = len;
+                }
+                total_height += height;
             }
-            if len > 0.0 && height > 0.0 {
-                let scale1 = info.pos.width() / len;
-                let scale2 = info.pos.height() / height;
+            if max_len > 0.0 && total_height > 0.0 {
+                let scale1 = info.pos.width() / max_len;
+                let scale2 = info.pos.height() / total_height;
                 let scale;
                 self.content_pos = if scale1 < scale2 {
                     // use all available width
                     scale = scale1;
-                    self.content_height = height * scale;
-                    let pad = info.pos.height() - self.content_height;
-                    Vec2::new(0.0, pad * self.align.y)
+                    Vec2::new(
+                        0.0,
+                        (info.pos.height() - (total_height * scale)) * self.align.y,
+                    )
                 } else {
                     // use all available height
                     scale = scale2;
-                    self.content_height = info.pos.height();
-                    let pad = info.pos.width() - len * scale;
-                    Vec2::new(pad * self.align.x, 0.0)
+                    Vec2::new((info.pos.width() - (max_len * scale)) * self.align.x, 0.0)
                 };
-                for (c, s, _) in &mut self.content {
-                    c.formatted = Some(info.font.layout_text(
-                        &c.text,
-                        scale * (*s),
-                        TextOptions::new(),
-                    ));
+                for line in &mut self.content {
+                    for (c, s, _) in line {
+                        c.formatted = Some(info.font.layout_text(
+                            &c.text,
+                            scale * (*s),
+                            TextOptions::new(),
+                        ));
+                    }
                 }
             }
         }
-        let pos_y = info.pos.top_left().y + self.content_pos.y;
-        let mut pos_x = info.pos.top_left().x + self.content_pos.x;
-        for (c, _, h) in &self.content {
-            if let Some(f) = &c.formatted {
-                let y = pos_y + (self.content_height - f.height()) * h;
-                g.draw_text(Vec2::new(pos_x, y), c.color, f);
-                pos_x += f.width();
+        let pos_x_start = info.pos.top_left().x + self.content_pos.x;
+        let mut pos_y = info.pos.top_left().y + self.content_pos.y;
+        for line in &self.content {
+            let mut pos_x = pos_x_start;
+            let height = line
+                .iter()
+                .filter_map(|v| v.0.formatted.as_ref())
+                .map(|f| f.height())
+                .reduce(f32::max)
+                .unwrap_or(0.0);
+            for (c, _, h) in line {
+                if let Some(f) = &c.formatted {
+                    let y = pos_y + (height - f.height()) * h;
+                    g.draw_text(Vec2::new(pos_x, y), c.color, f);
+                    pos_x += f.width();
+                }
             }
+            pos_y += height;
         }
     }
 }

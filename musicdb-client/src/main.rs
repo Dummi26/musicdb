@@ -42,6 +42,7 @@ mod gui_settings;
 mod gui_text;
 #[cfg(feature = "speedy2d")]
 mod gui_wrappers;
+mod textcfg;
 
 #[derive(Clone, Copy)]
 enum Mode {

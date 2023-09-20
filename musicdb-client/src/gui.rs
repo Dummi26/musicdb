@@ -28,7 +28,7 @@ use speedy2d::{
     Graphics2D,
 };
 
-use crate::{gui_screen::GuiScreen, gui_wrappers::WithFocusHotkey};
+use crate::{gui_screen::GuiScreen, gui_wrappers::WithFocusHotkey, textcfg};
 
 pub enum GuiEvent {
     Refresh,
@@ -50,6 +50,7 @@ pub fn main(
     let mut scroll_pixels_multiplier = 1.0;
     let mut scroll_lines_multiplier = 3.0;
     let mut scroll_pages_multiplier = 0.75;
+    let status_bar_text;
     match std::fs::read_to_string(&config_file) {
         Ok(cfg) => {
             if let Ok(table) = cfg.parse::<toml::Table>() {
@@ -85,8 +86,26 @@ pub fn main(
                 {
                     scroll_pages_multiplier = v;
                 }
+                if let Some(t) = table.get("text").and_then(|v| v.as_table()) {
+                    if let Some(v) = t.get("status_bar").and_then(|v| v.as_str()) {
+                        match v.parse() {
+                            Ok(v) => status_bar_text = v,
+                            Err(e) => {
+                                eprintln!("[toml] `text.status_bar couldn't be parsed: {e}`");
+                                std::process::exit(30);
+                            }
+                        }
+                    } else {
+                        eprintln!("[toml] missing the required `text.status_bar` string value.");
+                        std::process::exit(30);
+                    }
+                } else {
+                    eprintln!("[toml] missing the required `[text]` section!");
+                    std::process::exit(30);
+                }
             } else {
                 eprintln!("Couldn't parse config file {config_file:?} as toml!");
+                std::process::exit(30);
             }
         }
         Err(e) => {
@@ -94,7 +113,9 @@ pub fn main(
             if let Some(p) = config_file.parent() {
                 _ = std::fs::create_dir_all(p);
             }
-            _ = std::fs::write(&config_file, "font = ''");
+            if std::fs::write(&config_file, include_bytes!("config_gui.toml")).is_ok() {
+                eprintln!("[info] created a default config file.");
+            }
             std::process::exit(25);
         }
     }
@@ -126,7 +147,12 @@ pub fn main(
         scroll_pixels_multiplier,
         scroll_lines_multiplier,
         scroll_pages_multiplier,
+        GuiConfig { status_bar_text },
     ));
+}
+
+pub struct GuiConfig {
+    pub status_bar_text: textcfg::TextBuilder,
 }
 
 pub struct Gui {
@@ -150,6 +176,7 @@ pub struct Gui {
     pub scroll_pixels_multiplier: f64,
     pub scroll_lines_multiplier: f64,
     pub scroll_pages_multiplier: f64,
+    pub gui_config: Option<GuiConfig>,
 }
 impl Gui {
     fn new(
@@ -163,6 +190,7 @@ impl Gui {
         scroll_pixels_multiplier: f64,
         scroll_lines_multiplier: f64,
         scroll_pages_multiplier: f64,
+        gui_config: GuiConfig,
     ) -> Self {
         database.lock().unwrap().update_endpoints.push(
             musicdb_lib::data::database::UpdateEndpoint::Custom(Box::new(move |cmd| match cmd {
@@ -227,6 +255,7 @@ impl Gui {
             scroll_pixels_multiplier,
             scroll_lines_multiplier,
             scroll_pages_multiplier,
+            gui_config: Some(gui_config),
         }
     }
 }
@@ -430,6 +459,7 @@ pub struct DrawInfo<'a> {
         Dragging,
         Option<Box<dyn FnMut(&mut DrawInfo, &mut Graphics2D)>>,
     )>,
+    pub gui_config: &'a GuiConfig,
 }
 
 /// Generic wrapper over anything that implements GuiElemTrait
@@ -817,6 +847,7 @@ impl WindowHandler<GuiEvent> for Gui {
         );
         let mut dblock = self.database.lock().unwrap();
         let mut covers = self.covers.take().unwrap();
+        let cfg = self.gui_config.take().unwrap();
         let mut info = DrawInfo {
             actions: Vec::with_capacity(0),
             pos: Rectangle::new(Vec2::ZERO, self.size.into_f32()),
@@ -830,6 +861,7 @@ impl WindowHandler<GuiEvent> for Gui {
             child_has_keyboard_focus: true,
             line_height: self.line_height,
             dragging: self.dragging.take(),
+            gui_config: &cfg,
         };
         self.gui.draw(&mut info, graphics);
         let actions = std::mem::replace(&mut info.actions, Vec::with_capacity(0));
@@ -864,6 +896,7 @@ impl WindowHandler<GuiEvent> for Gui {
         }
         // cleanup
         drop(info);
+        self.gui_config = Some(cfg);
         self.covers = Some(covers);
         drop(dblock);
         for a in actions {
