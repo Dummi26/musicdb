@@ -651,73 +651,42 @@ impl FilterPanel {
             children: vec![GuiElem::new(ScrollBox::new(
                 GuiElemCfg::default(),
                 crate::gui_base::ScrollBoxSizeUnit::Pixels,
-                vec![
-                    (
-                        GuiElem::new(Button::new(
+                vec![(
+                    GuiElem::new(Button::new(
+                        GuiElemCfg::default(),
+                        move |button| {
+                            let is_case_sensitive = !search_is_case_sensitive
+                                .load(std::sync::atomic::Ordering::Relaxed);
+                            search_is_case_sensitive
+                                .store(is_case_sensitive, std::sync::atomic::Ordering::Relaxed);
+                            *button
+                                .children()
+                                .next()
+                                .unwrap()
+                                .try_as_mut::<Label>()
+                                .unwrap()
+                                .content
+                                .text() = if is_case_sensitive {
+                                FP_CASESENS_Y.to_owned()
+                            } else {
+                                FP_CASESENS_N.to_owned()
+                            };
+                            vec![]
+                        },
+                        vec![GuiElem::new(Label::new(
                             GuiElemCfg::default(),
-                            move |button| {
-                                let is_case_sensitive = !search_is_case_sensitive
-                                    .load(std::sync::atomic::Ordering::Relaxed);
-                                search_is_case_sensitive
-                                    .store(is_case_sensitive, std::sync::atomic::Ordering::Relaxed);
-                                *button
-                                    .children()
-                                    .next()
-                                    .unwrap()
-                                    .try_as_mut::<Label>()
-                                    .unwrap()
-                                    .content
-                                    .text() = if is_case_sensitive {
-                                    FP_CASESENS_Y.to_owned()
-                                } else {
-                                    FP_CASESENS_N.to_owned()
-                                };
-                                vec![]
+                            if is_case_sensitive {
+                                FP_CASESENS_Y.to_owned()
+                            } else {
+                                FP_CASESENS_N.to_owned()
                             },
-                            vec![GuiElem::new(Label::new(
-                                GuiElemCfg::default(),
-                                if is_case_sensitive {
-                                    FP_CASESENS_Y.to_owned()
-                                } else {
-                                    FP_CASESENS_N.to_owned()
-                                },
-                                Color::GRAY,
-                                None,
-                                Vec2::new(0.5, 0.5),
-                            ))],
-                        )),
-                        1.0,
-                    ),
-                    (
-                        GuiElem::new(Button::new(
-                            GuiElemCfg::default(),
-                            |button| {
-                                let text = button
-                                    .children()
-                                    .next()
-                                    .unwrap()
-                                    .try_as_mut::<Label>()
-                                    .unwrap()
-                                    .content
-                                    .text();
-                                *text = if text.len() > 20 {
-                                    "Click for RegEx help".to_owned()
-                                } else {
-                                    "Click to close RegEx help\ntest\nyay".to_owned()
-                                };
-                                vec![]
-                            },
-                            vec![GuiElem::new(Label::new(
-                                GuiElemCfg::default(),
-                                "Click for RegEx help".to_owned(),
-                                Color::GRAY,
-                                None,
-                                Vec2::new(0.5, 0.0),
-                            ))],
-                        )),
-                        1.0,
-                    ),
-                ],
+                            Color::GRAY,
+                            None,
+                            Vec2::new(0.5, 0.5),
+                        ))],
+                    )),
+                    1.0,
+                )],
             ))],
             line_height: 0.0,
         }
