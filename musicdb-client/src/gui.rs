@@ -1142,3 +1142,17 @@ impl GuiCover {
         }
     }
 }
+
+pub fn morph_rect(a: &Rectangle, b: &Rectangle, p: f32) -> Rectangle {
+    let q = 1.0 - p;
+    Rectangle::from_tuples(
+        (
+            a.top_left().x * q + b.top_left().x * p,
+            a.top_left().y * q + b.top_left().y * p,
+        ),
+        (
+            a.bottom_right().x * q + b.bottom_right().x * p,
+            a.bottom_right().y * q + b.bottom_right().y * p,
+        ),
+    )
+}

@@ -1,9 +1,12 @@
 use std::{
+    cmp::Ordering,
     rc::Rc,
     sync::{atomic::AtomicBool, Arc},
 };
 
-use musicdb_lib::data::{database::Database, AlbumId, ArtistId, SongId};
+use musicdb_lib::data::{
+    album::Album, artist::Artist, database::Database, song::Song, AlbumId, ArtistId, SongId,
+};
 use regex::{Regex, RegexBuilder};
 use speedy2d::{
     color::Color,
@@ -31,6 +34,15 @@ with Regex search and drag-n-drop.
 pub struct LibraryBrowser {
     config: GuiElemCfg,
     pub children: Vec<GuiElem>,
+    // - - -
+    library_sorted: Vec<(ArtistId, Vec<SongId>, Vec<(AlbumId, Vec<SongId>)>)>,
+    library_filtered: Vec<(
+        ArtistId,
+        Vec<(SongId, f32)>,
+        Vec<(AlbumId, Vec<(SongId, f32)>, f32)>,
+        f32,
+    )>,
+    // - - -
     search_artist: String,
     search_artist_regex: Option<Regex>,
     search_album: String,
@@ -39,14 +51,24 @@ pub struct LibraryBrowser {
     search_song_regex: Option<Regex>,
     filter_target_state: Rc<AtomicBool>,
     filter_state: f32,
+    library_updated: bool,
+    search_settings_changed: Rc<AtomicBool>,
     search_is_case_sensitive: Rc<AtomicBool>,
     search_was_case_sensitive: bool,
+    search_prefer_start_matches: Rc<AtomicBool>,
+    search_prefers_start_matches: bool,
 }
-fn search_regex_new(pat: &str, case_insensitive: bool) -> Result<Regex, regex::Error> {
-    RegexBuilder::new(pat)
-        .unicode(true)
-        .case_insensitive(case_insensitive)
-        .build()
+fn search_regex_new(pat: &str, case_insensitive: bool) -> Result<Option<Regex>, regex::Error> {
+    if pat.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(
+            RegexBuilder::new(pat)
+                .unicode(true)
+                .case_insensitive(case_insensitive)
+                .build()?,
+        ))
+    }
 }
 const LP_LIB1: f32 = 0.1;
 const LP_LIB2: f32 = 1.0;
@@ -79,6 +101,11 @@ impl LibraryBrowser {
             crate::gui_base::ScrollBoxSizeUnit::Pixels,
             vec![],
         );
+        let search_settings_changed = Rc::new(AtomicBool::new(false));
+        let search_was_case_sensitive = false;
+        let search_is_case_sensitive = Rc::new(AtomicBool::new(search_was_case_sensitive));
+        let search_prefers_start_matches = true;
+        let search_prefer_start_matches = Rc::new(AtomicBool::new(search_prefers_start_matches));
         let filter_target_state = Rc::new(AtomicBool::new(false));
         let fts = Rc::clone(&filter_target_state);
         let filter_button = Button::new(
@@ -98,7 +125,6 @@ impl LibraryBrowser {
                 Vec2::new(0.5, 0.5),
             ))],
         );
-        let search_is_case_sensitive = Rc::new(AtomicBool::new(false));
         Self {
             config,
             children: vec![
@@ -107,8 +133,16 @@ impl LibraryBrowser {
                 GuiElem::new(search_song),
                 GuiElem::new(library_scroll_box),
                 GuiElem::new(filter_button),
-                GuiElem::new(FilterPanel::new(Rc::clone(&search_is_case_sensitive))),
+                GuiElem::new(FilterPanel::new(
+                    Rc::clone(&search_settings_changed),
+                    Rc::clone(&search_is_case_sensitive),
+                    Rc::clone(&search_prefer_start_matches),
+                )),
             ],
+            // - - -
+            library_sorted: vec![],
+            library_filtered: vec![],
+            // - - -
             search_artist: String::new(),
             search_artist_regex: None,
             search_album: String::new(),
@@ -117,8 +151,12 @@ impl LibraryBrowser {
             search_song_regex: None,
             filter_target_state,
             filter_state: 0.0,
+            library_updated: true,
+            search_settings_changed,
             search_is_case_sensitive,
-            search_was_case_sensitive: false,
+            search_was_case_sensitive,
+            search_prefer_start_matches,
+            search_prefers_start_matches,
         }
     }
 }
@@ -145,12 +183,26 @@ impl GuiElemTrait for LibraryBrowser {
         // search
         let mut search_changed = false;
         let mut rebuild_regex = false;
-        let case_sensitive = self
-            .search_is_case_sensitive
-            .load(std::sync::atomic::Ordering::Relaxed);
-        if self.search_was_case_sensitive != case_sensitive {
-            self.search_was_case_sensitive = case_sensitive;
-            rebuild_regex = true;
+        if self
+            .search_settings_changed
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            search_changed = true;
+            self.search_settings_changed
+                .store(false, std::sync::atomic::Ordering::Relaxed);
+            let case_sensitive = self
+                .search_is_case_sensitive
+                .load(std::sync::atomic::Ordering::Relaxed);
+            if self.search_was_case_sensitive != case_sensitive {
+                self.search_was_case_sensitive = case_sensitive;
+                rebuild_regex = true;
+            }
+            let pref_start = self
+                .search_prefer_start_matches
+                .load(std::sync::atomic::Ordering::Relaxed);
+            if self.search_prefers_start_matches != pref_start {
+                self.search_prefers_start_matches = pref_start;
+            }
         }
         {
             let v = &mut self.children[0].try_as_mut::<TextField>().unwrap().children[0]
@@ -161,7 +213,9 @@ impl GuiElemTrait for LibraryBrowser {
                 search_changed = true;
                 self.search_artist = v.get_text().clone();
                 self.search_artist_regex =
-                    search_regex_new(&self.search_artist, !case_sensitive).ok();
+                    search_regex_new(&self.search_artist, !self.search_was_case_sensitive)
+                        .ok()
+                        .flatten();
                 *v.color() = if self.search_artist_regex.is_some() {
                     Color::WHITE
                 } else {
@@ -178,7 +232,9 @@ impl GuiElemTrait for LibraryBrowser {
                 search_changed = true;
                 self.search_album = v.get_text().clone();
                 self.search_album_regex =
-                    search_regex_new(&self.search_album, !case_sensitive).ok();
+                    search_regex_new(&self.search_album, !self.search_was_case_sensitive)
+                        .ok()
+                        .flatten();
                 *v.color() = if self.search_album_regex.is_some() {
                     Color::WHITE
                 } else {
@@ -198,7 +254,10 @@ impl GuiElemTrait for LibraryBrowser {
             if rebuild_regex || v.will_redraw() && self.search_song != *v.get_text() {
                 search_changed = true;
                 self.search_song = v.get_text().clone();
-                self.search_song_regex = search_regex_new(&self.search_song, !case_sensitive).ok();
+                self.search_song_regex =
+                    search_regex_new(&self.search_song, !self.search_was_case_sensitive)
+                        .ok()
+                        .flatten();
                 *v.color() = if self.search_song_regex.is_some() {
                     Color::WHITE
                 } else {
@@ -206,7 +265,7 @@ impl GuiElemTrait for LibraryBrowser {
                 };
             }
         }
-        // filter
+        // filter panel
         let filter_target_state = self
             .filter_target_state
             .load(std::sync::atomic::Ordering::Relaxed);
@@ -244,112 +303,244 @@ impl GuiElemTrait for LibraryBrowser {
             filter_panel.config.enabled = self.filter_state > 0.0;
         }
         // -
-        if self.config.redraw || search_changed || info.pos.size() != self.config.pixel_pos.size() {
+        if self.library_updated {
+            self.library_updated = false;
+            self.update_local_library(&info.database, |(_, a), (_, b)| a.name.cmp(&b.name));
+            search_changed = true;
+        }
+        if search_changed {
+            fn filter(
+                s: &LibraryBrowser,
+                pat: &str,
+                regex: &Option<Regex>,
+                search_text: &String,
+            ) -> f32 {
+                if let Some(r) = regex {
+                    if s.search_prefers_start_matches {
+                        r.find_iter(pat)
+                            .map(|m| match pat[0..m.start()].chars().rev().next() {
+                                // found at the start of h, reaches to the end (whole pattern is part of the match)
+                                None if m.end() == pat.len() => 5.0,
+                                // found at start of h
+                                None => 4.0,
+                                // found after whitespace in h
+                                Some(ch) if ch.is_whitespace() => 3.0,
+                                // found somewhere else in h
+                                _ => 2.0,
+                            })
+                            .fold(0.0, f32::max)
+                    } else {
+                        if r.is_match(pat) {
+                            2.0
+                        } else {
+                            0.0
+                        }
+                    }
+                } else if search_text.is_empty() {
+                    1.0
+                } else {
+                    0.0
+                }
+            }
+            self.filter_local_library(
+                &info.database,
+                |s, artist| filter(s, &artist.name, &s.search_artist_regex, &s.search_artist),
+                |s, album| filter(s, &album.name, &s.search_album_regex, &s.search_album),
+                |s, song| {
+                    if song.album.is_some() || s.search_album.is_empty() {
+                        filter(s, &song.title, &s.search_song_regex, &s.search_song)
+                    } else {
+                        0.0
+                    }
+                },
+            );
+            self.config.redraw = true;
+        }
+        if self.config.redraw || info.pos.size() != self.config.pixel_pos.size() {
             self.config.redraw = false;
-            self.update_list(&info.database, info.line_height);
+            self.update_ui(&info.database, info.line_height);
         }
     }
     fn updated_library(&mut self) {
-        self.config.redraw = true;
+        self.library_updated = true;
     }
 }
 impl LibraryBrowser {
-    fn update_list(&mut self, db: &Database, line_height: f32) {
-        let song_height = line_height;
-        let artist_height = song_height * 3.0;
-        let album_height = song_height * 2.0;
-        // sort artists by name
+    /// Sets `self.library_sorted` based on the contents of the `Database`.
+    fn update_local_library(
+        &mut self,
+        db: &Database,
+        sort_artists: impl FnMut(&(&ArtistId, &Artist), &(&ArtistId, &Artist)) -> Ordering,
+    ) {
         let mut artists = db.artists().iter().collect::<Vec<_>>();
-        artists.sort_by_key(|v| &v.1.name);
-        let mut gui_elements = vec![];
-        for (artist_id, artist) in artists {
-            if self.search_artist.is_empty()
-                || self
-                    .search_artist_regex
-                    .as_ref()
-                    .is_some_and(|regex| regex.is_match(&artist.name))
-            {
-                let mut artist_gui = Some((
-                    GuiElem::new(ListArtist::new(
-                        GuiElemCfg::default(),
-                        *artist_id,
-                        artist.name.clone(),
-                    )),
-                    artist_height,
-                ));
-                if self.search_album.is_empty() {
-                    for song_id in &artist.singles {
-                        if let Some(song) = db.songs().get(song_id) {
-                            if self.search_song.is_empty()
-                                || self
-                                    .search_song_regex
-                                    .as_ref()
-                                    .is_some_and(|regex| regex.is_match(&song.title))
-                            {
-                                if let Some(g) = artist_gui.take() {
-                                    gui_elements.push(g);
-                                }
-                                gui_elements.push((
-                                    GuiElem::new(ListSong::new(
-                                        GuiElemCfg::default(),
-                                        *song_id,
-                                        song.title.clone(),
-                                    )),
-                                    song_height,
-                                ));
-                            }
-                        }
-                    }
-                }
-                for album_id in &artist.albums {
-                    if let Some(album) = db.albums().get(album_id) {
-                        if self.search_album.is_empty()
-                            || self
-                                .search_album_regex
-                                .as_ref()
-                                .is_some_and(|regex| regex.is_match(&album.name))
-                        {
-                            let mut album_gui = Some((
-                                GuiElem::new(ListAlbum::new(
-                                    GuiElemCfg::default(),
-                                    *album_id,
-                                    album.name.clone(),
-                                )),
-                                album_height,
-                            ));
-                            for song_id in &album.songs {
+        artists.sort_unstable_by(sort_artists);
+        self.library_sorted = artists
+            .into_iter()
+            .map(|(ar_id, artist)| {
+                let singles = artist.singles.iter().map(|id| *id).collect();
+                let albums = artist
+                    .albums
+                    .iter()
+                    .map(|id| {
+                        let songs = if let Some(album) = db.albums().get(id) {
+                            album.songs.iter().map(|id| *id).collect()
+                        } else {
+                            eprintln!("[warn] No album with id {id} found in db!");
+                            vec![]
+                        };
+                        (*id, songs)
+                    })
+                    .collect();
+                (*ar_id, singles, albums)
+            })
+            .collect();
+    }
+    /// Sets `self.library_filtered` using the value of `self.library_sorted` and filter functions.
+    /// Return values of the filter functions:
+    /// 0.0 -> don't show
+    /// 1.0 -> neutral
+    /// anything else -> priority (determines how things will be sorted)
+    /// Album Value = max(Song Values) * AlbumFilterVal
+    /// Artist Value = max(Album Values) * ArtistFilterVal
+    fn filter_local_library(
+        &mut self,
+        db: &Database,
+        filter_artist: impl Fn(&Self, &Artist) -> f32,
+        filter_album: impl Fn(&Self, &Album) -> f32,
+        filter_song: impl Fn(&Self, &Song) -> f32,
+    ) {
+        let mut a = vec![];
+        for (artist_id, singles, albums) in self.library_sorted.iter() {
+            if let Some(artist) = db.artists().get(artist_id) {
+                let mut filterscore_artist = filter_artist(self, artist);
+                if filterscore_artist > 0.0 {
+                    let mut max_score_in_artist = 0.0;
+                    if filterscore_artist > 0.0 {
+                        let mut s = singles
+                            .iter()
+                            .filter_map(|song_id| {
                                 if let Some(song) = db.songs().get(song_id) {
-                                    if self.search_song.is_empty()
-                                        || self
-                                            .search_song_regex
-                                            .as_ref()
-                                            .is_some_and(|regex| regex.is_match(&song.title))
-                                    {
-                                        if let Some(g) = artist_gui.take() {
-                                            gui_elements.push(g);
+                                    let filterscore_song = filter_song(self, song);
+                                    if filterscore_song > 0.0 {
+                                        if filterscore_song > max_score_in_artist {
+                                            max_score_in_artist = filterscore_song;
                                         }
-                                        if let Some(g) = album_gui.take() {
-                                            gui_elements.push(g);
-                                        }
-                                        gui_elements.push((
-                                            GuiElem::new(ListSong::new(
-                                                GuiElemCfg::default(),
-                                                *song_id,
-                                                song.title.clone(),
-                                            )),
-                                            song_height,
-                                        ));
+                                        return Some((*song_id, filterscore_song));
                                     }
                                 }
-                            }
+                                None
+                            })
+                            .collect::<Vec<_>>();
+                        s.sort_by(|(.., a), (.., b)| b.partial_cmp(a).unwrap_or(Ordering::Equal));
+                        let mut al = albums
+                            .iter()
+                            .filter_map(|(album_id, songs)| {
+                                if let Some(album) = db.albums().get(album_id) {
+                                    let mut filterscore_album = filter_album(self, album);
+                                    if filterscore_album > 0.0 {
+                                        let mut max_score_in_album = 0.0;
+                                        let mut s = songs
+                                            .iter()
+                                            .filter_map(|song_id| {
+                                                if let Some(song) = db.songs().get(song_id) {
+                                                    let filterscore_song = filter_song(self, song);
+                                                    if filterscore_song > 0.0 {
+                                                        if filterscore_song > max_score_in_album {
+                                                            max_score_in_album = filterscore_song;
+                                                        }
+                                                        return Some((*song_id, filterscore_song));
+                                                    }
+                                                }
+                                                None
+                                            })
+                                            .collect::<Vec<_>>();
+                                        s.sort_by(|(.., a), (.., b)| {
+                                            b.partial_cmp(a).unwrap_or(Ordering::Equal)
+                                        });
+                                        filterscore_album *= max_score_in_album;
+                                        if filterscore_album > 0.0 {
+                                            if filterscore_album > max_score_in_artist {
+                                                max_score_in_artist = filterscore_album;
+                                            }
+                                            return Some((*album_id, s, filterscore_album));
+                                        }
+                                    }
+                                }
+                                None
+                            })
+                            .collect::<Vec<_>>();
+                        al.sort_by(|(.., a), (.., b)| b.partial_cmp(a).unwrap_or(Ordering::Equal));
+                        filterscore_artist *= max_score_in_artist;
+                        if filterscore_artist > 0.0 {
+                            a.push((*artist_id, s, al, filterscore_artist));
                         }
                     }
                 }
             }
         }
-        let scroll_box = self.children[3].try_as_mut::<ScrollBox>().unwrap();
-        scroll_box.children = gui_elements;
-        scroll_box.config_mut().redraw = true;
+        a.sort_by(|(.., a), (.., b)| b.partial_cmp(a).unwrap_or(Ordering::Equal));
+        self.library_filtered = a;
+    }
+    /// Sets the contents of the `ScrollBox` based on `self.library_filtered`.
+    fn update_ui(&mut self, db: &Database, line_height: f32) {
+        let mut elems = vec![];
+        for (artist_id, singles, albums, _artist_filterscore) in self.library_filtered.iter() {
+            elems.push(self.build_ui_element_artist(*artist_id, db, line_height));
+            for (song_id, _song_filterscore) in singles {
+                elems.push(self.build_ui_element_song(*song_id, db, line_height));
+            }
+            for (album_id, songs, _album_filterscore) in albums {
+                elems.push(self.build_ui_element_album(*album_id, db, line_height));
+                for (song_id, _song_filterscore) in songs {
+                    elems.push(self.build_ui_element_song(*song_id, db, line_height));
+                }
+            }
+        }
+        let library_scroll_box = self.children[3].try_as_mut::<ScrollBox>().unwrap();
+        library_scroll_box.children = elems;
+        library_scroll_box.config_mut().redraw = true;
+    }
+    fn build_ui_element_artist(&self, id: ArtistId, db: &Database, h: f32) -> (GuiElem, f32) {
+        (
+            GuiElem::new(ListArtist::new(
+                GuiElemCfg::default(),
+                id,
+                if let Some(v) = db.artists().get(&id) {
+                    v.name.to_owned()
+                } else {
+                    format!("[ Artist #{id} ]")
+                },
+            )),
+            h * 2.5,
+        )
+    }
+    fn build_ui_element_album(&self, id: ArtistId, db: &Database, h: f32) -> (GuiElem, f32) {
+        (
+            GuiElem::new(ListAlbum::new(
+                GuiElemCfg::default(),
+                id,
+                if let Some(v) = db.albums().get(&id) {
+                    v.name.to_owned()
+                } else {
+                    format!("[ Album #{id} ]")
+                },
+            )),
+            h * 1.5,
+        )
+    }
+    fn build_ui_element_song(&self, id: ArtistId, db: &Database, h: f32) -> (GuiElem, f32) {
+        (
+            GuiElem::new(ListSong::new(
+                GuiElemCfg::default(),
+                id,
+                if let Some(v) = db.songs().get(&id) {
+                    v.title.to_owned()
+                } else {
+                    format!("[ Song #{id} ]")
+                },
+            )),
+            h,
+        )
     }
 }
 
@@ -407,8 +598,8 @@ impl GuiElemTrait for ListArtist {
             }
         }
         self.mouse_pos = Vec2::new(
-            info.mouse_pos.x - self.config.pixel_pos.top_left().x,
-            info.mouse_pos.y - self.config.pixel_pos.top_left().y,
+            info.mouse_pos.x - info.pos.top_left().x,
+            info.mouse_pos.y - info.pos.top_left().y,
         );
     }
     fn mouse_down(&mut self, button: MouseButton) -> Vec<GuiAction> {
@@ -501,8 +692,8 @@ impl GuiElemTrait for ListAlbum {
             }
         }
         self.mouse_pos = Vec2::new(
-            info.mouse_pos.x - self.config.pixel_pos.top_left().x,
-            info.mouse_pos.y - self.config.pixel_pos.top_left().y,
+            info.mouse_pos.x - info.pos.top_left().x,
+            info.mouse_pos.y - info.pos.top_left().y,
         );
     }
     fn mouse_down(&mut self, button: MouseButton) -> Vec<GuiAction> {
@@ -595,8 +786,8 @@ impl GuiElemTrait for ListSong {
             }
         }
         self.mouse_pos = Vec2::new(
-            info.mouse_pos.x - self.config.pixel_pos.top_left().x,
-            info.mouse_pos.y - self.config.pixel_pos.top_left().y,
+            info.mouse_pos.x - info.pos.top_left().x,
+            info.mouse_pos.y - info.pos.top_left().y,
         );
     }
     fn mouse_down(&mut self, button: MouseButton) -> Vec<GuiAction> {
@@ -641,52 +832,102 @@ struct FilterPanel {
     children: Vec<GuiElem>,
     line_height: f32,
 }
-const FP_CASESENS_N: &'static str = "Switch to case-sensitive search";
-const FP_CASESENS_Y: &'static str = "Switch to case-insensitive search";
+const FP_CASESENS_N: &'static str = "search is case-insensitive";
+const FP_CASESENS_Y: &'static str = "search is case-sensitive!";
+const FP_PREFSTART_N: &'static str = "simple search";
+const FP_PREFSTART_Y: &'static str = "will prefer matches at the start of a word";
 impl FilterPanel {
-    pub fn new(search_is_case_sensitive: Rc<AtomicBool>) -> Self {
+    pub fn new(
+        search_settings_changed: Rc<AtomicBool>,
+        search_is_case_sensitive: Rc<AtomicBool>,
+        search_prefer_start_matches: Rc<AtomicBool>,
+    ) -> Self {
         let is_case_sensitive = search_is_case_sensitive.load(std::sync::atomic::Ordering::Relaxed);
+        let prefer_start_matches =
+            search_prefer_start_matches.load(std::sync::atomic::Ordering::Relaxed);
+        let ssc1 = Rc::clone(&search_settings_changed);
+        let ssc2 = search_settings_changed;
         Self {
             config: GuiElemCfg::default().disabled(),
             children: vec![GuiElem::new(ScrollBox::new(
                 GuiElemCfg::default(),
                 crate::gui_base::ScrollBoxSizeUnit::Pixels,
-                vec![(
-                    GuiElem::new(Button::new(
-                        GuiElemCfg::default(),
-                        move |button| {
-                            let is_case_sensitive = !search_is_case_sensitive
-                                .load(std::sync::atomic::Ordering::Relaxed);
-                            search_is_case_sensitive
-                                .store(is_case_sensitive, std::sync::atomic::Ordering::Relaxed);
-                            *button
-                                .children()
-                                .next()
-                                .unwrap()
-                                .try_as_mut::<Label>()
-                                .unwrap()
-                                .content
-                                .text() = if is_case_sensitive {
-                                FP_CASESENS_Y.to_owned()
-                            } else {
-                                FP_CASESENS_N.to_owned()
-                            };
-                            vec![]
-                        },
-                        vec![GuiElem::new(Label::new(
+                vec![
+                    (
+                        GuiElem::new(Button::new(
                             GuiElemCfg::default(),
-                            if is_case_sensitive {
-                                FP_CASESENS_Y.to_owned()
-                            } else {
-                                FP_CASESENS_N.to_owned()
+                            move |button| {
+                                let v = !search_is_case_sensitive
+                                    .load(std::sync::atomic::Ordering::Relaxed);
+                                search_is_case_sensitive
+                                    .store(v, std::sync::atomic::Ordering::Relaxed);
+                                ssc1.store(true, std::sync::atomic::Ordering::Relaxed);
+                                *button
+                                    .children()
+                                    .next()
+                                    .unwrap()
+                                    .try_as_mut::<Label>()
+                                    .unwrap()
+                                    .content
+                                    .text() = if v {
+                                    FP_CASESENS_Y.to_owned()
+                                } else {
+                                    FP_CASESENS_N.to_owned()
+                                };
+                                vec![]
                             },
-                            Color::GRAY,
-                            None,
-                            Vec2::new(0.5, 0.5),
-                        ))],
-                    )),
-                    1.0,
-                )],
+                            vec![GuiElem::new(Label::new(
+                                GuiElemCfg::default(),
+                                if is_case_sensitive {
+                                    FP_CASESENS_Y.to_owned()
+                                } else {
+                                    FP_CASESENS_N.to_owned()
+                                },
+                                Color::GRAY,
+                                None,
+                                Vec2::new(0.5, 0.5),
+                            ))],
+                        )),
+                        1.0,
+                    ),
+                    (
+                        GuiElem::new(Button::new(
+                            GuiElemCfg::default(),
+                            move |button| {
+                                let v = !search_prefer_start_matches
+                                    .load(std::sync::atomic::Ordering::Relaxed);
+                                search_prefer_start_matches
+                                    .store(v, std::sync::atomic::Ordering::Relaxed);
+                                ssc2.store(true, std::sync::atomic::Ordering::Relaxed);
+                                *button
+                                    .children()
+                                    .next()
+                                    .unwrap()
+                                    .try_as_mut::<Label>()
+                                    .unwrap()
+                                    .content
+                                    .text() = if v {
+                                    FP_PREFSTART_Y.to_owned()
+                                } else {
+                                    FP_PREFSTART_N.to_owned()
+                                };
+                                vec![]
+                            },
+                            vec![GuiElem::new(Label::new(
+                                GuiElemCfg::default(),
+                                if prefer_start_matches {
+                                    FP_PREFSTART_Y.to_owned()
+                                } else {
+                                    FP_PREFSTART_N.to_owned()
+                                },
+                                Color::GRAY,
+                                None,
+                                Vec2::new(0.5, 0.5),
+                            ))],
+                        )),
+                        1.0,
+                    ),
+                ],
             ))],
             line_height: 0.0,
         }

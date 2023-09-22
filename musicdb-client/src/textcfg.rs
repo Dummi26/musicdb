@@ -39,7 +39,15 @@ impl TextBuilder {
     pub fn gen(&self, db: &Database, current_song: Option<&Song>) -> Vec<Vec<(Content, f32, f32)>> {
         let mut out = vec![];
         let mut line = vec![];
-        self.gen_to(db, current_song, &mut out, &mut line, &mut 1.0, &mut 1.0);
+        self.gen_to(
+            db,
+            current_song,
+            &mut out,
+            &mut line,
+            &mut 1.0,
+            &mut 1.0,
+            &mut Color::WHITE,
+        );
         if !line.is_empty() {
             out.push(line)
         }
@@ -53,11 +61,11 @@ impl TextBuilder {
         line: &mut Vec<(Content, f32, f32)>,
         scale: &mut f32,
         align: &mut f32,
+        color: &mut Color,
     ) {
-        let mut color = Color::WHITE;
         macro_rules! push {
             ($e:expr) => {
-                line.push((Content::new($e, color), *scale, *align))
+                line.push((Content::new($e, *color), *scale, *align))
             };
         }
         fn all_general<'a>(
@@ -83,7 +91,7 @@ impl TextBuilder {
         for part in &self.0 {
             match part {
                 TextPart::LineBreak => out.push(std::mem::replace(line, vec![])),
-                TextPart::SetColor(c) => color = *c,
+                TextPart::SetColor(c) => *color = *c,
                 TextPart::SetScale(v) => *scale = *v,
                 TextPart::SetHeightAlign(v) => *align = *v,
                 TextPart::Literal(s) => push!(s.to_owned()),
@@ -141,9 +149,9 @@ impl TextBuilder {
                 }
                 TextPart::If(condition, yes, no) => {
                     if !condition.gen(db, current_song).is_empty() {
-                        yes.gen_to(db, current_song, out, line, scale, align);
+                        yes.gen_to(db, current_song, out, line, scale, align, color);
                     } else {
-                        no.gen_to(db, current_song, out, line, scale, align);
+                        no.gen_to(db, current_song, out, line, scale, align, color);
                     }
                 }
             }

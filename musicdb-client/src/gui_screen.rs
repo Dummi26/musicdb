@@ -1,13 +1,10 @@
-use std::{
-    io::{Read, Write},
-    time::{Duration, Instant},
-};
+use std::time::Instant;
 
-use musicdb_lib::server::get;
+use musicdb_lib::data::queue::QueueContent;
 use speedy2d::{color::Color, dimen::Vec2, shape::Rectangle, Graphics2D};
 
 use crate::{
-    gui::{DrawInfo, GuiAction, GuiElem, GuiElemCfg, GuiElemTrait},
+    gui::{morph_rect, DrawInfo, GuiAction, GuiElem, GuiElemCfg, GuiElemTrait},
     gui_base::{Button, Panel},
     gui_library::LibraryBrowser,
     gui_playback::{CurrentSong, PlayPauseToggle},
@@ -239,7 +236,12 @@ impl GuiElemTrait for GuiScreen {
             // resizing prevents idle, but doesn't un-idle
             self.not_idle();
         }
-        self.idle_check();
+        if !(!info.database.playing
+            || matches!(info.database.queue.content(), QueueContent::Folder(_, v, _) if v.is_empty()))
+        {
+            // skip idle_check if paused or queue is empty
+            self.idle_check();
+        }
         // request_redraw for animations
         if self.idle.1.is_some() || self.settings.1.is_some() || self.edit_panel.1.is_some() {
             if let Some(h) = &info.helper {
@@ -272,7 +274,7 @@ impl GuiElemTrait for GuiScreen {
                 .any_mut()
                 .downcast_mut::<StatusBar>()
                 .unwrap()
-                .idle_mode = p1;
+                .idle_mode = p;
         }
         // animations: settings
         if self.settings.1.is_some() {
@@ -317,24 +319,33 @@ pub struct StatusBar {
     children: Vec<GuiElem>,
     idle_mode: f32,
     idle_prev: f32,
+    pos_current_song_s: Rectangle,
+    pos_current_song_l: Rectangle,
+    pos_play_pause_s: Rectangle,
+    pos_play_pause_l: Rectangle,
 }
 impl StatusBar {
     pub fn new(config: GuiElemCfg, playing: bool) -> Self {
+        let pos_current_song_s = Rectangle::new(Vec2::ZERO, Vec2::new(0.8, 1.0));
+        let pos_current_song_l = Rectangle::new(Vec2::ZERO, Vec2::new(1.0, 1.0));
+        let pos_play_pause_s = Rectangle::from_tuples((0.85, 0.0), (0.95, 1.0));
+        let pos_play_pause_l = Rectangle::from_tuples((0.85, 0.8), (0.95, 1.0));
         Self {
             config,
             children: vec![
-                GuiElem::new(CurrentSong::new(GuiElemCfg::at(Rectangle::new(
-                    Vec2::ZERO,
-                    Vec2::new(0.8, 1.0),
-                )))),
+                GuiElem::new(CurrentSong::new(GuiElemCfg::at(pos_current_song_s.clone()))),
                 GuiElem::new(PlayPauseToggle::new(
-                    GuiElemCfg::at(Rectangle::from_tuples((0.85, 0.0), (0.95, 1.0))),
+                    GuiElemCfg::at(pos_play_pause_s.clone()),
                     playing,
                 )),
                 GuiElem::new(Panel::new(GuiElemCfg::default(), vec![])),
             ],
             idle_mode: 0.0,
             idle_prev: 0.0,
+            pos_current_song_s,
+            pos_current_song_l,
+            pos_play_pause_s,
+            pos_play_pause_l,
         }
     }
     const fn index_current_song() -> usize {
@@ -394,17 +405,22 @@ impl GuiElemTrait for StatusBar {
                 self.set_background(Some(Color::BLACK));
             }
             // position the text
+            let l = self.idle_mode;
             let current_song = self.children[Self::index_current_song()]
                 .inner
                 .any_mut()
                 .downcast_mut::<CurrentSong>()
                 .unwrap();
             current_song.set_idle_mode(self.idle_mode);
+            current_song.config_mut().pos =
+                morph_rect(&self.pos_current_song_s, &self.pos_current_song_l, l);
             let play_pause = self.children[Self::index_play_pause_toggle()]
                 .inner
                 .any_mut()
                 .downcast_mut::<PlayPauseToggle>()
                 .unwrap();
+            play_pause.config_mut().pos =
+                morph_rect(&self.pos_play_pause_s, &self.pos_play_pause_l, l);
             // - - - - -
             self.idle_prev = self.idle_mode;
         }

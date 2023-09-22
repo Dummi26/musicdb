@@ -7,8 +7,10 @@ use musicdb_lib::{
 use speedy2d::{color::Color, dimen::Vec2, shape::Rectangle, window::MouseButton};
 
 use crate::{
-    gui::{adjust_area, adjust_pos, GuiAction, GuiCover, GuiElem, GuiElemCfg, GuiElemTrait},
-    gui_text::{AdvancedLabel, Content, Label},
+    gui::{
+        adjust_area, adjust_pos, morph_rect, GuiAction, GuiCover, GuiElem, GuiElemCfg, GuiElemTrait,
+    },
+    gui_text::AdvancedLabel,
 };
 
 /*
@@ -25,25 +27,45 @@ pub struct CurrentSong {
     prev_song: Option<SongId>,
     cover_pos: Rectangle,
     covers: VecDeque<(CoverId, Option<(bool, Instant)>)>,
+    idle_changed: bool,
+    idle: f32,
     text_updated: Option<Instant>,
+    text_pos_s: Rectangle,
+    text_pos_l: Rectangle,
+    cover_pos_s: Rectangle,
+    cover_pos_l: Rectangle,
 }
 impl CurrentSong {
     pub fn new(config: GuiElemCfg) -> Self {
+        let text_pos_s = Rectangle::from_tuples((0.4, 0.0), (1.0, 1.0));
+        let text_pos_l = Rectangle::from_tuples((0.05, 0.0), (0.95, 0.25));
+        let cover_pos_s = Rectangle::from_tuples((0.0, 0.0), (0.1, 1.0));
+        let cover_pos_l = Rectangle::from_tuples((0.0, 0.26), (0.4, 0.80));
         Self {
             config,
             children: vec![GuiElem::new(AdvancedLabel::new(
-                GuiElemCfg::at(Rectangle::from_tuples((0.4, 0.0), (1.0, 1.0))),
+                GuiElemCfg::at(text_pos_s.clone()),
                 Vec2::new(0.0, 0.5),
                 vec![],
             ))],
             cover_pos: Rectangle::new(Vec2::ZERO, Vec2::ZERO),
             covers: VecDeque::new(),
             prev_song: None,
+            idle_changed: false,
+            idle: 0.0,
             text_updated: None,
+            text_pos_s,
+            text_pos_l,
+            cover_pos_s,
+            cover_pos_l,
         }
     }
     pub fn set_idle_mode(&mut self, idle_mode: f32) {
-        // ...
+        self.idle = idle_mode;
+        self.idle_changed = true;
+        let label = self.children[0].try_as_mut::<AdvancedLabel>().unwrap();
+        label.config_mut().pos = morph_rect(&self.text_pos_s, &self.text_pos_l, idle_mode);
+        label.align = Vec2::new(0.5 * idle_mode, 0.5);
     }
     fn color_title(a: f32) -> Color {
         Self::color_with_alpha(&Color::WHITE, a)
@@ -153,33 +175,58 @@ impl GuiElemTrait for CurrentSong {
                 prog = 1.0;
                 self.text_updated = None;
             }
-            self.children[0]
+            for c in self.children[0]
                 .try_as_mut::<AdvancedLabel>()
                 .unwrap()
                 .content
                 .iter_mut()
-                .count();
+            {
+                for c in c {
+                    *c.0.color() = Self::color_with_alpha(c.0.color(), prog);
+                }
+            }
         }
-        // drawing stuff
-        if self.config.pixel_pos.size() != info.pos.size() {
-            let leftright = 0.05;
-            let topbottom = 0.05;
-            let mut width = 0.3;
-            let mut height = 1.0 - topbottom * 2.0;
-            if width * info.pos.width() < height * info.pos.height() {
-                height = width * info.pos.width() / info.pos.height();
-            } else {
-                width = height * info.pos.height() / info.pos.width();
-            }
-            let right = leftright + width + leftright;
-            self.cover_pos = Rectangle::from_tuples(
-                (leftright, 0.5 - 0.5 * height),
-                (leftright + width, 0.5 + 0.5 * height),
+        // calculate cover pos
+        if self.idle_changed || self.config.pixel_pos.size() != info.pos.size() {
+            let cw = (info.pos.height() / info.pos.width()).min(0.5);
+            let padl = 0.1;
+            let padr = 1.0 - padl;
+            let padp = (self.idle * 1.5).min(1.0);
+            self.cover_pos_s =
+                Rectangle::from_tuples((cw * padl, padl + 0.7 * padp), (cw * padr, padr));
+            self.text_pos_s = Rectangle::from_tuples((cw, 0.0), (1.0, 1.0));
+            // to resize the text
+            self.set_idle_mode(self.idle);
+            self.idle_changed = false;
+            // cover pos
+            let pixel_pos = adjust_area(
+                &info.pos,
+                &morph_rect(&self.cover_pos_s, &self.cover_pos_l, self.idle),
             );
-            for el in self.children.iter_mut().take(2) {
-                let pos = &mut el.inner.config_mut().pos;
-                *pos = Rectangle::new(Vec2::new(right, pos.top_left().y), *pos.bottom_right());
-            }
+            let pad = 0.5 * (pixel_pos.width() - pixel_pos.height());
+            self.cover_pos = if pad >= 0.0 {
+                Rectangle::from_tuples(
+                    (
+                        pixel_pos.top_left().x + pad - info.pos.top_left().x,
+                        pixel_pos.top_left().y - info.pos.top_left().y,
+                    ),
+                    (
+                        pixel_pos.bottom_right().x - pad - info.pos.top_left().x,
+                        pixel_pos.bottom_right().y - info.pos.top_left().y,
+                    ),
+                )
+            } else {
+                Rectangle::from_tuples(
+                    (
+                        pixel_pos.top_left().x - info.pos.top_left().x,
+                        pixel_pos.top_left().y - pad - info.pos.top_left().y,
+                    ),
+                    (
+                        pixel_pos.bottom_right().x - info.pos.top_left().x,
+                        pixel_pos.bottom_right().y + pad - info.pos.top_left().y,
+                    ),
+                )
+            };
         }
         let mut cover_to_remove = None;
         for (cover_index, (cover_id, time)) in self.covers.iter_mut().enumerate() {
@@ -214,14 +261,12 @@ impl GuiElemTrait for CurrentSong {
                 if let Some(cover) = cover.get_init(g) {
                     let rect = Rectangle::new(
                         Vec2::new(
-                            info.pos.top_left().x + info.pos.width() * self.cover_pos.top_left().x,
-                            info.pos.top_left().y + info.pos.height() * self.cover_pos.top_left().y,
+                            info.pos.top_left().x + self.cover_pos.top_left().x,
+                            info.pos.top_left().y + self.cover_pos.top_left().y,
                         ),
                         Vec2::new(
-                            info.pos.top_left().x
-                                + info.pos.width() * self.cover_pos.bottom_right().x,
-                            info.pos.top_left().y
-                                + info.pos.height() * self.cover_pos.bottom_right().y,
+                            info.pos.top_left().x + self.cover_pos.bottom_right().x,
+                            info.pos.top_left().y + self.cover_pos.bottom_right().y,
                         ),
                     );
                     if pos == 1.0 {
