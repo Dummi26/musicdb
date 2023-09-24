@@ -1,7 +1,7 @@
 use std::{
     fmt::Display,
     io::{Read, Write},
-    path::{Path, PathBuf},
+    path::PathBuf,
     sync::{Arc, Mutex},
     thread::JoinHandle,
 };

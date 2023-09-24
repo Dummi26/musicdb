@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 use musicdb_lib::{
     data::{
         database::Database,
-        queue::{Queue, QueueContent},
+        queue::{Queue, QueueContent, ShuffleState},
         song::Song,
         AlbumId, ArtistId,
     },
@@ -116,7 +116,7 @@ impl QueueViewer {
                                 GuiElemCfg::at(Rectangle::from_tuples((0.5, 0.5), (1.0, 1.0)))
                                     .w_mouse(),
                                 vec![],
-                                QueueContent::Shuffle(0, vec![], vec![], 0).into(),
+                                QueueContent::Shuffle { inner: Box::new(QueueContent::Folder(0, vec![], String::new()).into()), state: ShuffleState::NotShuffled }.into(),
                                 false,
                             )
                             .alwayscopy(),
@@ -237,9 +237,9 @@ fn queue_gui(
         }
         QueueContent::Loop(_, _, inner) => {
             let mut p = path.clone();
+            p.push(0);
             let mut p1 = path.clone();
             let p2 = p1.pop().unwrap_or(0) + 1;
-            p.push(0);
             target.push((
                 GuiElem::new(QueueLoop::new(cfg.clone(), path, queue.clone(), current)),
                 line_height * 0.8,
@@ -262,7 +262,7 @@ fn queue_gui(
         }
         QueueContent::Random(q) => {
             target.push((
-                GuiElem::new(QueueRandom::new(cfg, path.clone(), queue.clone(), current)),
+                GuiElem::new(QueueRandom::new(cfg.clone(), path.clone(), queue.clone(), current)),
                 line_height,
             ));
             for (i, inner) in q.iter().enumerate() {
@@ -280,29 +280,37 @@ fn queue_gui(
                     false,
                 );
             }
-        }
-        QueueContent::Shuffle(c, map, elems, _) => {
+            let mut p1 = path.clone();
+            let p2 = p1.pop().unwrap_or(0) + 1;
             target.push((
-                GuiElem::new(QueueShuffle::new(cfg, path.clone(), queue.clone(), current)),
+                GuiElem::new(QueueIndentEnd::new(cfg, (p1, p2))),
+                line_height * 0.4,
+            ));
+        }
+        QueueContent::Shuffle { inner, state: _ } => {
+            target.push((
+                GuiElem::new(QueueShuffle::new(cfg.clone(), path.clone(), queue.clone(), current)),
                 line_height * 0.8,
             ));
-            for (i, inner) in map.iter().enumerate() {
-                if let Some(inner) = elems.get(*inner) {
-                    let mut p = path.clone();
-                    p.push(i);
-                    queue_gui(
-                        inner,
-                        db,
-                        depth + depth_inc_by,
-                        depth_inc_by,
-                        line_height,
-                        target,
-                        p,
-                        current && i == *c,
-                        false,
-                    );
-                }
-            }
+            let mut p = path.clone();
+            p.push(0);
+            queue_gui(
+                inner,
+                db,
+                depth + depth_inc_by,
+                depth_inc_by,
+                line_height,
+                target,
+                p,
+                current,
+                true,
+            );
+            let mut p1 = path.clone();
+            let p2 = p1.pop().unwrap_or(0) + 1;
+            target.push((
+                GuiElem::new(QueueIndentEnd::new(cfg, (p1, p2))),
+                line_height * 0.4,
+            ));
         }
     }
 }
@@ -1101,7 +1109,7 @@ impl QueueShuffle {
             children: vec![GuiElem::new(Label::new(
                 GuiElemCfg::default(),
                 match queue.content() {
-                    QueueContent::Shuffle(..) => {
+                    QueueContent::Shuffle { .. } => {
                         format!("shuffle")
                     }
                     _ => "[???]".to_string(),
@@ -1200,7 +1208,8 @@ impl GuiElemTrait for QueueShuffle {
     }
     fn dragged(&mut self, dragged: Dragging) -> Vec<GuiAction> {
         if !self.always_copy {
-            let p = self.path.clone();
+            let mut p = self.path.clone();
+            p.push(0);
             dragged_add_to_queue(dragged, move |q| Command::QueueAdd(p, q))
         } else {
             vec![]

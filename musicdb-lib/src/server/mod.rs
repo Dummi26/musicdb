@@ -37,7 +37,7 @@ pub enum Command {
     QueueInsert(Vec<usize>, usize, Queue),
     QueueRemove(Vec<usize>),
     QueueGoto(Vec<usize>),
-    QueueSetShuffle(Vec<usize>, Vec<usize>, usize),
+    QueueSetShuffle(Vec<usize>, Vec<usize>),
     /// .id field is ignored!
     AddSong(Song),
     /// .id field is ignored!
@@ -232,11 +232,10 @@ impl ToFromBytes for Command {
                 s.write_all(&[0b00011011])?;
                 index.to_bytes(s)?;
             }
-            Self::QueueSetShuffle(path, map, next) => {
+            Self::QueueSetShuffle(path, map) => {
                 s.write_all(&[0b10011011])?;
                 path.to_bytes(s)?;
                 map.to_bytes(s)?;
-                next.to_bytes(s)?;
             }
             Self::AddSong(song) => {
                 s.write_all(&[0b01010000])?;
@@ -313,11 +312,9 @@ impl ToFromBytes for Command {
             ),
             0b00011001 => Self::QueueRemove(ToFromBytes::from_bytes(s)?),
             0b00011011 => Self::QueueGoto(ToFromBytes::from_bytes(s)?),
-            0b10011011 => Self::QueueSetShuffle(
-                ToFromBytes::from_bytes(s)?,
-                ToFromBytes::from_bytes(s)?,
-                ToFromBytes::from_bytes(s)?,
-            ),
+            0b10011011 => {
+                Self::QueueSetShuffle(ToFromBytes::from_bytes(s)?, ToFromBytes::from_bytes(s)?)
+            }
             0b01010000 => Self::AddSong(ToFromBytes::from_bytes(s)?),
             0b01010011 => Self::AddAlbum(ToFromBytes::from_bytes(s)?),
             0b01011100 => Self::AddArtist(ToFromBytes::from_bytes(s)?),

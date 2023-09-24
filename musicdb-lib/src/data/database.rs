@@ -12,7 +12,7 @@ use crate::{load::ToFromBytes, server::Command};
 use super::{
     album::Album,
     artist::Artist,
-    queue::{Queue, QueueContent},
+    queue::{Queue, QueueContent, ShuffleState},
     song::Song,
     AlbumId, ArtistId, CoverId, DatabaseLocation, SongId,
 };
@@ -250,42 +250,68 @@ impl Database {
             }
             Command::SyncDatabase(a, b, c) => self.sync(a, b, c),
             Command::QueueUpdate(index, new_data) => {
-                if let Some(v) = self.queue.get_item_at_index_mut(&index, 0) {
+                let mut actions = vec![];
+                if let Some(v) = self.queue.get_item_at_index_mut(&index, 0, &mut actions) {
                     *v = new_data;
                 }
+                Queue::handle_actions(self, actions);
             }
             Command::QueueAdd(mut index, new_data) => {
-                if let Some(v) = self.queue.get_item_at_index_mut(&index, 0) {
+                let mut actions = vec![];
+                if let Some(v) = self.queue.get_item_at_index_mut(&index, 0, &mut actions) {
                     if let Some(i) = v.add_to_end(new_data) {
                         index.push(i);
-                        if let Some(q) = self.queue.get_item_at_index_mut(&index, 0) {
+                        if let Some(q) = self.queue.get_item_at_index_mut(&index, 0, &mut actions) {
                             let mut actions = Vec::new();
                             q.init(index, &mut actions);
                             Queue::handle_actions(self, actions);
                         }
                     }
                 }
+                Queue::handle_actions(self, actions);
             }
             Command::QueueInsert(mut index, pos, mut new_data) => {
-                if let Some(v) = self.queue.get_item_at_index_mut(&index, 0) {
+                let mut actions = vec![];
+                if let Some(v) = self.queue.get_item_at_index_mut(&index, 0, &mut actions) {
                     index.push(pos);
                     let mut actions = Vec::new();
                     new_data.init(index, &mut actions);
                     v.insert(new_data, pos);
                     Queue::handle_actions(self, actions);
                 }
+                Queue::handle_actions(self, actions);
             }
             Command::QueueRemove(index) => {
                 self.queue.remove_by_index(&index, 0);
             }
             Command::QueueGoto(index) => Queue::set_index_db(self, &index),
-            Command::QueueSetShuffle(path, map, next) => {
-                if let Some(elem) = self.queue.get_item_at_index_mut(&path, 0) {
-                    if let QueueContent::Shuffle(_, m, _, n) = elem.content_mut() {
-                        *m = map;
-                        *n = next;
+            Command::QueueSetShuffle(path, order) => {
+                let mut actions = vec![];
+                if let Some(elem) = self.queue.get_item_at_index_mut(&path, 0, &mut actions) {
+                    if let QueueContent::Shuffle { inner, state } = elem.content_mut() {
+                        if let QueueContent::Folder(_, v, _) = inner.content_mut() {
+                            let mut o = std::mem::replace(v, vec![])
+                                .into_iter()
+                                .map(|v| Some(v))
+                                .collect::<Vec<_>>();
+                            for &i in order.iter() {
+                                if let Some(a) = o.get_mut(i).and_then(Option::take) {
+                                    v.push(a);
+                                } else {
+                                    eprintln!("[warn] Can't properly apply requested order to Queue/Shuffle: no element at index {i}. Index may be out of bounds or used twice. Len: {}, Order: {order:?}.", v.len());
+                                }
+                            }
+                        }
+                        *state = ShuffleState::Shuffled;
+                    } else {
+                        eprintln!(
+                            "[warn] can't QueueSetShuffle - element at path {path:?} isn't Shuffle"
+                        );
                     }
+                } else {
+                    eprintln!("[warn] can't QueueSetShuffle - no element at path {path:?}");
                 }
+                Queue::handle_actions(self, actions);
             }
             Command::AddSong(song) => {
                 self.add_song_new(song);

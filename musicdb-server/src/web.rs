@@ -663,7 +663,7 @@ fn build_queue_content_build(
                     }
                 }
             }
-            QueueContent::Shuffle(cur, map, content, _) => {
+            QueueContent::Shuffle { inner, state: _ } => {
                 for v in if current {
                     &state.html.queue_shuffle_current
                 } else {
@@ -674,18 +674,15 @@ fn build_queue_content_build(
                         HtmlPart::Insert(key) => match key.as_str() {
                             "path" => html.push_str(&path),
                             "content" => {
-                                for (i, v) in map.iter().filter_map(|i| content.get(*i)).enumerate()
-                                {
                                     build_queue_content_build(
                                         db,
                                         state,
                                         html,
-                                        &v,
+                                        &inner,
                                         format!("{path}-0"),
-                                        current && i == *cur,
+                                        current,
                                         true,
                                     )
-                                }
                             }
                             _ => {}
                         },
