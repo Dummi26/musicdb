@@ -328,7 +328,7 @@ impl GuiElemTrait for LibraryBrowser {
                                     None => 5.0,
                                     Some(ch) if ch.is_whitespace() => 5.0,
                                     // found after whitespace in h
-                                    Some(_) = 3.0,
+                                    Some(_) => 3.0,
                                 },
                                 // found somewhere else in h
                                 _ => 2.0,
