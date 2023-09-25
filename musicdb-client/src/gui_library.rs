@@ -320,11 +320,16 @@ impl GuiElemTrait for LibraryBrowser {
                         r.find_iter(pat)
                             .map(|m| match pat[0..m.start()].chars().rev().next() {
                                 // found at the start of h, reaches to the end (whole pattern is part of the match)
-                                None if m.end() == pat.len() => 5.0,
+                                None if m.end() == pat.len() => 6.0,
                                 // found at start of h
                                 None => 4.0,
-                                // found after whitespace in h
-                                Some(ch) if ch.is_whitespace() => 3.0,
+                                Some(ch) if ch.is_whitespace() => match pat[m.end()..].chars().next() {
+                                    // whole word matches
+                                    None => 5.0,
+                                    Some(ch) if ch.is_whitespace() => 5.0,
+                                    // found after whitespace in h
+                                    Some(_) = 3.0,
+                                },
                                 // found somewhere else in h
                                 _ => 2.0,
                             })
