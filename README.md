@@ -27,7 +27,7 @@ it is also possible for a fake "client" to mirror the main server's playback, so
 
 for (almost) gapless playback, even when the data is stored on a NAS or cloud
 
-#### central database
+#### custom database file
 
 when storing data on a cloud, it would take forever to load all songs and scan them for metadata.
 you would also run into issues with different file formats and where to store the cover images.
@@ -52,7 +52,7 @@ You will also need a file that will hold your database.
 I will assume this is `dbfile`.
 
 Note: Instead of adding the executables (`musicdb-client` and `musicdb-server`) to your `$PATH`, you can run `cargo run --release -- ` followed by the arguments.
-Since this is using cargo, you need to be in the source directorie for whatever you want to run.
+Since this is using cargo, you need to be in the source directory for whatever you want to run.
 
 ### database
 
@@ -65,11 +65,14 @@ musicdb-filldb /music
 
 ### starting the server
 
-run:
+Copy the `musicdb-server/assets` directory to `./assets`, then run:
 
 ```sh
 musicdb-server dbfile --tcp 127.0.0.1:26314 --web 127.0.0.1:8080
 ```
+
+Note: If you don't care about the HTML site, you can leave out the `--web 127.0.0.1:8080`.
+You also won't need the `assets` then.
 
 And that's it - the rest should just work.
 
