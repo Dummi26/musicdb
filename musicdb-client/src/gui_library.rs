@@ -1,11 +1,15 @@
 use std::{
     cmp::Ordering,
     rc::Rc,
-    sync::{atomic::AtomicBool, Arc},
+    sync::{
+        atomic::{AtomicBool, AtomicUsize},
+        Arc, Mutex,
+    },
 };
 
 use musicdb_lib::data::{
-    album::Album, artist::Artist, database::Database, song::Song, AlbumId, ArtistId, SongId,
+    album::Album, artist::Artist, database::Database, song::Song, AlbumId, ArtistId, GeneralData,
+    SongId,
 };
 use regex::{Regex, RegexBuilder};
 use speedy2d::{
@@ -17,7 +21,7 @@ use speedy2d::{
 
 use crate::{
     gui::{Dragging, DrawInfo, GuiAction, GuiElem, GuiElemCfg, GuiElemTrait},
-    gui_base::{Button, Panel, ScrollBox},
+    gui_base::{Button, Panel, ScrollBox, Slider},
     gui_edit::GuiEdit,
     gui_text::{Label, TextField},
     gui_wrappers::WithFocusHotkey,
@@ -57,6 +61,9 @@ pub struct LibraryBrowser {
     search_was_case_sensitive: bool,
     search_prefer_start_matches: Rc<AtomicBool>,
     search_prefers_start_matches: bool,
+    filter_songs: Rc<Mutex<Filter>>,
+    filter_albums: Rc<Mutex<Filter>>,
+    filter_artists: Rc<Mutex<Filter>>,
 }
 fn search_regex_new(pat: &str, case_insensitive: bool) -> Result<Option<Regex>, regex::Error> {
     if pat.is_empty() {
@@ -125,6 +132,18 @@ impl LibraryBrowser {
                 Vec2::new(0.5, 0.5),
             ))],
         );
+        let filter_songs = Rc::new(Mutex::new(Filter {
+            and: true,
+            filters: vec![],
+        }));
+        let filter_albums = Rc::new(Mutex::new(Filter {
+            and: true,
+            filters: vec![],
+        }));
+        let filter_artists = Rc::new(Mutex::new(Filter {
+            and: true,
+            filters: vec![],
+        }));
         Self {
             config,
             children: vec![
@@ -137,6 +156,9 @@ impl LibraryBrowser {
                     Rc::clone(&search_settings_changed),
                     Rc::clone(&search_is_case_sensitive),
                     Rc::clone(&search_prefer_start_matches),
+                    Rc::clone(&filter_songs),
+                    Rc::clone(&filter_albums),
+                    Rc::clone(&filter_artists),
                 )),
             ],
             // - - -
@@ -157,6 +179,9 @@ impl LibraryBrowser {
             search_was_case_sensitive,
             search_prefer_start_matches,
             search_prefers_start_matches,
+            filter_songs,
+            filter_albums,
+            filter_artists,
         }
     }
 }
@@ -314,7 +339,12 @@ impl GuiElemTrait for LibraryBrowser {
                 pat: &str,
                 regex: &Option<Regex>,
                 search_text: &String,
+                filter: &Filter,
+                search_gd: &GeneralData,
             ) -> f32 {
+                if !filter.passes(search_gd) {
+                    return 0.0;
+                };
                 if let Some(r) = regex {
                     if s.search_prefers_start_matches {
                         r.find_iter(pat)
@@ -323,13 +353,15 @@ impl GuiElemTrait for LibraryBrowser {
                                 None if m.end() == pat.len() => 6.0,
                                 // found at start of h
                                 None => 4.0,
-                                Some(ch) if ch.is_whitespace() => match pat[m.end()..].chars().next() {
-                                    // whole word matches
-                                    None => 5.0,
-                                    Some(ch) if ch.is_whitespace() => 5.0,
-                                    // found after whitespace in h
-                                    Some(_) => 3.0,
-                                },
+                                Some(ch) if ch.is_whitespace() => {
+                                    match pat[m.end()..].chars().next() {
+                                        // whole word matches
+                                        None => 5.0,
+                                        Some(ch) if ch.is_whitespace() => 5.0,
+                                        // found after whitespace in h
+                                        Some(_) => 3.0,
+                                    }
+                                }
                                 // found somewhere else in h
                                 _ => 2.0,
                             })
@@ -347,13 +379,40 @@ impl GuiElemTrait for LibraryBrowser {
                     0.0
                 }
             }
+            let allow_singles = self.search_album.is_empty()
+                && self.filter_albums.lock().unwrap().filters.is_empty();
             self.filter_local_library(
                 &info.database,
-                |s, artist| filter(s, &artist.name, &s.search_artist_regex, &s.search_artist),
-                |s, album| filter(s, &album.name, &s.search_album_regex, &s.search_album),
+                |s, artist| {
+                    filter(
+                        s,
+                        &artist.name,
+                        &s.search_artist_regex,
+                        &s.search_artist,
+                        &s.filter_artists.lock().unwrap(),
+                        &artist.general,
+                    )
+                },
+                |s, album| {
+                    filter(
+                        s,
+                        &album.name,
+                        &s.search_album_regex,
+                        &s.search_album,
+                        &s.filter_albums.lock().unwrap(),
+                        &album.general,
+                    )
+                },
                 |s, song| {
-                    if song.album.is_some() || s.search_album.is_empty() {
-                        filter(s, &song.title, &s.search_song_regex, &s.search_song)
+                    if song.album.is_some() || allow_singles {
+                        filter(
+                            s,
+                            &song.title,
+                            &s.search_song_regex,
+                            &s.search_song,
+                            &s.filter_songs.lock().unwrap(),
+                            &song.general,
+                        )
                     } else {
                         0.0
                     }
@@ -835,7 +894,13 @@ impl GuiElemTrait for ListSong {
 struct FilterPanel {
     config: GuiElemCfg,
     children: Vec<GuiElem>,
+    search_settings_changed: Rc<AtomicBool>,
+    tab: usize,
+    new_tab: Rc<AtomicUsize>,
     line_height: f32,
+    filter_songs: Rc<Mutex<Filter>>,
+    filter_albums: Rc<Mutex<Filter>>,
+    filter_artists: Rc<Mutex<Filter>>,
 }
 const FP_CASESENS_N: &'static str = "search is case-insensitive";
 const FP_CASESENS_Y: &'static str = "search is case-sensitive!";
@@ -846,105 +911,567 @@ impl FilterPanel {
         search_settings_changed: Rc<AtomicBool>,
         search_is_case_sensitive: Rc<AtomicBool>,
         search_prefer_start_matches: Rc<AtomicBool>,
+        filter_songs: Rc<Mutex<Filter>>,
+        filter_albums: Rc<Mutex<Filter>>,
+        filter_artists: Rc<Mutex<Filter>>,
     ) -> Self {
         let is_case_sensitive = search_is_case_sensitive.load(std::sync::atomic::Ordering::Relaxed);
         let prefer_start_matches =
             search_prefer_start_matches.load(std::sync::atomic::Ordering::Relaxed);
         let ssc1 = Rc::clone(&search_settings_changed);
-        let ssc2 = search_settings_changed;
+        let ssc2 = Rc::clone(&search_settings_changed);
+        let tab_settings = GuiElem::new(ScrollBox::new(
+            GuiElemCfg::default(),
+            crate::gui_base::ScrollBoxSizeUnit::Pixels,
+            vec![
+                (
+                    GuiElem::new(Button::new(
+                        GuiElemCfg::default(),
+                        move |button| {
+                            let v = !search_is_case_sensitive
+                                .load(std::sync::atomic::Ordering::Relaxed);
+                            search_is_case_sensitive.store(v, std::sync::atomic::Ordering::Relaxed);
+                            ssc1.store(true, std::sync::atomic::Ordering::Relaxed);
+                            *button
+                                .children()
+                                .next()
+                                .unwrap()
+                                .try_as_mut::<Label>()
+                                .unwrap()
+                                .content
+                                .text() = if v {
+                                FP_CASESENS_Y.to_owned()
+                            } else {
+                                FP_CASESENS_N.to_owned()
+                            };
+                            vec![]
+                        },
+                        vec![GuiElem::new(Label::new(
+                            GuiElemCfg::default(),
+                            if is_case_sensitive {
+                                FP_CASESENS_Y.to_owned()
+                            } else {
+                                FP_CASESENS_N.to_owned()
+                            },
+                            Color::GRAY,
+                            None,
+                            Vec2::new(0.5, 0.5),
+                        ))],
+                    )),
+                    1.0,
+                ),
+                (
+                    GuiElem::new(Button::new(
+                        GuiElemCfg::default(),
+                        move |button| {
+                            let v = !search_prefer_start_matches
+                                .load(std::sync::atomic::Ordering::Relaxed);
+                            search_prefer_start_matches
+                                .store(v, std::sync::atomic::Ordering::Relaxed);
+                            ssc2.store(true, std::sync::atomic::Ordering::Relaxed);
+                            *button
+                                .children()
+                                .next()
+                                .unwrap()
+                                .try_as_mut::<Label>()
+                                .unwrap()
+                                .content
+                                .text() = if v {
+                                FP_PREFSTART_Y.to_owned()
+                            } else {
+                                FP_PREFSTART_N.to_owned()
+                            };
+                            vec![]
+                        },
+                        vec![GuiElem::new(Label::new(
+                            GuiElemCfg::default(),
+                            if prefer_start_matches {
+                                FP_PREFSTART_Y.to_owned()
+                            } else {
+                                FP_PREFSTART_N.to_owned()
+                            },
+                            Color::GRAY,
+                            None,
+                            Vec2::new(0.5, 0.5),
+                        ))],
+                    )),
+                    1.0,
+                ),
+            ],
+        ));
+        let tab_filters_songs = GuiElem::new(ScrollBox::new(
+            GuiElemCfg::default().disabled(),
+            crate::gui_base::ScrollBoxSizeUnit::Pixels,
+            vec![],
+        ));
+        let tab_filters_albums = GuiElem::new(ScrollBox::new(
+            GuiElemCfg::default().disabled(),
+            crate::gui_base::ScrollBoxSizeUnit::Pixels,
+            vec![],
+        ));
+        let tab_filters_artists = GuiElem::new(ScrollBox::new(
+            GuiElemCfg::default().disabled(),
+            crate::gui_base::ScrollBoxSizeUnit::Pixels,
+            vec![],
+        ));
+        let new_tab = Rc::new(AtomicUsize::new(0));
+        let set_tab_0 = Rc::clone(&new_tab);
+        let set_tab_1 = Rc::clone(&new_tab);
+        let set_tab_2 = Rc::clone(&new_tab);
+        let set_tab_3 = Rc::clone(&new_tab);
+        const HEIGHT: f32 = 0.1;
         Self {
             config: GuiElemCfg::default().disabled(),
-            children: vec![GuiElem::new(ScrollBox::new(
-                GuiElemCfg::default(),
-                crate::gui_base::ScrollBoxSizeUnit::Pixels,
-                vec![
-                    (
+            children: vec![
+                GuiElem::new(Panel::new(
+                    GuiElemCfg::at(Rectangle::from_tuples((0.0, 0.0), (1.0, HEIGHT))),
+                    vec![
                         GuiElem::new(Button::new(
-                            GuiElemCfg::default(),
-                            move |button| {
-                                let v = !search_is_case_sensitive
-                                    .load(std::sync::atomic::Ordering::Relaxed);
-                                search_is_case_sensitive
-                                    .store(v, std::sync::atomic::Ordering::Relaxed);
-                                ssc1.store(true, std::sync::atomic::Ordering::Relaxed);
-                                *button
-                                    .children()
-                                    .next()
-                                    .unwrap()
-                                    .try_as_mut::<Label>()
-                                    .unwrap()
-                                    .content
-                                    .text() = if v {
-                                    FP_CASESENS_Y.to_owned()
-                                } else {
-                                    FP_CASESENS_N.to_owned()
-                                };
+                            GuiElemCfg::at(Rectangle::from_tuples((0.0, 0.0), (0.4, 1.0))),
+                            move |_| {
+                                set_tab_0.store(0, std::sync::atomic::Ordering::Relaxed);
                                 vec![]
                             },
                             vec![GuiElem::new(Label::new(
                                 GuiElemCfg::default(),
-                                if is_case_sensitive {
-                                    FP_CASESENS_Y.to_owned()
-                                } else {
-                                    FP_CASESENS_N.to_owned()
-                                },
+                                "Settings".to_owned(),
+                                Color::WHITE,
+                                None,
+                                Vec2::new(0.5, 0.5),
+                            ))],
+                        )),
+                        GuiElem::new(Button::new(
+                            GuiElemCfg::at(Rectangle::from_tuples((0.4, 0.0), (0.6, 1.0))),
+                            move |_| {
+                                set_tab_1.store(1, std::sync::atomic::Ordering::Relaxed);
+                                vec![]
+                            },
+                            vec![GuiElem::new(Label::new(
+                                GuiElemCfg::default(),
+                                "Filters\n(Songs)".to_owned(),
                                 Color::GRAY,
                                 None,
                                 Vec2::new(0.5, 0.5),
                             ))],
                         )),
-                        1.0,
-                    ),
-                    (
                         GuiElem::new(Button::new(
-                            GuiElemCfg::default(),
-                            move |button| {
-                                let v = !search_prefer_start_matches
-                                    .load(std::sync::atomic::Ordering::Relaxed);
-                                search_prefer_start_matches
-                                    .store(v, std::sync::atomic::Ordering::Relaxed);
-                                ssc2.store(true, std::sync::atomic::Ordering::Relaxed);
-                                *button
-                                    .children()
-                                    .next()
-                                    .unwrap()
-                                    .try_as_mut::<Label>()
-                                    .unwrap()
-                                    .content
-                                    .text() = if v {
-                                    FP_PREFSTART_Y.to_owned()
-                                } else {
-                                    FP_PREFSTART_N.to_owned()
-                                };
+                            GuiElemCfg::at(Rectangle::from_tuples((0.6, 0.0), (0.8, 1.0))),
+                            move |_| {
+                                set_tab_2.store(2, std::sync::atomic::Ordering::Relaxed);
                                 vec![]
                             },
                             vec![GuiElem::new(Label::new(
                                 GuiElemCfg::default(),
-                                if prefer_start_matches {
-                                    FP_PREFSTART_Y.to_owned()
-                                } else {
-                                    FP_PREFSTART_N.to_owned()
-                                },
+                                "Filters\n(Albums)".to_owned(),
                                 Color::GRAY,
                                 None,
                                 Vec2::new(0.5, 0.5),
                             ))],
                         )),
-                        1.0,
-                    ),
-                ],
-            ))],
+                        GuiElem::new(Button::new(
+                            GuiElemCfg::at(Rectangle::from_tuples((0.8, 0.0), (1.0, 1.0))),
+                            move |_| {
+                                set_tab_3.store(3, std::sync::atomic::Ordering::Relaxed);
+                                vec![]
+                            },
+                            vec![GuiElem::new(Label::new(
+                                GuiElemCfg::default(),
+                                "Filters\n(Artists)".to_owned(),
+                                Color::GRAY,
+                                None,
+                                Vec2::new(0.5, 0.5),
+                            ))],
+                        )),
+                    ],
+                )),
+                GuiElem::new(Panel::new(
+                    GuiElemCfg::at(Rectangle::from_tuples((0.0, HEIGHT), (1.0, 1.0))),
+                    vec![
+                        tab_settings,
+                        tab_filters_songs,
+                        tab_filters_albums,
+                        tab_filters_artists,
+                    ],
+                )),
+            ],
             line_height: 0.0,
+            search_settings_changed,
+            tab: 0,
+            new_tab,
+            filter_songs,
+            filter_albums,
+            filter_artists,
+        }
+    }
+    fn build_filter(
+        filter: &Rc<Mutex<Filter>>,
+        line_height: f32,
+        on_change: &Rc<impl Fn(bool) + 'static>,
+        path: Vec<usize>,
+    ) -> Vec<(GuiElem, f32)> {
+        let f0 = Rc::clone(filter);
+        let oc0 = Rc::clone(on_change);
+        let f1 = Rc::clone(filter);
+        let f2 = Rc::clone(filter);
+        let oc1 = Rc::clone(on_change);
+        let oc2 = Rc::clone(on_change);
+        let mut children = vec![
+            GuiElem::new(Button::new(
+                GuiElemCfg::default(),
+                move |_| {
+                    f0.lock().unwrap().filters.clear();
+                    oc0(true);
+                    vec![]
+                },
+                vec![GuiElem::new(Label::new(
+                    GuiElemCfg::default(),
+                    "clear filters".to_owned(),
+                    Color::LIGHT_GRAY,
+                    None,
+                    Vec2::new(0.5, 0.5),
+                ))],
+            )),
+            GuiElem::new(Button::new(
+                GuiElemCfg::default(),
+                move |_| {
+                    f1.lock()
+                        .unwrap()
+                        .filters
+                        .push(FilterType::TagEq("Fav".to_owned()));
+                    oc1(true);
+                    vec![]
+                },
+                vec![GuiElem::new(Label::new(
+                    GuiElemCfg::default(),
+                    "must have tag".to_owned(),
+                    Color::GRAY,
+                    None,
+                    Vec2::new(0.5, 0.5),
+                ))],
+            )),
+            GuiElem::new(Button::new(
+                GuiElemCfg::default(),
+                move |_| {
+                    f2.lock().unwrap().filters.push(FilterType::TagWithValueInt(
+                        "Year=".to_owned(),
+                        1990,
+                        2000,
+                    ));
+                    oc2(true);
+                    vec![]
+                },
+                vec![GuiElem::new(Label::new(
+                    GuiElemCfg::default(),
+                    "tag with integer value between (min) and (max)".to_owned(),
+                    Color::GRAY,
+                    None,
+                    Vec2::new(0.5, 0.5),
+                ))],
+            )),
+        ];
+        Self::build_filter_editor(
+            &filter.lock().unwrap(),
+            filter,
+            &mut children,
+            0.0,
+            0.05,
+            on_change,
+            path,
+        );
+        children.into_iter().map(|v| (v, line_height)).collect()
+    }
+    fn build_filter_editor(
+        filter: &Filter,
+        mutex: &Rc<Mutex<Filter>>,
+        children: &mut Vec<GuiElem>,
+        mut indent: f32,
+        indent_by: f32,
+        on_change: &Rc<impl Fn(bool) + 'static>,
+        path: Vec<usize>,
+    ) {
+        if filter.filters.len() > 1 {
+            let mx = Rc::clone(mutex);
+            let oc = Rc::clone(on_change);
+            let p = path.clone();
+            children.push(GuiElem::new(Button::new(
+                GuiElemCfg::at(Rectangle::from_tuples((indent, 0.0), (1.0, 1.0))),
+                move |_| {
+                    if let Some(f) = match mx.lock().unwrap().get_mut(&p) {
+                        Some(Ok(f)) => f.inner_filter(),
+                        Some(Err(f)) => Some(f),
+                        None => None,
+                    } {
+                        f.and = !f.and;
+                        oc(true);
+                    }
+                    vec![]
+                },
+                vec![GuiElem::new(Label::new(
+                    GuiElemCfg::default(),
+                    if filter.and { "AND" } else { "OR" }.to_owned(),
+                    Color::WHITE,
+                    None,
+                    Vec2::new(0.5, 0.5),
+                ))],
+            )));
+        }
+        indent += indent_by;
+        for (i, f) in filter.filters.iter().enumerate() {
+            let mut path = path.clone();
+            path.push(i);
+            match f {
+                FilterType::Nested(f) => Self::build_filter_editor(
+                    f, mutex, children, indent, indent_by, on_change, path,
+                ),
+                FilterType::Not(f) => {
+                    children.push(GuiElem::new(Label::new(
+                        GuiElemCfg::at(Rectangle::from_tuples((indent, 0.0), (1.0, 1.0))),
+                        "NOT".to_owned(),
+                        Color::WHITE,
+                        None,
+                        Vec2::new(0.0, 0.5),
+                    )));
+                    Self::build_filter_editor(
+                        f, mutex, children, indent, indent_by, on_change, path,
+                    )
+                }
+                FilterType::TagEq(v) => {
+                    let mut tf = TextField::new_adv(
+                        GuiElemCfg::at(Rectangle::from_tuples((0.1, 0.0), (1.0, 1.0))),
+                        v.to_owned(),
+                        "tag value".to_owned(),
+                        Color::GRAY,
+                        Color::WHITE,
+                    );
+                    let mx = Rc::clone(mutex);
+                    let oc = Rc::clone(on_change);
+                    tf.on_changed = Some(Box::new(move |text| {
+                        if let Some(Ok(FilterType::TagEq(v))) = mx.lock().unwrap().get_mut(&path) {
+                            *v = text.to_owned();
+                            oc(false);
+                        }
+                    }));
+                    children.push(GuiElem::new(Panel::new(
+                        GuiElemCfg::at(Rectangle::from_tuples((indent, 0.0), (1.0, 1.0))),
+                        vec![
+                            GuiElem::new(Label::new(
+                                GuiElemCfg::at(Rectangle::from_tuples((0.0, 0.0), (0.1, 1.0))),
+                                "=".to_owned(),
+                                Color::WHITE,
+                                None,
+                                Vec2::new(0.5, 0.5),
+                            )),
+                            GuiElem::new(tf),
+                        ],
+                    )));
+                }
+                FilterType::TagStartsWith(v) => {
+                    let mut tf = TextField::new_adv(
+                        GuiElemCfg::at(Rectangle::from_tuples((0.1, 0.0), (1.0, 1.0))),
+                        v.to_owned(),
+                        "tag value".to_owned(),
+                        Color::GRAY,
+                        Color::WHITE,
+                    );
+                    let mx = Rc::clone(mutex);
+                    let oc = Rc::clone(on_change);
+                    tf.on_changed = Some(Box::new(move |text| {
+                        if let Some(Ok(FilterType::TagStartsWith(v))) =
+                            mx.lock().unwrap().get_mut(&path)
+                        {
+                            *v = text.to_owned();
+                            oc(false);
+                        }
+                    }));
+                    children.push(GuiElem::new(Panel::new(
+                        GuiElemCfg::at(Rectangle::from_tuples((indent, 0.0), (1.0, 1.0))),
+                        vec![
+                            GuiElem::new(Label::new(
+                                GuiElemCfg::at(Rectangle::from_tuples((0.0, 0.0), (0.1, 1.0))),
+                                ">".to_owned(),
+                                Color::WHITE,
+                                None,
+                                Vec2::new(0.5, 0.5),
+                            )),
+                            GuiElem::new(tf),
+                        ],
+                    )));
+                }
+                FilterType::TagWithValueInt(v, min, max) => {
+                    let mut tf = TextField::new_adv(
+                        GuiElemCfg::at(Rectangle::from_tuples((0.1, 0.0), (0.6, 1.0))),
+                        v.to_owned(),
+                        "tag value".to_owned(),
+                        Color::GRAY,
+                        Color::WHITE,
+                    );
+                    let mx = Rc::clone(mutex);
+                    let oc = Rc::clone(on_change);
+                    let p = path.clone();
+                    tf.on_changed = Some(Box::new(move |text| {
+                        if let Some(Ok(FilterType::TagWithValueInt(v, _, _))) =
+                            mx.lock().unwrap().get_mut(&p)
+                        {
+                            *v = text.to_owned();
+                            oc(false);
+                        }
+                    }));
+                    let mut tf1 = TextField::new_adv(
+                        GuiElemCfg::at(Rectangle::from_tuples((0.6, 0.0), (0.8, 1.0))),
+                        min.to_string(),
+                        "min".to_owned(),
+                        Color::GRAY,
+                        Color::WHITE,
+                    );
+                    let mut tf2 = TextField::new_adv(
+                        GuiElemCfg::at(Rectangle::from_tuples((0.8, 0.0), (1.0, 1.0))),
+                        max.to_string(),
+                        "max".to_owned(),
+                        Color::GRAY,
+                        Color::WHITE,
+                    );
+                    let mx = Rc::clone(mutex);
+                    let oc = Rc::clone(on_change);
+                    let p = path.clone();
+                    tf1.on_changed = Some(Box::new(move |text| {
+                        if let Ok(n) = text.parse() {
+                            if let Some(Ok(FilterType::TagWithValueInt(_, v, _))) =
+                                mx.lock().unwrap().get_mut(&p)
+                            {
+                                *v = n;
+                                oc(false);
+                            }
+                        }
+                    }));
+                    let mx = Rc::clone(mutex);
+                    let oc = Rc::clone(on_change);
+                    let p = path.clone();
+                    tf2.on_changed = Some(Box::new(move |text| {
+                        if let Ok(n) = text.parse() {
+                            if let Some(Ok(FilterType::TagWithValueInt(_, _, v))) =
+                                mx.lock().unwrap().get_mut(&p)
+                            {
+                                *v = n;
+                                oc(false);
+                            }
+                        }
+                    }));
+                    children.push(GuiElem::new(Panel::new(
+                        GuiElemCfg::at(Rectangle::from_tuples((indent, 0.0), (1.0, 1.0))),
+                        vec![
+                            GuiElem::new(Label::new(
+                                GuiElemCfg::at(Rectangle::from_tuples((0.0, 0.0), (0.1, 1.0))),
+                                "..".to_owned(),
+                                Color::WHITE,
+                                None,
+                                Vec2::new(0.5, 0.5),
+                            )),
+                            GuiElem::new(tf),
+                            GuiElem::new(tf1),
+                            GuiElem::new(tf2),
+                        ],
+                    )));
+                }
+            }
         }
     }
 }
 impl GuiElemTrait for FilterPanel {
     fn draw(&mut self, info: &mut DrawInfo, _g: &mut speedy2d::Graphics2D) {
+        // set line height
         if info.line_height != self.line_height {
-            for (_, h) in &mut self.children[0].try_as_mut::<ScrollBox>().unwrap().children {
-                *h = info.line_height;
+            for c in &mut self.children[1].inner.children() {
+                if let Some(sb) = c.try_as_mut::<ScrollBox>() {
+                    for (_, h) in &mut sb.children {
+                        *h = info.line_height;
+                    }
+                }
             }
             self.line_height = info.line_height;
+        }
+        // maybe switch tabs
+        let new_tab = self.new_tab.load(std::sync::atomic::Ordering::Relaxed);
+        let mut load_tab = false;
+        if new_tab < usize::MAX {
+            load_tab = true;
+            self.new_tab
+                .store(usize::MAX, std::sync::atomic::Ordering::Relaxed);
+            self.children[1]
+                .inner
+                .children()
+                .nth(self.tab)
+                .unwrap()
+                .inner
+                .config_mut()
+                .enabled = false;
+            self.children[1]
+                .inner
+                .children()
+                .nth(new_tab)
+                .unwrap()
+                .inner
+                .config_mut()
+                .enabled = true;
+            *self.children[0]
+                .inner
+                .children()
+                .nth(self.tab)
+                .unwrap()
+                .try_as_mut::<Button>()
+                .unwrap()
+                .children[0]
+                .try_as_mut::<Label>()
+                .unwrap()
+                .content
+                .color() = Color::GRAY;
+            *self.children[0]
+                .inner
+                .children()
+                .nth(new_tab)
+                .unwrap()
+                .try_as_mut::<Button>()
+                .unwrap()
+                .children[0]
+                .try_as_mut::<Label>()
+                .unwrap()
+                .content
+                .color() = Color::WHITE;
+            self.tab = new_tab;
+        }
+        // load tab
+        if load_tab {
+            match new_tab {
+                1 | 2 | 3 => {
+                    let sb = self.children[1]
+                        .inner
+                        .children()
+                        .nth(new_tab)
+                        .unwrap()
+                        .try_as_mut::<ScrollBox>()
+                        .unwrap();
+                    let ssc = Rc::clone(&self.search_settings_changed);
+                    let my_tab = self.tab;
+                    let ntab = Rc::clone(&self.new_tab);
+                    sb.children = Self::build_filter(
+                        match new_tab {
+                            1 => &self.filter_songs,
+                            2 => &self.filter_albums,
+                            3 => &self.filter_artists,
+                            _ => unreachable!(),
+                        },
+                        info.line_height,
+                        &Rc::new(move |update_ui| {
+                            if update_ui {
+                                ntab.store(my_tab, std::sync::atomic::Ordering::Relaxed);
+                            }
+                            ssc.store(true, std::sync::atomic::Ordering::Relaxed);
+                        }),
+                        vec![],
+                    );
+                    sb.config_mut().redraw = true;
+                }
+                _ => {}
+            }
         }
     }
     fn config(&self) -> &GuiElemCfg {
@@ -964,5 +1491,81 @@ impl GuiElemTrait for FilterPanel {
     }
     fn clone_gui(&self) -> Box<dyn GuiElemTrait> {
         Box::new(self.clone())
+    }
+}
+struct Filter {
+    and: bool,
+    filters: Vec<FilterType>,
+}
+enum FilterType {
+    Nested(Filter),
+    Not(Filter),
+    TagEq(String),
+    TagStartsWith(String),
+    /// true if the tag is '<String><Integer>' and Integer is between min and max (both inclusive)
+    /// note: <String> usually ends with '='.
+    TagWithValueInt(String, i32, i32),
+}
+impl Filter {
+    pub fn passes(&self, gd: &GeneralData) -> bool {
+        if self.filters.is_empty() {
+            return true;
+        }
+        let mut iter = self.filters.iter().map(|v| v.passes(gd));
+        if self.and {
+            iter.all(|v| v)
+        } else {
+            iter.any(|v| v)
+        }
+    }
+    pub fn get_mut(&mut self, path: &[usize]) -> Option<Result<&mut FilterType, &mut Self>> {
+        if let Some(i) = path.first() {
+            let p = &path[1..];
+            if let Some(f) = self.filters.get_mut(*i) {
+                f.get_mut(p)
+            } else {
+                None
+            }
+        } else {
+            Some(Err(self))
+        }
+    }
+}
+impl FilterType {
+    pub fn passes(&self, gd: &GeneralData) -> bool {
+        match self {
+            Self::Nested(f) => f.passes(gd),
+            Self::Not(f) => !f.passes(gd),
+            Self::TagEq(v) => gd.tags.iter().any(|t| t == v),
+            Self::TagStartsWith(v) => gd.tags.iter().any(|t| t.starts_with(v)),
+            Self::TagWithValueInt(v, min, max) => gd.tags.iter().any(|t| {
+                if t.starts_with(v) {
+                    if let Ok(val) = t[v.len()..].parse() {
+                        *min <= val && val <= *max
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            }),
+        }
+    }
+    pub fn get_mut(&mut self, path: &[usize]) -> Option<Result<&mut Self, &mut Filter>> {
+        if path.is_empty() {
+            Some(Ok(self))
+        } else {
+            if let Some(f) = self.inner_filter() {
+                f.get_mut(path)
+            } else {
+                None
+            }
+        }
+    }
+    pub fn inner_filter(&mut self) -> Option<&mut Filter> {
+        match self {
+            Self::Nested(f) | Self::Not(f) => Some(f),
+            Self::TagEq(_) | Self::TagStartsWith(_) | Self::TagWithValueInt(..) => None,
+        }
     }
 }

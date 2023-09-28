@@ -138,31 +138,48 @@ impl GuiElemTrait for Label {
 // TODO! this, but requires keyboard events first
 
 /// a single-line text field for users to type text into.
-#[derive(Clone)]
 pub struct TextField {
     config: GuiElemCfg,
     pub children: Vec<GuiElem>,
+    pub on_changed: Option<Box<dyn FnMut(&str)>>,
+    pub on_changed_mut: Option<Box<dyn FnMut(&mut Self, String)>>,
 }
 impl TextField {
     pub fn new(config: GuiElemCfg, hint: String, color_hint: Color, color_input: Color) -> Self {
+        Self::new_adv(config, String::new(), hint, color_hint, color_input)
+    }
+    pub fn new_adv(
+        config: GuiElemCfg,
+        text: String,
+        hint: String,
+        color_hint: Color,
+        color_input: Color,
+    ) -> Self {
+        let text_is_empty = text.is_empty();
         Self {
             config: config.w_mouse().w_keyboard_focus(),
             children: vec![
                 GuiElem::new(Label::new(
                     GuiElemCfg::default(),
-                    String::new(),
+                    text,
                     color_input,
                     None,
                     Vec2::new(0.0, 0.5),
                 )),
                 GuiElem::new(Label::new(
-                    GuiElemCfg::default(),
+                    if text_is_empty {
+                        GuiElemCfg::default()
+                    } else {
+                        GuiElemCfg::default().disabled()
+                    },
                     hint,
                     color_hint,
                     None,
                     Vec2::new(0.0, 0.5),
                 )),
             ],
+            on_changed: None,
+            on_changed_mut: None,
         }
     }
     pub fn label_input(&self) -> &Label {
@@ -208,7 +225,7 @@ impl GuiElemTrait for TextField {
         g.draw_line(info.pos.top_left(), info.pos.bottom_left(), t, c);
         g.draw_line(info.pos.top_right(), info.pos.bottom_right(), t, c);
     }
-    fn mouse_pressed(&mut self, button: MouseButton) -> Vec<GuiAction> {
+    fn mouse_pressed(&mut self, _button: MouseButton) -> Vec<GuiAction> {
         self.config.request_keyboard_focus = true;
         vec![GuiAction::ResetKeyboardFocus]
     }
@@ -217,6 +234,14 @@ impl GuiElemTrait for TextField {
             let content = &mut self.children[0].try_as_mut::<Label>().unwrap().content;
             let was_empty = content.get_text().is_empty();
             content.text().push(key);
+            if let Some(f) = &mut self.on_changed {
+                f(content.get_text());
+            }
+            if let Some(mut f) = self.on_changed_mut.take() {
+                let text = content.get_text().clone();
+                f(self, text);
+                self.on_changed_mut = Some(f);
+            }
             if was_empty {
                 self.children[1].inner.config_mut().enabled = false;
             }
@@ -247,12 +272,31 @@ impl GuiElemTrait for TextField {
                 } else {
                     content.text().pop();
                 }
-                if content.get_text().is_empty() {
+                let is_now_empty = content.get_text().is_empty();
+                if let Some(f) = &mut self.on_changed {
+                    f(content.get_text());
+                }
+                if let Some(mut f) = self.on_changed_mut.take() {
+                    let text = content.get_text().clone();
+                    f(self, text);
+                    self.on_changed_mut = Some(f);
+                }
+                if is_now_empty {
                     self.children[1].inner.config_mut().enabled = true;
                 }
             }
         }
         vec![]
+    }
+}
+impl Clone for TextField {
+    fn clone(&self) -> Self {
+        Self {
+            config: self.config.clone(),
+            children: self.children.clone(),
+            on_changed: None,
+            on_changed_mut: None,
+        }
     }
 }
 
