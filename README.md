@@ -1,15 +1,18 @@
 # musicdb
 
-custom music player running on my personal SBC which can be controlled from other WiFi devices (phone/pc)
+custom music player which can be controlled from other WiFi devices (phone/pc)
 
 should perform pretty well (it runs well on my Pine A64 with 10k+ songs)
+
+https://github.com/Dummi26/musicdb/assets/67615357/8ba85f00-27a5-4e41-8688-4816b8aaaff4
 
 ## why???
 
 #### server/client
 
 allows you to play music on any device you want while controlling playback from anywhere.
-you can either run the client and server on the same machine or connect via tcp.
+you can either run the client and server on the same machine or have them be in the same network
+so that they can connect using TCP.
 
 if one client makes a change, all other clients will be notified of it and update almost instantly.
 
