@@ -8,7 +8,6 @@ use std::{
     },
 };
 
-use clap::builder::StringValueParser;
 use musicdb_lib::data::{
     album::Album,
     artist::Artist,
@@ -69,7 +68,6 @@ pub struct LibraryBrowser {
     filter_songs: Rc<Mutex<Filter>>,
     filter_albums: Rc<Mutex<Filter>>,
     filter_artists: Rc<Mutex<Filter>>,
-    do_something_sender: mpsc::Sender<Box<dyn FnOnce(&mut Self)>>,
     do_something_receiver: mpsc::Receiver<Box<dyn FnOnce(&mut Self)>>,
 }
 impl Clone for LibraryBrowser {
@@ -269,7 +267,6 @@ impl LibraryBrowser {
             filter_songs,
             filter_albums,
             filter_artists,
-            do_something_sender,
             do_something_receiver,
         }
     }
@@ -1169,17 +1166,10 @@ impl FilterPanel {
         let ssc1 = Rc::clone(&search_settings_changed);
         let ssc2 = Rc::clone(&search_settings_changed);
         let ssc3 = Rc::clone(&search_settings_changed);
-        let ssc4 = Rc::clone(&search_settings_changed);
-        let ssc5 = Rc::clone(&search_settings_changed);
-        let ssc6 = Rc::clone(&search_settings_changed);
-        let ssc7 = Rc::clone(&search_settings_changed);
         let sel3 = selected.clone();
-        let sel4 = selected.clone();
-        let sel5 = selected.clone();
-        let sel6 = selected.clone();
-        let sel7 = selected.clone();
+        const VSPLIT: f32 = 0.4;
         let tab_main = GuiElem::new(ScrollBox::new(
-            GuiElemCfg::default(),
+            GuiElemCfg::at(Rectangle::from_tuples((0.0, 0.0), (VSPLIT, 1.0))),
             crate::gui_base::ScrollBoxSizeUnit::Pixels,
             vec![
                 (
@@ -1315,7 +1305,7 @@ impl FilterPanel {
                                 ))],
                             )),
                             GuiElem::new(Button::new(
-                                GuiElemCfg::at(Rectangle::from_tuples((0.55, 0.0), (0.65, 1.0))),
+                                GuiElemCfg::at(Rectangle::from_tuples((0.55, 0.0), (0.75, 1.0))),
                                 {
                                     let dss = do_something_sender.clone();
                                     move |_| {
@@ -1347,7 +1337,7 @@ impl FilterPanel {
                                 ))],
                             )),
                             GuiElem::new(Button::new(
-                                GuiElemCfg::at(Rectangle::from_tuples((0.7, 0.0), (0.8, 1.0))),
+                                GuiElemCfg::at(Rectangle::from_tuples((0.8, 0.0), (1.0, 1.0))),
                                 {
                                     let dss = do_something_sender.clone();
                                     move |_| {
@@ -1356,8 +1346,11 @@ impl FilterPanel {
                                                 .store(true, std::sync::atomic::Ordering::Relaxed);
                                             let mut sel = s.selected.0.lock().unwrap();
                                             for (_, _, albums, _) in &s.library_filtered {
-                                                for (id, _, _) in albums {
+                                                for (id, album, _) in albums {
                                                     sel.1.insert(*id);
+                                                    for (s, _) in album {
+                                                        sel.2.insert(*s);
+                                                    }
                                                 }
                                             }
                                         }))
@@ -1373,31 +1366,6 @@ impl FilterPanel {
                                     Vec2::new(0.5, 0.5),
                                 ))],
                             )),
-                            GuiElem::new(Button::new(
-                                GuiElemCfg::at(Rectangle::from_tuples((0.85, 0.0), (0.95, 1.0))),
-                                {
-                                    let dss = do_something_sender.clone();
-                                    move |_| {
-                                        dss.send(Box::new(|s| {
-                                            s.search_settings_changed
-                                                .store(true, std::sync::atomic::Ordering::Relaxed);
-                                            let mut sel = s.selected.0.lock().unwrap();
-                                            for (id, _, _, _) in &s.library_filtered {
-                                                sel.0.insert(*id);
-                                            }
-                                        }))
-                                        .unwrap();
-                                        vec![]
-                                    }
-                                },
-                                vec![GuiElem::new(Label::new(
-                                    GuiElemCfg::default(),
-                                    "artists".to_owned(),
-                                    Color::GRAY,
-                                    None,
-                                    Vec2::new(0.5, 0.5),
-                                ))],
-                            )),
                         ],
                     )),
                     1.0,
@@ -1405,17 +1373,17 @@ impl FilterPanel {
             ],
         ));
         let tab_filters_songs = GuiElem::new(ScrollBox::new(
-            GuiElemCfg::default().disabled(),
+            GuiElemCfg::at(Rectangle::from_tuples((VSPLIT, 0.0), (1.0, 1.0))),
             crate::gui_base::ScrollBoxSizeUnit::Pixels,
             vec![],
         ));
         let tab_filters_albums = GuiElem::new(ScrollBox::new(
-            GuiElemCfg::default().disabled(),
+            GuiElemCfg::at(Rectangle::from_tuples((VSPLIT, 0.0), (1.0, 1.0))).disabled(),
             crate::gui_base::ScrollBoxSizeUnit::Pixels,
             vec![],
         ));
         let tab_filters_artists = GuiElem::new(ScrollBox::new(
-            GuiElemCfg::default().disabled(),
+            GuiElemCfg::at(Rectangle::from_tuples((VSPLIT, 0.0), (1.0, 1.0))).disabled(),
             crate::gui_base::ScrollBoxSizeUnit::Pixels,
             vec![],
         ));
@@ -1428,18 +1396,12 @@ impl FilterPanel {
             config: GuiElemCfg::default().disabled(),
             children: vec![
                 GuiElem::new(Panel::new(
-                    GuiElemCfg::at(Rectangle::from_tuples((0.0, 0.0), (1.0, HEIGHT))),
+                    GuiElemCfg::at(Rectangle::from_tuples((VSPLIT, 0.0), (1.0, HEIGHT))),
                     vec![
                         GuiElem::new(Button::new(
                             GuiElemCfg::at(Rectangle::from_tuples((0.0, 0.0), (0.33, 1.0))),
                             move |_| {
-                                let v = if set_tab_1.load(std::sync::atomic::Ordering::Relaxed) != 1
-                                {
-                                    1
-                                } else {
-                                    0
-                                };
-                                set_tab_1.store(v, std::sync::atomic::Ordering::Relaxed);
+                                set_tab_1.store(0, std::sync::atomic::Ordering::Relaxed);
                                 vec![]
                             },
                             vec![GuiElem::new(Label::new(
@@ -1453,13 +1415,7 @@ impl FilterPanel {
                         GuiElem::new(Button::new(
                             GuiElemCfg::at(Rectangle::from_tuples((0.33, 0.0), (0.67, 1.0))),
                             move |_| {
-                                let v = if set_tab_2.load(std::sync::atomic::Ordering::Relaxed) != 2
-                                {
-                                    2
-                                } else {
-                                    0
-                                };
-                                set_tab_2.store(v, std::sync::atomic::Ordering::Relaxed);
+                                set_tab_2.store(1, std::sync::atomic::Ordering::Relaxed);
                                 vec![]
                             },
                             vec![GuiElem::new(Label::new(
@@ -1473,13 +1429,7 @@ impl FilterPanel {
                         GuiElem::new(Button::new(
                             GuiElemCfg::at(Rectangle::from_tuples((0.67, 0.0), (1.0, 1.0))),
                             move |_| {
-                                let v = if set_tab_3.load(std::sync::atomic::Ordering::Relaxed) != 3
-                                {
-                                    3
-                                } else {
-                                    0
-                                };
-                                set_tab_3.store(v, std::sync::atomic::Ordering::Relaxed);
+                                set_tab_3.store(2, std::sync::atomic::Ordering::Relaxed);
                                 vec![]
                             },
                             vec![GuiElem::new(Label::new(
@@ -1494,13 +1444,9 @@ impl FilterPanel {
                 )),
                 GuiElem::new(Panel::new(
                     GuiElemCfg::at(Rectangle::from_tuples((0.0, HEIGHT), (1.0, 1.0))),
-                    vec![
-                        tab_main,
-                        tab_filters_songs,
-                        tab_filters_albums,
-                        tab_filters_artists,
-                    ],
+                    vec![tab_filters_songs, tab_filters_albums, tab_filters_artists],
                 )),
+                tab_main,
             ],
             line_height: 0.0,
             search_settings_changed,
@@ -1788,6 +1734,10 @@ impl GuiElemTrait for FilterPanel {
     fn draw(&mut self, info: &mut DrawInfo, _g: &mut speedy2d::Graphics2D) {
         // set line height
         if info.line_height != self.line_height {
+            let sb = self.children[2].try_as_mut::<ScrollBox>().unwrap();
+            for (_, h) in &mut sb.children {
+                *h = info.line_height;
+            }
             for c in &mut self.children[1].inner.children() {
                 if let Some(sb) = c.try_as_mut::<ScrollBox>() {
                     for (_, h) in &mut sb.children {
@@ -1800,7 +1750,9 @@ impl GuiElemTrait for FilterPanel {
         // maybe switch tabs
         let mut new_tab = self.new_tab.load(std::sync::atomic::Ordering::Relaxed);
         let mut load_tab = false;
-        if new_tab != self.tab {
+        if new_tab != usize::MAX {
+            self.new_tab
+                .store(usize::MAX, std::sync::atomic::Ordering::Relaxed);
             load_tab = true;
             if new_tab == usize::MAX {
                 self.new_tab
@@ -1823,41 +1775,37 @@ impl GuiElemTrait for FilterPanel {
                     .inner
                     .config_mut()
                     .enabled = true;
-                if self.tab > 0 {
-                    *self.children[0]
-                        .inner
-                        .children()
-                        .nth(self.tab - 1)
-                        .unwrap()
-                        .try_as_mut::<Button>()
-                        .unwrap()
-                        .children[0]
-                        .try_as_mut::<Label>()
-                        .unwrap()
-                        .content
-                        .color() = Color::GRAY;
-                }
-                if new_tab > 0 {
-                    *self.children[0]
-                        .inner
-                        .children()
-                        .nth(new_tab - 1)
-                        .unwrap()
-                        .try_as_mut::<Button>()
-                        .unwrap()
-                        .children[0]
-                        .try_as_mut::<Label>()
-                        .unwrap()
-                        .content
-                        .color() = Color::WHITE;
-                }
+                *self.children[0]
+                    .inner
+                    .children()
+                    .nth(self.tab)
+                    .unwrap()
+                    .try_as_mut::<Button>()
+                    .unwrap()
+                    .children[0]
+                    .try_as_mut::<Label>()
+                    .unwrap()
+                    .content
+                    .color() = Color::GRAY;
+                *self.children[0]
+                    .inner
+                    .children()
+                    .nth(new_tab)
+                    .unwrap()
+                    .try_as_mut::<Button>()
+                    .unwrap()
+                    .children[0]
+                    .try_as_mut::<Label>()
+                    .unwrap()
+                    .content
+                    .color() = Color::WHITE;
                 self.tab = new_tab;
             }
         }
         // load tab
         if load_tab {
             match new_tab {
-                1 | 2 | 3 => {
+                0 | 1 | 2 => {
                     let sb = self.children[1]
                         .inner
                         .children()
@@ -1866,18 +1814,19 @@ impl GuiElemTrait for FilterPanel {
                         .try_as_mut::<ScrollBox>()
                         .unwrap();
                     let ssc = Rc::clone(&self.search_settings_changed);
+                    let my_tab = new_tab;
                     let ntab = Rc::clone(&self.new_tab);
                     sb.children = Self::build_filter(
                         match new_tab {
-                            1 => &self.filter_songs,
-                            2 => &self.filter_albums,
-                            3 => &self.filter_artists,
+                            0 => &self.filter_songs,
+                            1 => &self.filter_albums,
+                            2 => &self.filter_artists,
                             _ => unreachable!(),
                         },
                         info.line_height,
                         &Rc::new(move |update_ui| {
                             if update_ui {
-                                ntab.store(usize::MAX, std::sync::atomic::Ordering::Relaxed);
+                                ntab.store(my_tab, std::sync::atomic::Ordering::Relaxed);
                             }
                             ssc.store(true, std::sync::atomic::Ordering::Relaxed);
                         }),

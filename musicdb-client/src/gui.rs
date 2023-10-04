@@ -385,6 +385,10 @@ impl GuiElemCfg {
         self.drag_target = true;
         self
     }
+    pub fn force_redraw(mut self) -> Self {
+        self.redraw = true;
+        self
+    }
     pub fn disabled(mut self) -> Self {
         self.enabled = false;
         self
