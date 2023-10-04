@@ -38,6 +38,8 @@ pub struct Database {
     pub command_sender: Option<mpsc::Sender<Command>>,
     pub remote_server_as_song_file_source:
         Option<Arc<Mutex<crate::server::get::Client<Box<dyn ClientIo>>>>>,
+    /// only relevant for clients. true if init is done
+    client_is_init: bool,
 }
 pub trait ClientIo: Read + Write + Send {}
 impl<T: Read + Write + Send> ClientIo for T {}
@@ -59,6 +61,9 @@ impl Database {
     }
     pub fn is_client(&self) -> bool {
         self.db_file.as_os_str().is_empty()
+    }
+    pub fn is_client_init(&self) -> bool {
+        self.client_is_init
     }
     pub fn get_path(&self, location: &DatabaseLocation) -> PathBuf {
         self.lib_directory.join(&location.rel_path)
@@ -220,7 +225,7 @@ impl Database {
         }
         // since this is so easy to check for, it comes last.
         // this allows clients to find out when init_connection is done.
-        Command::SetLibraryDirectory(self.lib_directory.clone()).to_bytes(con)?;
+        Command::InitComplete.to_bytes(con)?;
         // is initialized now - client can receive updates after this point.
         // NOTE: Don't write to connection anymore - the db will dispatch updates on its own.
         // we just need to handle commands (receive from the connection).
@@ -341,8 +346,8 @@ impl Database {
             Command::RemoveArtist(artist) => {
                 _ = self.remove_artist(artist);
             }
-            Command::SetLibraryDirectory(new_dir) => {
-                self.lib_directory = new_dir;
+            Command::InitComplete => {
+                self.client_is_init = true;
             }
         }
     }
@@ -368,6 +373,7 @@ impl Database {
             playing: false,
             command_sender: None,
             remote_server_as_song_file_source: None,
+            client_is_init: false,
         }
     }
     pub fn new_empty(path: PathBuf, lib_dir: PathBuf) -> Self {
@@ -385,13 +391,12 @@ impl Database {
             playing: false,
             command_sender: None,
             remote_server_as_song_file_source: None,
+            client_is_init: false,
         }
     }
-    pub fn load_database(path: PathBuf) -> Result<Self, std::io::Error> {
+    pub fn load_database(path: PathBuf, lib_directory: PathBuf) -> Result<Self, std::io::Error> {
         let mut file = BufReader::new(File::open(&path)?);
         eprintln!("[info] loading library from {file:?}");
-        let lib_directory = ToFromBytes::from_bytes(&mut file)?;
-        eprintln!("[info] library directory is {lib_directory:?}");
         Ok(Self {
             db_file: path,
             lib_directory,
@@ -406,6 +411,7 @@ impl Database {
             playing: false,
             command_sender: None,
             remote_server_as_song_file_source: None,
+            client_is_init: false,
         })
     }
     /// saves the database's contents. save path can be overridden
@@ -425,7 +431,6 @@ impl Database {
             .truncate(true)
             .create(true)
             .open(&path)?;
-        self.lib_directory.to_bytes(&mut file)?;
         self.artists.to_bytes(&mut file)?;
         self.albums.to_bytes(&mut file)?;
         self.songs.to_bytes(&mut file)?;
@@ -433,6 +438,10 @@ impl Database {
         Ok(path)
     }
     pub fn broadcast_update(&mut self, update: &Command) {
+        match update {
+            Command::InitComplete => return,
+            _ => {}
+        }
         let mut remove = vec![];
         let mut bytes = None;
         let mut arc = None;

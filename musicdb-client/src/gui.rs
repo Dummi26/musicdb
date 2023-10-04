@@ -198,7 +198,7 @@ impl Gui {
                 | Command::Pause
                 | Command::Stop
                 | Command::Save
-                | Command::SetLibraryDirectory(..) => {}
+                | Command::InitComplete => {}
                 Command::NextSong
                 | Command::QueueUpdate(..)
                 | Command::QueueAdd(..)

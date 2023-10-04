@@ -438,7 +438,7 @@ async fn sse_handler(
                             .collect::<String>(),
                     )
                 }
-                Command::Save | Command::SetLibraryDirectory(_) => return Poll::Pending,
+                Command::Save | Command::InitComplete => return Poll::Pending,
             }))
         } else {
             return Poll::Pending;
@@ -673,17 +673,15 @@ fn build_queue_content_build(
                         HtmlPart::Plain(v) => html.push_str(v),
                         HtmlPart::Insert(key) => match key.as_str() {
                             "path" => html.push_str(&path),
-                            "content" => {
-                                    build_queue_content_build(
-                                        db,
-                                        state,
-                                        html,
-                                        &inner,
-                                        format!("{path}-0"),
-                                        current,
-                                        true,
-                                    )
-                            }
+                            "content" => build_queue_content_build(
+                                db,
+                                state,
+                                html,
+                                &inner,
+                                format!("{path}-0"),
+                                current,
+                                true,
+                            ),
                             _ => {}
                         },
                     }

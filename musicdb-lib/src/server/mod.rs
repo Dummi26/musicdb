@@ -4,7 +4,6 @@ use std::{
     eprintln,
     io::{BufRead, BufReader, Read, Write},
     net::{SocketAddr, TcpListener},
-    path::PathBuf,
     sync::{mpsc, Arc, Mutex},
     thread,
     time::Duration,
@@ -51,7 +50,7 @@ pub enum Command {
     RemoveAlbum(AlbumId),
     RemoveArtist(ArtistId),
     ModifyArtist(Artist),
-    SetLibraryDirectory(PathBuf),
+    InitComplete,
 }
 impl Command {
     pub fn send_to_server(self, db: &Database) -> Result<(), Self> {
@@ -277,9 +276,8 @@ impl ToFromBytes for Command {
                 s.write_all(&[0b11011100])?;
                 artist.to_bytes(s)?;
             }
-            Self::SetLibraryDirectory(path) => {
+            Self::InitComplete => {
                 s.write_all(&[0b00110001])?;
-                path.to_bytes(s)?;
             }
         }
         Ok(())
@@ -325,7 +323,7 @@ impl ToFromBytes for Command {
             0b11010011 => Self::RemoveAlbum(ToFromBytes::from_bytes(s)?),
             0b11011100 => Self::RemoveArtist(ToFromBytes::from_bytes(s)?),
             0b01011101 => Self::AddCover(ToFromBytes::from_bytes(s)?),
-            0b00110001 => Self::SetLibraryDirectory(ToFromBytes::from_bytes(s)?),
+            0b00110001 => Self::InitComplete,
             _ => {
                 eprintln!("unexpected byte when reading command; stopping playback.");
                 Self::Stop
