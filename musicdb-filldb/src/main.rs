@@ -68,8 +68,8 @@ fn main() {
         let (artist_id, album_id) = if let Some(artist) = song
             .1
             .album_artist()
-            .or_else(|| song.1.artist())
             .filter(|v| !v.trim().is_empty())
+            .or_else(|| song.1.artist().filter(|v| !v.trim().is_empty()))
         {
             let artist_id = if !artists.contains_key(artist) {
                 let artist_id = database.add_artist_new(Artist {
@@ -85,7 +85,7 @@ fn main() {
             } else {
                 artists.get(artist).unwrap().0
             };
-            if let Some(album) = song.1.album() {
+            if let Some(album) = song.1.album().filter(|a| !a.trim().is_empty()) {
                 let (_, albums) = artists.get_mut(artist).unwrap();
                 let album_id = if !albums.contains_key(album) {
                     let album_id = database.add_album_new(Album {
