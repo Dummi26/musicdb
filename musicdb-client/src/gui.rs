@@ -436,6 +436,7 @@ pub enum Dragging {
     Album(AlbumId),
     Song(SongId),
     Queue(Queue),
+    Queues(Vec<Queue>),
 }
 
 /// GuiElems have access to this within draw.
@@ -733,7 +734,7 @@ pub fn adjust_pos(outer: &Rectangle, rel_pos: &Vec2) -> Vec2 {
 }
 
 impl Gui {
-    fn exec_gui_action(&mut self, action: GuiAction) {
+    pub fn exec_gui_action(&mut self, action: GuiAction) {
         match action {
             GuiAction::Build(f) => {
                 let actions = f(&mut *self.database.lock().unwrap());
@@ -887,6 +888,11 @@ impl WindowHandler<GuiEvent> for Gui {
                         Color::from_int_rgba(0, 100, 255, 100),
                     ),
                     Dragging::Queue(_) => graphics.draw_circle(
+                        self.mouse_pos,
+                        25.0,
+                        Color::from_int_rgba(100, 0, 255, 100),
+                    ),
+                    Dragging::Queues(_) => graphics.draw_circle(
                         self.mouse_pos,
                         25.0,
                         Color::from_int_rgba(100, 0, 255, 100),

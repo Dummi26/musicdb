@@ -373,7 +373,9 @@ impl GuiElemTrait for GuiEdit {
     }
     fn dragged(&mut self, dragged: Dragging) -> Vec<GuiAction> {
         let dragged = match dragged {
-            Dragging::Artist(_) | Dragging::Album(_) | Dragging::Song(_) => dragged,
+            Dragging::Artist(_) | Dragging::Album(_) | Dragging::Song(_) | Dragging::Queues(_) => {
+                dragged
+            }
             Dragging::Queue(q) => match q.content() {
                 QueueContent::Song(id) => Dragging::Song(*id),
                 _ => Dragging::Queue(q),
@@ -396,6 +398,7 @@ impl GuiElemTrait for GuiEdit {
                 }
             }
             Dragging::Queue(_) => return vec![],
+            Dragging::Queues(_) => return vec![],
         }
         self.reload = true;
         vec![]

@@ -37,6 +37,11 @@ pub struct GuiScreen {
     /// 0: StatusBar / Idle display
     /// 1: Settings
     /// 2: Panel for Main view
+    ///  0: settings button
+    ///  1: exit button
+    ///  2: library browser
+    ///  3: queue
+    ///  4: queue clear button
     /// 3: Edit Panel
     children: Vec<GuiElem>,
     pub idle: (bool, Option<Instant>),

@@ -1,15 +1,21 @@
 use std::{
     cmp::Ordering,
+    collections::HashSet,
     rc::Rc,
     sync::{
         atomic::{AtomicBool, AtomicUsize},
-        Arc, Mutex,
+        mpsc, Mutex,
     },
 };
 
+use clap::builder::StringValueParser;
 use musicdb_lib::data::{
-    album::Album, artist::Artist, database::Database, song::Song, AlbumId, ArtistId, GeneralData,
-    SongId,
+    album::Album,
+    artist::Artist,
+    database::Database,
+    queue::{Queue, QueueContent},
+    song::Song,
+    AlbumId, ArtistId, GeneralData, SongId,
 };
 use regex::{Regex, RegexBuilder};
 use speedy2d::{
@@ -21,8 +27,7 @@ use speedy2d::{
 
 use crate::{
     gui::{Dragging, DrawInfo, GuiAction, GuiElem, GuiElemCfg, GuiElemTrait},
-    gui_base::{Button, Panel, ScrollBox, Slider},
-    gui_edit::GuiEdit,
+    gui_base::{Button, Panel, ScrollBox},
     gui_text::{Label, TextField},
     gui_wrappers::WithFocusHotkey,
 };
@@ -34,7 +39,6 @@ with Regex search and drag-n-drop.
 
 */
 
-#[derive(Clone)]
 pub struct LibraryBrowser {
     config: GuiElemCfg,
     pub children: Vec<GuiElem>,
@@ -46,6 +50,7 @@ pub struct LibraryBrowser {
         Vec<(AlbumId, Vec<(SongId, f32)>, f32)>,
         f32,
     )>,
+    selected: Selected,
     // - - -
     search_artist: String,
     search_artist_regex: Option<Regex>,
@@ -64,6 +69,79 @@ pub struct LibraryBrowser {
     filter_songs: Rc<Mutex<Filter>>,
     filter_albums: Rc<Mutex<Filter>>,
     filter_artists: Rc<Mutex<Filter>>,
+    do_something_sender: mpsc::Sender<Box<dyn FnOnce(&mut Self)>>,
+    do_something_receiver: mpsc::Receiver<Box<dyn FnOnce(&mut Self)>>,
+}
+impl Clone for LibraryBrowser {
+    fn clone(&self) -> Self {
+        Self::new(self.config.clone())
+    }
+}
+#[derive(Clone)]
+struct Selected(Rc<Mutex<(HashSet<ArtistId>, HashSet<AlbumId>, HashSet<SongId>)>>);
+impl Selected {
+    pub fn as_queue(&self, lb: &LibraryBrowser, db: &Database) -> Vec<Queue> {
+        let lock = self.0.lock().unwrap();
+        let (sel_artists, sel_albums, sel_songs) = &*lock;
+        let mut out = vec![];
+        for (artist, singles, albums, _) in &lb.library_filtered {
+            let artist_selected = sel_artists.contains(artist);
+            let mut local_artist_owned = vec![];
+            let mut local_artist = if artist_selected {
+                &mut local_artist_owned
+            } else {
+                &mut out
+            };
+            for (song, _) in singles {
+                let song_selected = sel_songs.contains(song);
+                if song_selected {
+                    local_artist.push(QueueContent::Song(*song).into());
+                }
+            }
+            for (album, songs, _) in albums {
+                let album_selected = sel_albums.contains(album);
+                let mut local_album_owned = vec![];
+                let local_album = if album_selected {
+                    &mut local_album_owned
+                } else {
+                    &mut local_artist
+                };
+                for (song, _) in songs {
+                    let song_selected = sel_songs.contains(song);
+                    if song_selected {
+                        local_album.push(QueueContent::Song(*song).into());
+                    }
+                }
+                if album_selected {
+                    local_artist.push(
+                        QueueContent::Folder(
+                            0,
+                            local_album_owned,
+                            match db.albums().get(album) {
+                                Some(v) => v.name.clone(),
+                                None => "< unknown album >".to_owned(),
+                            },
+                        )
+                        .into(),
+                    );
+                }
+            }
+            if artist_selected {
+                out.push(
+                    QueueContent::Folder(
+                        0,
+                        local_artist_owned,
+                        match db.artists().get(artist) {
+                            Some(v) => v.name.to_owned(),
+                            None => "< unknown artist >".to_owned(),
+                        },
+                    )
+                    .into(),
+                );
+            }
+        }
+        out
+    }
 }
 fn search_regex_new(pat: &str, case_insensitive: bool) -> Result<Option<Regex>, regex::Error> {
     if pat.is_empty() {
@@ -108,6 +186,7 @@ impl LibraryBrowser {
             crate::gui_base::ScrollBoxSizeUnit::Pixels,
             vec![],
         );
+        let (do_something_sender, do_something_receiver) = mpsc::channel();
         let search_settings_changed = Rc::new(AtomicBool::new(false));
         let search_was_case_sensitive = false;
         let search_is_case_sensitive = Rc::new(AtomicBool::new(search_was_case_sensitive));
@@ -144,6 +223,11 @@ impl LibraryBrowser {
             and: true,
             filters: vec![],
         }));
+        let selected = Selected(Rc::new(Mutex::new((
+            HashSet::new(),
+            HashSet::new(),
+            HashSet::new(),
+        ))));
         Self {
             config,
             children: vec![
@@ -159,11 +243,14 @@ impl LibraryBrowser {
                     Rc::clone(&filter_songs),
                     Rc::clone(&filter_albums),
                     Rc::clone(&filter_artists),
+                    selected.clone(),
+                    do_something_sender.clone(),
                 )),
             ],
             // - - -
             library_sorted: vec![],
             library_filtered: vec![],
+            selected,
             // - - -
             search_artist: String::new(),
             search_artist_regex: None,
@@ -182,6 +269,8 @@ impl LibraryBrowser {
             filter_songs,
             filter_albums,
             filter_artists,
+            do_something_sender,
+            do_something_receiver,
         }
     }
 }
@@ -205,6 +294,13 @@ impl GuiElemTrait for LibraryBrowser {
         Box::new(self.clone())
     }
     fn draw(&mut self, info: &mut DrawInfo, _g: &mut speedy2d::Graphics2D) {
+        loop {
+            if let Ok(action) = self.do_something_receiver.try_recv() {
+                action(self);
+            } else {
+                break;
+            }
+        }
         // search
         let mut search_changed = false;
         let mut rebuild_regex = false;
@@ -574,6 +670,7 @@ impl LibraryBrowser {
                 } else {
                     format!("[ Artist #{id} ]")
                 },
+                self.selected.clone(),
             )),
             h * 2.5,
         )
@@ -588,6 +685,7 @@ impl LibraryBrowser {
                 } else {
                     format!("[ Album #{id} ]")
                 },
+                self.selected.clone(),
             )),
             h * 1.5,
         )
@@ -602,6 +700,7 @@ impl LibraryBrowser {
                 } else {
                     format!("[ Song #{id} ]")
                 },
+                self.selected.clone(),
             )),
             h,
         )
@@ -615,9 +714,11 @@ struct ListArtist {
     children: Vec<GuiElem>,
     mouse: bool,
     mouse_pos: Vec2,
+    selected: Selected,
+    sel: bool,
 }
 impl ListArtist {
-    pub fn new(config: GuiElemCfg, id: ArtistId, name: String) -> Self {
+    pub fn new(mut config: GuiElemCfg, id: ArtistId, name: String, selected: Selected) -> Self {
         let label = Label::new(
             GuiElemCfg::default(),
             name,
@@ -625,12 +726,15 @@ impl ListArtist {
             None,
             Vec2::new(0.0, 0.5),
         );
+        config.redraw = true;
         Self {
             config: config.w_mouse(),
             id,
             children: vec![GuiElem::new(label)],
             mouse: false,
             mouse_pos: Vec2::ZERO,
+            selected,
+            sel: false,
         }
     }
 }
@@ -654,11 +758,50 @@ impl GuiElemTrait for ListArtist {
         Box::new(self.clone())
     }
     fn draw(&mut self, info: &mut DrawInfo, _g: &mut speedy2d::Graphics2D) {
+        if self.config.redraw {
+            self.config.redraw = false;
+            let sel = self.selected.0.lock().unwrap().0.contains(&self.id);
+            if sel != self.sel {
+                self.sel = sel;
+                if sel {
+                    self.children.push(GuiElem::new(Panel::with_background(
+                        GuiElemCfg::default(),
+                        vec![],
+                        Color::from_rgba(1.0, 1.0, 1.0, 0.2),
+                    )));
+                } else {
+                    self.children.pop();
+                }
+            }
+        }
         if self.mouse {
             if info.pos.contains(info.mouse_pos) {
                 return;
             } else {
                 self.mouse = false;
+                if self.sel {
+                    let selected = self.selected.clone();
+                    info.actions.push(GuiAction::Do(Box::new(move |gui| {
+                        let q = selected.as_queue(
+                            gui.gui
+                                .inner
+                                .children()
+                                .nth(2)
+                                .unwrap()
+                                .inner
+                                .children()
+                                .nth(2)
+                                .unwrap()
+                                .try_as()
+                                .unwrap(),
+                            &gui.database.lock().unwrap(),
+                        );
+                        gui.exec_gui_action(GuiAction::SetDragging(Some((
+                            Dragging::Queues(q),
+                            None,
+                        ))));
+                    })));
+                }
             }
         }
         self.mouse_pos = Vec2::new(
@@ -673,18 +816,22 @@ impl GuiElemTrait for ListArtist {
             let w = self.config.pixel_pos.width();
             let h = self.config.pixel_pos.height();
             let mut el = GuiElem::new(self.clone());
-            vec![GuiAction::SetDragging(Some((
-                Dragging::Artist(self.id),
-                Some(Box::new(move |i, g| {
-                    let sw = i.pos.width();
-                    let sh = i.pos.height();
-                    let x = (i.mouse_pos.x - mouse_pos.x) / sw;
-                    let y = (i.mouse_pos.y - mouse_pos.y) / sh;
-                    el.inner.config_mut().pos =
-                        Rectangle::from_tuples((x, y), (x + w / sw, y + h / sh));
-                    el.draw(i, g)
-                })),
-            )))]
+            if self.sel {
+                vec![]
+            } else {
+                vec![GuiAction::SetDragging(Some((
+                    Dragging::Artist(self.id),
+                    Some(Box::new(move |i, g| {
+                        let sw = i.pos.width();
+                        let sh = i.pos.height();
+                        let x = (i.mouse_pos.x - mouse_pos.x) / sw;
+                        let y = (i.mouse_pos.y - mouse_pos.y) / sh;
+                        el.inner.config_mut().pos =
+                            Rectangle::from_tuples((x, y), (x + w / sw, y + h / sh));
+                        el.draw(i, g)
+                    })),
+                )))]
+            }
         } else {
             vec![]
         }
@@ -692,13 +839,14 @@ impl GuiElemTrait for ListArtist {
     fn mouse_up(&mut self, button: MouseButton) -> Vec<GuiAction> {
         if self.mouse && button == MouseButton::Left {
             self.mouse = false;
-            vec![GuiAction::OpenEditPanel(GuiElem::new(GuiEdit::new(
-                GuiElemCfg::default(),
-                crate::gui_edit::Editable::Artist(vec![self.id]),
-            )))]
-        } else {
-            vec![]
+            self.config.redraw = true;
+            if !self.sel {
+                self.selected.0.lock().unwrap().0.insert(self.id);
+            } else {
+                self.selected.0.lock().unwrap().0.remove(&self.id);
+            }
         }
+        vec![]
     }
 }
 
@@ -709,9 +857,11 @@ struct ListAlbum {
     children: Vec<GuiElem>,
     mouse: bool,
     mouse_pos: Vec2,
+    selected: Selected,
+    sel: bool,
 }
 impl ListAlbum {
-    pub fn new(config: GuiElemCfg, id: AlbumId, name: String) -> Self {
+    pub fn new(mut config: GuiElemCfg, id: AlbumId, name: String, selected: Selected) -> Self {
         let label = Label::new(
             GuiElemCfg::default(),
             name,
@@ -719,12 +869,15 @@ impl ListAlbum {
             None,
             Vec2::new(0.0, 0.5),
         );
+        config.redraw = true;
         Self {
             config: config.w_mouse(),
             id,
             children: vec![GuiElem::new(label)],
             mouse: false,
             mouse_pos: Vec2::ZERO,
+            selected,
+            sel: false,
         }
     }
 }
@@ -748,11 +901,50 @@ impl GuiElemTrait for ListAlbum {
         Box::new(self.clone())
     }
     fn draw(&mut self, info: &mut DrawInfo, _g: &mut speedy2d::Graphics2D) {
+        if self.config.redraw {
+            self.config.redraw = false;
+            let sel = self.selected.0.lock().unwrap().1.contains(&self.id);
+            if sel != self.sel {
+                self.sel = sel;
+                if sel {
+                    self.children.push(GuiElem::new(Panel::with_background(
+                        GuiElemCfg::default(),
+                        vec![],
+                        Color::from_rgba(1.0, 1.0, 1.0, 0.2),
+                    )));
+                } else {
+                    self.children.pop();
+                }
+            }
+        }
         if self.mouse {
             if info.pos.contains(info.mouse_pos) {
                 return;
             } else {
                 self.mouse = false;
+                if self.sel {
+                    let selected = self.selected.clone();
+                    info.actions.push(GuiAction::Do(Box::new(move |gui| {
+                        let q = selected.as_queue(
+                            gui.gui
+                                .inner
+                                .children()
+                                .nth(2)
+                                .unwrap()
+                                .inner
+                                .children()
+                                .nth(2)
+                                .unwrap()
+                                .try_as()
+                                .unwrap(),
+                            &gui.database.lock().unwrap(),
+                        );
+                        gui.exec_gui_action(GuiAction::SetDragging(Some((
+                            Dragging::Queues(q),
+                            None,
+                        ))));
+                    })));
+                }
             }
         }
         self.mouse_pos = Vec2::new(
@@ -767,18 +959,22 @@ impl GuiElemTrait for ListAlbum {
             let w = self.config.pixel_pos.width();
             let h = self.config.pixel_pos.height();
             let mut el = GuiElem::new(self.clone());
-            vec![GuiAction::SetDragging(Some((
-                Dragging::Album(self.id),
-                Some(Box::new(move |i, g| {
-                    let sw = i.pos.width();
-                    let sh = i.pos.height();
-                    let x = (i.mouse_pos.x - mouse_pos.x) / sw;
-                    let y = (i.mouse_pos.y - mouse_pos.y) / sh;
-                    el.inner.config_mut().pos =
-                        Rectangle::from_tuples((x, y), (x + w / sw, y + h / sh));
-                    el.draw(i, g)
-                })),
-            )))]
+            if self.sel {
+                vec![]
+            } else {
+                vec![GuiAction::SetDragging(Some((
+                    Dragging::Album(self.id),
+                    Some(Box::new(move |i, g| {
+                        let sw = i.pos.width();
+                        let sh = i.pos.height();
+                        let x = (i.mouse_pos.x - mouse_pos.x) / sw;
+                        let y = (i.mouse_pos.y - mouse_pos.y) / sh;
+                        el.inner.config_mut().pos =
+                            Rectangle::from_tuples((x, y), (x + w / sw, y + h / sh));
+                        el.draw(i, g)
+                    })),
+                )))]
+            }
         } else {
             vec![]
         }
@@ -786,13 +982,14 @@ impl GuiElemTrait for ListAlbum {
     fn mouse_up(&mut self, button: MouseButton) -> Vec<GuiAction> {
         if self.mouse && button == MouseButton::Left {
             self.mouse = false;
-            vec![GuiAction::OpenEditPanel(GuiElem::new(GuiEdit::new(
-                GuiElemCfg::default(),
-                crate::gui_edit::Editable::Album(vec![self.id]),
-            )))]
-        } else {
-            vec![]
+            self.config.redraw = true;
+            if !self.sel {
+                self.selected.0.lock().unwrap().1.insert(self.id);
+            } else {
+                self.selected.0.lock().unwrap().1.remove(&self.id);
+            }
         }
+        vec![]
     }
 }
 
@@ -803,9 +1000,11 @@ struct ListSong {
     children: Vec<GuiElem>,
     mouse: bool,
     mouse_pos: Vec2,
+    selected: Selected,
+    sel: bool,
 }
 impl ListSong {
-    pub fn new(config: GuiElemCfg, id: SongId, name: String) -> Self {
+    pub fn new(mut config: GuiElemCfg, id: SongId, name: String, selected: Selected) -> Self {
         let label = Label::new(
             GuiElemCfg::default(),
             name,
@@ -813,12 +1012,15 @@ impl ListSong {
             None,
             Vec2::new(0.0, 0.5),
         );
+        config.redraw = true;
         Self {
             config: config.w_mouse(),
             id,
             children: vec![GuiElem::new(label)],
             mouse: false,
             mouse_pos: Vec2::ZERO,
+            selected,
+            sel: false,
         }
     }
 }
@@ -842,11 +1044,50 @@ impl GuiElemTrait for ListSong {
         Box::new(self.clone())
     }
     fn draw(&mut self, info: &mut DrawInfo, _g: &mut speedy2d::Graphics2D) {
+        if self.config.redraw {
+            self.config.redraw = false;
+            let sel = self.selected.0.lock().unwrap().2.contains(&self.id);
+            if sel != self.sel {
+                self.sel = sel;
+                if sel {
+                    self.children.push(GuiElem::new(Panel::with_background(
+                        GuiElemCfg::default(),
+                        vec![],
+                        Color::from_rgba(1.0, 1.0, 1.0, 0.2),
+                    )));
+                } else {
+                    self.children.pop();
+                }
+            }
+        }
         if self.mouse {
             if info.pos.contains(info.mouse_pos) {
                 return;
             } else {
                 self.mouse = false;
+                if self.sel {
+                    let selected = self.selected.clone();
+                    info.actions.push(GuiAction::Do(Box::new(move |gui| {
+                        let q = selected.as_queue(
+                            gui.gui
+                                .inner
+                                .children()
+                                .nth(2)
+                                .unwrap()
+                                .inner
+                                .children()
+                                .nth(2)
+                                .unwrap()
+                                .try_as()
+                                .unwrap(),
+                            &gui.database.lock().unwrap(),
+                        );
+                        gui.exec_gui_action(GuiAction::SetDragging(Some((
+                            Dragging::Queues(q),
+                            None,
+                        ))));
+                    })));
+                }
             }
         }
         self.mouse_pos = Vec2::new(
@@ -861,18 +1102,22 @@ impl GuiElemTrait for ListSong {
             let w = self.config.pixel_pos.width();
             let h = self.config.pixel_pos.height();
             let mut el = GuiElem::new(self.clone());
-            vec![GuiAction::SetDragging(Some((
-                Dragging::Song(self.id),
-                Some(Box::new(move |i, g| {
-                    let sw = i.pos.width();
-                    let sh = i.pos.height();
-                    let x = (i.mouse_pos.x - mouse_pos.x) / sw;
-                    let y = (i.mouse_pos.y - mouse_pos.y) / sh;
-                    el.inner.config_mut().pos =
-                        Rectangle::from_tuples((x, y), (x + w / sw, y + h / sh));
-                    el.draw(i, g)
-                })),
-            )))]
+            if self.sel {
+                vec![]
+            } else {
+                vec![GuiAction::SetDragging(Some((
+                    Dragging::Song(self.id),
+                    Some(Box::new(move |i, g| {
+                        let sw = i.pos.width();
+                        let sh = i.pos.height();
+                        let x = (i.mouse_pos.x - mouse_pos.x) / sw;
+                        let y = (i.mouse_pos.y - mouse_pos.y) / sh;
+                        el.inner.config_mut().pos =
+                            Rectangle::from_tuples((x, y), (x + w / sw, y + h / sh));
+                        el.draw(i, g)
+                    })),
+                )))]
+            }
         } else {
             vec![]
         }
@@ -880,13 +1125,14 @@ impl GuiElemTrait for ListSong {
     fn mouse_up(&mut self, button: MouseButton) -> Vec<GuiAction> {
         if self.mouse && button == MouseButton::Left {
             self.mouse = false;
-            vec![GuiAction::OpenEditPanel(GuiElem::new(GuiEdit::new(
-                GuiElemCfg::default(),
-                crate::gui_edit::Editable::Song(vec![self.id]),
-            )))]
-        } else {
-            vec![]
+            self.config.redraw = true;
+            if !self.sel {
+                self.selected.0.lock().unwrap().2.insert(self.id);
+            } else {
+                self.selected.0.lock().unwrap().2.remove(&self.id);
+            }
         }
+        vec![]
     }
 }
 
@@ -914,13 +1160,25 @@ impl FilterPanel {
         filter_songs: Rc<Mutex<Filter>>,
         filter_albums: Rc<Mutex<Filter>>,
         filter_artists: Rc<Mutex<Filter>>,
+        selected: Selected,
+        do_something_sender: mpsc::Sender<Box<dyn FnOnce(&mut LibraryBrowser)>>,
     ) -> Self {
         let is_case_sensitive = search_is_case_sensitive.load(std::sync::atomic::Ordering::Relaxed);
         let prefer_start_matches =
             search_prefer_start_matches.load(std::sync::atomic::Ordering::Relaxed);
         let ssc1 = Rc::clone(&search_settings_changed);
         let ssc2 = Rc::clone(&search_settings_changed);
-        let tab_settings = GuiElem::new(ScrollBox::new(
+        let ssc3 = Rc::clone(&search_settings_changed);
+        let ssc4 = Rc::clone(&search_settings_changed);
+        let ssc5 = Rc::clone(&search_settings_changed);
+        let ssc6 = Rc::clone(&search_settings_changed);
+        let ssc7 = Rc::clone(&search_settings_changed);
+        let sel3 = selected.clone();
+        let sel4 = selected.clone();
+        let sel5 = selected.clone();
+        let sel6 = selected.clone();
+        let sel7 = selected.clone();
+        let tab_main = GuiElem::new(ScrollBox::new(
             GuiElemCfg::default(),
             crate::gui_base::ScrollBoxSizeUnit::Pixels,
             vec![
@@ -997,6 +1255,153 @@ impl FilterPanel {
                     )),
                     1.0,
                 ),
+                (
+                    GuiElem::new(Button::new(
+                        GuiElemCfg::default(),
+                        move |_| {
+                            ssc3.store(true, std::sync::atomic::Ordering::Relaxed);
+                            let mut sel = sel3.0.lock().unwrap();
+                            sel.2 = HashSet::new();
+                            sel.1 = HashSet::new();
+                            sel.0 = HashSet::new();
+                            vec![]
+                        },
+                        vec![GuiElem::new(Label::new(
+                            GuiElemCfg::default(),
+                            "deselect all".to_owned(),
+                            Color::GRAY,
+                            None,
+                            Vec2::new(0.5, 0.5),
+                        ))],
+                    )),
+                    1.0,
+                ),
+                (
+                    GuiElem::new(Panel::new(
+                        GuiElemCfg::default(),
+                        vec![
+                            GuiElem::new(Button::new(
+                                GuiElemCfg::at(Rectangle::from_tuples((0.0, 0.0), (0.5, 1.0))),
+                                {
+                                    let dss = do_something_sender.clone();
+                                    move |_| {
+                                        dss.send(Box::new(|s| {
+                                            s.search_settings_changed
+                                                .store(true, std::sync::atomic::Ordering::Relaxed);
+                                            let mut sel = s.selected.0.lock().unwrap();
+                                            for (id, singles, albums, _) in &s.library_filtered {
+                                                sel.0.insert(*id);
+                                                for (s, _) in singles {
+                                                    sel.2.insert(*s);
+                                                }
+                                                for (id, album, _) in albums {
+                                                    sel.1.insert(*id);
+                                                    for (s, _) in album {
+                                                        sel.2.insert(*s);
+                                                    }
+                                                }
+                                            }
+                                        }))
+                                        .unwrap();
+                                        vec![]
+                                    }
+                                },
+                                vec![GuiElem::new(Label::new(
+                                    GuiElemCfg::default(),
+                                    "select all".to_owned(),
+                                    Color::GRAY,
+                                    None,
+                                    Vec2::new(0.5, 0.5),
+                                ))],
+                            )),
+                            GuiElem::new(Button::new(
+                                GuiElemCfg::at(Rectangle::from_tuples((0.55, 0.0), (0.65, 1.0))),
+                                {
+                                    let dss = do_something_sender.clone();
+                                    move |_| {
+                                        dss.send(Box::new(|s| {
+                                            s.search_settings_changed
+                                                .store(true, std::sync::atomic::Ordering::Relaxed);
+                                            let mut sel = s.selected.0.lock().unwrap();
+                                            for (_, singles, albums, _) in &s.library_filtered {
+                                                for (s, _) in singles {
+                                                    sel.2.insert(*s);
+                                                }
+                                                for (_, album, _) in albums {
+                                                    for (s, _) in album {
+                                                        sel.2.insert(*s);
+                                                    }
+                                                }
+                                            }
+                                        }))
+                                        .unwrap();
+                                        vec![]
+                                    }
+                                },
+                                vec![GuiElem::new(Label::new(
+                                    GuiElemCfg::default(),
+                                    "songs".to_owned(),
+                                    Color::GRAY,
+                                    None,
+                                    Vec2::new(0.5, 0.5),
+                                ))],
+                            )),
+                            GuiElem::new(Button::new(
+                                GuiElemCfg::at(Rectangle::from_tuples((0.7, 0.0), (0.8, 1.0))),
+                                {
+                                    let dss = do_something_sender.clone();
+                                    move |_| {
+                                        dss.send(Box::new(|s| {
+                                            s.search_settings_changed
+                                                .store(true, std::sync::atomic::Ordering::Relaxed);
+                                            let mut sel = s.selected.0.lock().unwrap();
+                                            for (_, _, albums, _) in &s.library_filtered {
+                                                for (id, _, _) in albums {
+                                                    sel.1.insert(*id);
+                                                }
+                                            }
+                                        }))
+                                        .unwrap();
+                                        vec![]
+                                    }
+                                },
+                                vec![GuiElem::new(Label::new(
+                                    GuiElemCfg::default(),
+                                    "albums".to_owned(),
+                                    Color::GRAY,
+                                    None,
+                                    Vec2::new(0.5, 0.5),
+                                ))],
+                            )),
+                            GuiElem::new(Button::new(
+                                GuiElemCfg::at(Rectangle::from_tuples((0.85, 0.0), (0.95, 1.0))),
+                                {
+                                    let dss = do_something_sender.clone();
+                                    move |_| {
+                                        dss.send(Box::new(|s| {
+                                            s.search_settings_changed
+                                                .store(true, std::sync::atomic::Ordering::Relaxed);
+                                            let mut sel = s.selected.0.lock().unwrap();
+                                            for (id, _, _, _) in &s.library_filtered {
+                                                sel.0.insert(*id);
+                                            }
+                                        }))
+                                        .unwrap();
+                                        vec![]
+                                    }
+                                },
+                                vec![GuiElem::new(Label::new(
+                                    GuiElemCfg::default(),
+                                    "artists".to_owned(),
+                                    Color::GRAY,
+                                    None,
+                                    Vec2::new(0.5, 0.5),
+                                ))],
+                            )),
+                        ],
+                    )),
+                    1.0,
+                ),
             ],
         ));
         let tab_filters_songs = GuiElem::new(ScrollBox::new(
@@ -1015,7 +1420,6 @@ impl FilterPanel {
             vec![],
         ));
         let new_tab = Rc::new(AtomicUsize::new(0));
-        let set_tab_0 = Rc::clone(&new_tab);
         let set_tab_1 = Rc::clone(&new_tab);
         let set_tab_2 = Rc::clone(&new_tab);
         let set_tab_3 = Rc::clone(&new_tab);
@@ -1027,56 +1431,60 @@ impl FilterPanel {
                     GuiElemCfg::at(Rectangle::from_tuples((0.0, 0.0), (1.0, HEIGHT))),
                     vec![
                         GuiElem::new(Button::new(
-                            GuiElemCfg::at(Rectangle::from_tuples((0.0, 0.0), (0.4, 1.0))),
+                            GuiElemCfg::at(Rectangle::from_tuples((0.0, 0.0), (0.33, 1.0))),
                             move |_| {
-                                set_tab_0.store(0, std::sync::atomic::Ordering::Relaxed);
+                                let v = if set_tab_1.load(std::sync::atomic::Ordering::Relaxed) != 1
+                                {
+                                    1
+                                } else {
+                                    0
+                                };
+                                set_tab_1.store(v, std::sync::atomic::Ordering::Relaxed);
                                 vec![]
                             },
                             vec![GuiElem::new(Label::new(
                                 GuiElemCfg::default(),
-                                "Settings".to_owned(),
-                                Color::WHITE,
-                                None,
-                                Vec2::new(0.5, 0.5),
-                            ))],
-                        )),
-                        GuiElem::new(Button::new(
-                            GuiElemCfg::at(Rectangle::from_tuples((0.4, 0.0), (0.6, 1.0))),
-                            move |_| {
-                                set_tab_1.store(1, std::sync::atomic::Ordering::Relaxed);
-                                vec![]
-                            },
-                            vec![GuiElem::new(Label::new(
-                                GuiElemCfg::default(),
-                                "Filters\n(Songs)".to_owned(),
+                                "Filter Songs".to_owned(),
                                 Color::GRAY,
                                 None,
                                 Vec2::new(0.5, 0.5),
                             ))],
                         )),
                         GuiElem::new(Button::new(
-                            GuiElemCfg::at(Rectangle::from_tuples((0.6, 0.0), (0.8, 1.0))),
+                            GuiElemCfg::at(Rectangle::from_tuples((0.33, 0.0), (0.67, 1.0))),
                             move |_| {
-                                set_tab_2.store(2, std::sync::atomic::Ordering::Relaxed);
+                                let v = if set_tab_2.load(std::sync::atomic::Ordering::Relaxed) != 2
+                                {
+                                    2
+                                } else {
+                                    0
+                                };
+                                set_tab_2.store(v, std::sync::atomic::Ordering::Relaxed);
                                 vec![]
                             },
                             vec![GuiElem::new(Label::new(
                                 GuiElemCfg::default(),
-                                "Filters\n(Albums)".to_owned(),
+                                "Filter Albums".to_owned(),
                                 Color::GRAY,
                                 None,
                                 Vec2::new(0.5, 0.5),
                             ))],
                         )),
                         GuiElem::new(Button::new(
-                            GuiElemCfg::at(Rectangle::from_tuples((0.8, 0.0), (1.0, 1.0))),
+                            GuiElemCfg::at(Rectangle::from_tuples((0.67, 0.0), (1.0, 1.0))),
                             move |_| {
-                                set_tab_3.store(3, std::sync::atomic::Ordering::Relaxed);
+                                let v = if set_tab_3.load(std::sync::atomic::Ordering::Relaxed) != 3
+                                {
+                                    3
+                                } else {
+                                    0
+                                };
+                                set_tab_3.store(v, std::sync::atomic::Ordering::Relaxed);
                                 vec![]
                             },
                             vec![GuiElem::new(Label::new(
                                 GuiElemCfg::default(),
-                                "Filters\n(Artists)".to_owned(),
+                                "Filter Artists".to_owned(),
                                 Color::GRAY,
                                 None,
                                 Vec2::new(0.5, 0.5),
@@ -1087,7 +1495,7 @@ impl FilterPanel {
                 GuiElem::new(Panel::new(
                     GuiElemCfg::at(Rectangle::from_tuples((0.0, HEIGHT), (1.0, 1.0))),
                     vec![
-                        tab_settings,
+                        tab_main,
                         tab_filters_songs,
                         tab_filters_albums,
                         tab_filters_artists,
@@ -1390,53 +1798,61 @@ impl GuiElemTrait for FilterPanel {
             self.line_height = info.line_height;
         }
         // maybe switch tabs
-        let new_tab = self.new_tab.load(std::sync::atomic::Ordering::Relaxed);
+        let mut new_tab = self.new_tab.load(std::sync::atomic::Ordering::Relaxed);
         let mut load_tab = false;
-        if new_tab < usize::MAX {
+        if new_tab != self.tab {
             load_tab = true;
-            self.new_tab
-                .store(usize::MAX, std::sync::atomic::Ordering::Relaxed);
-            self.children[1]
-                .inner
-                .children()
-                .nth(self.tab)
-                .unwrap()
-                .inner
-                .config_mut()
-                .enabled = false;
-            self.children[1]
-                .inner
-                .children()
-                .nth(new_tab)
-                .unwrap()
-                .inner
-                .config_mut()
-                .enabled = true;
-            *self.children[0]
-                .inner
-                .children()
-                .nth(self.tab)
-                .unwrap()
-                .try_as_mut::<Button>()
-                .unwrap()
-                .children[0]
-                .try_as_mut::<Label>()
-                .unwrap()
-                .content
-                .color() = Color::GRAY;
-            *self.children[0]
-                .inner
-                .children()
-                .nth(new_tab)
-                .unwrap()
-                .try_as_mut::<Button>()
-                .unwrap()
-                .children[0]
-                .try_as_mut::<Label>()
-                .unwrap()
-                .content
-                .color() = Color::WHITE;
-            self.tab = new_tab;
+            if new_tab == usize::MAX {
+                self.new_tab
+                    .store(self.tab, std::sync::atomic::Ordering::Relaxed);
+                new_tab = self.tab;
+            } else {
+                self.children[1]
+                    .inner
+                    .children()
+                    .nth(self.tab)
+                    .unwrap()
+                    .inner
+                    .config_mut()
+                    .enabled = false;
+                self.children[1]
+                    .inner
+                    .children()
+                    .nth(new_tab)
+                    .unwrap()
+                    .inner
+                    .config_mut()
+                    .enabled = true;
+                if self.tab > 0 {
+                    *self.children[0]
+                        .inner
+                        .children()
+                        .nth(self.tab - 1)
+                        .unwrap()
+                        .try_as_mut::<Button>()
+                        .unwrap()
+                        .children[0]
+                        .try_as_mut::<Label>()
+                        .unwrap()
+                        .content
+                        .color() = Color::GRAY;
+                }
+                if new_tab > 0 {
+                    *self.children[0]
+                        .inner
+                        .children()
+                        .nth(new_tab - 1)
+                        .unwrap()
+                        .try_as_mut::<Button>()
+                        .unwrap()
+                        .children[0]
+                        .try_as_mut::<Label>()
+                        .unwrap()
+                        .content
+                        .color() = Color::WHITE;
+                }
+                self.tab = new_tab;
+            }
         }
         // load tab
         if load_tab {
@@ -1450,7 +1866,6 @@ impl GuiElemTrait for FilterPanel {
                         .try_as_mut::<ScrollBox>()
                         .unwrap();
                     let ssc = Rc::clone(&self.search_settings_changed);
-                    let my_tab = self.tab;
                     let ntab = Rc::clone(&self.new_tab);
                     sb.children = Self::build_filter(
                         match new_tab {
@@ -1462,7 +1877,7 @@ impl GuiElemTrait for FilterPanel {
                         info.line_height,
                         &Rc::new(move |update_ui| {
                             if update_ui {
-                                ntab.store(my_tab, std::sync::atomic::Ordering::Relaxed);
+                                ntab.store(usize::MAX, std::sync::atomic::Ordering::Relaxed);
                             }
                             ssc.store(true, std::sync::atomic::Ordering::Relaxed);
                         }),
