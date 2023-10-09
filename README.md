@@ -37,9 +37,10 @@ a custom database speeds up server startup and allows for more features.
 
 ### build
 
-build `musicdb-server` and `musicdb-client` using cargo.
+build `musicdb-server` and `musicdb-client` (and `musicdb-filldb`) using cargo.
 
 Note: the client has a config file in ~/.config/musicdb-client/, which includes the path to a font. You need to set this manually or the client won't start.
+The file and directory will be created when you first run the client in gui mode.
 
 ## setup
 
@@ -68,7 +69,7 @@ musicdb-filldb /music
 Copy the `musicdb-server/assets` directory to `./assets`, then run:
 
 ```sh
-musicdb-server dbfile --tcp 127.0.0.1:26314 --web 127.0.0.1:8080
+musicdb-server dbfile /music --tcp 127.0.0.1:26314 --web 127.0.0.1:8080
 ```
 
 Note: If you don't care about the HTML site, you can leave out the `--web 127.0.0.1:8080`.
@@ -79,14 +80,19 @@ And that's it - the rest should just work.
 You can now open 127.0.0.1:8080 in a browser or use `musicdb-client`:
 
 ```sh
-musicdb-client gui 127.0.0.1:26314
+musicdb-client 127.0.0.1:26314 gui
 ```
 
 ### syncplayer
 
-If `/music` is the same on two devices, one can act as the server and the other as a client
-that simply mirrors the server using the client's syncplayer mode:
+`musicdb-client` has a syncplayer mode, where it will play back songs in sync with the server.
+It's usually easier to use syncplayer-network, which will get the song files from the server,
+but syncplayer-local may be more stable and responsive, because it assumes you have a local copy of the server's music files (`/music`) somewhere, for example at `~/music`:
 
 ```sh
-musicdb-client syncplayer 127.0.0.1:26314
+musicdb-client 127.0.0.1:26314 syncplayer-network
+```
+
+```sh
+musicdb-client 127.0.0.1:26314 syncplayer-local ~/music
 ```
