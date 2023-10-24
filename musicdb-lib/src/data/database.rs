@@ -232,7 +232,14 @@ impl Database {
         Ok(())
     }
 
-    pub fn apply_command(&mut self, command: Command) {
+    pub fn apply_command(&mut self, mut command: Command) {
+        if !self.is_client() {
+            if let Command::ErrorInfo(t, _) = &mut command {
+                // clients can send ErrorInfo to the server and it will show up on other clients,
+                // BUT only the server can set the Title of the ErrorInfo.
+                t.clear();
+            }
+        }
         // since db.update_endpoints is empty for clients, this won't cause unwanted back and forth
         self.broadcast_update(&command);
         match command {
@@ -349,6 +356,7 @@ impl Database {
             Command::InitComplete => {
                 self.client_is_init = true;
             }
+            Command::ErrorInfo(..) => {}
         }
     }
 }

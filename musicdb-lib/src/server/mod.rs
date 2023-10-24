@@ -1,7 +1,6 @@
 pub mod get;
 
 use std::{
-    eprintln,
     io::{BufRead, BufReader, Read, Write},
     net::{SocketAddr, TcpListener},
     sync::{mpsc, Arc, Mutex},
@@ -51,6 +50,7 @@ pub enum Command {
     RemoveArtist(ArtistId),
     ModifyArtist(Artist),
     InitComplete,
+    ErrorInfo(String, String),
 }
 impl Command {
     pub fn send_to_server(self, db: &Database) -> Result<(), Self> {
@@ -106,7 +106,6 @@ pub fn run_server(
                         let command_sender = command_sender.clone();
                         let db = Arc::clone(&db);
                         thread::spawn(move || {
-                            eprintln!("[info] TCP connection accepted from {con_addr}.");
                             // each connection first has to send one line to tell us what it wants
                             let mut connection = BufReader::new(connection);
                             let mut line = String::new();
@@ -279,6 +278,11 @@ impl ToFromBytes for Command {
             Self::InitComplete => {
                 s.write_all(&[0b00110001])?;
             }
+            Self::ErrorInfo(t, d) => {
+                s.write_all(&[0b11011011])?;
+                t.to_bytes(s)?;
+                d.to_bytes(s)?;
+            }
         }
         Ok(())
     }
@@ -324,6 +328,7 @@ impl ToFromBytes for Command {
             0b11011100 => Self::RemoveArtist(ToFromBytes::from_bytes(s)?),
             0b01011101 => Self::AddCover(ToFromBytes::from_bytes(s)?),
             0b00110001 => Self::InitComplete,
+            0b11011011 => Self::ErrorInfo(ToFromBytes::from_bytes(s)?, ToFromBytes::from_bytes(s)?),
             _ => {
                 eprintln!("unexpected byte when reading command; stopping playback.");
                 Self::Stop

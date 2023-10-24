@@ -6,7 +6,7 @@ use std::{
     net::TcpStream,
     sync::{Arc, Mutex},
     thread::JoinHandle,
-    time::Instant,
+    time::{Duration, Instant},
     usize,
 };
 
@@ -28,7 +28,14 @@ use speedy2d::{
     Graphics2D,
 };
 
-use crate::{gui_screen::GuiScreen, gui_wrappers::WithFocusHotkey, textcfg};
+use crate::{
+    gui_base::Panel,
+    gui_notif::{NotifInfo, NotifOverlay},
+    gui_screen::GuiScreen,
+    gui_text::Label,
+    gui_wrappers::WithFocusHotkey,
+    textcfg,
+};
 
 pub enum GuiEvent {
     Refresh,
@@ -192,6 +199,7 @@ impl Gui {
         scroll_pages_multiplier: f64,
         gui_config: GuiConfig,
     ) -> Self {
+        let (notif_overlay, notif_sender) = NotifOverlay::new();
         database.lock().unwrap().update_endpoints.push(
             musicdb_lib::data::database::UpdateEndpoint::Custom(Box::new(move |cmd| match cmd {
                 Command::Resume
@@ -225,6 +233,37 @@ impl Gui {
                         _ = s.send_event(GuiEvent::UpdatedLibrary);
                     }
                 }
+                Command::ErrorInfo(t, d) => {
+                    eprintln!("{t:?} | {d:?}");
+                    let (t, d) = (t.clone(), d.clone());
+                    notif_sender
+                        .send(Box::new(move |_| {
+                            (
+                                GuiElem::new(Panel::with_background(
+                                    GuiElemCfg::default(),
+                                    vec![GuiElem::new(Label::new(
+                                        GuiElemCfg::default(),
+                                        if t.is_empty() {
+                                            format!("Server message\n{d}")
+                                        } else {
+                                            format!("Server error ({t})\n{d}")
+                                        },
+                                        Color::WHITE,
+                                        None,
+                                        Vec2::new(0.5, 0.5),
+                                    ))],
+                                    Color::from_rgba(0.0, 0.0, 0.0, 0.8),
+                                )),
+                                if t.is_empty() {
+                                    NotifInfo::new(Duration::from_secs(2))
+                                } else {
+                                    NotifInfo::new(Duration::from_secs(5))
+                                        .with_highlight(Color::RED)
+                                },
+                            )
+                        }))
+                        .unwrap();
+                }
             })),
         );
         Gui {
@@ -236,6 +275,7 @@ impl Gui {
                 VirtualKeyCode::Escape,
                 GuiScreen::new(
                     GuiElemCfg::default(),
+                    notif_overlay,
                     line_height,
                     scroll_pixels_multiplier,
                     scroll_lines_multiplier,

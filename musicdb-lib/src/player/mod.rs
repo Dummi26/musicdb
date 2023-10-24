@@ -139,6 +139,13 @@ impl Player {
                                     db.apply_command(Command::NextSong);
                                 }
                             }
+                        } else {
+                            // couldn't load song bytes
+                            db.broadcast_update(&Command::ErrorInfo(
+                                "NoSongData".to_owned(),
+                                format!("Couldn't load song #{}\n({})", song.id, song.title),
+                            ));
+                            db.apply_command(Command::NextSong);
                         }
                     } else {
                         self.source = None;

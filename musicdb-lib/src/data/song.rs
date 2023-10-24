@@ -154,7 +154,7 @@ impl Song {
                 {
                     Ok(data) => Some(data),
                     Err(e) => {
-                        eprintln!("[info] error loading song {id}: {e}");
+                        eprintln!("[WARN] error loading song {id}: {e}");
                         None
                     }
                 }

@@ -7,6 +7,7 @@ use crate::{
     gui::{morph_rect, DrawInfo, GuiAction, GuiElem, GuiElemCfg, GuiElemTrait},
     gui_base::{Button, Panel},
     gui_library::LibraryBrowser,
+    gui_notif::NotifOverlay,
     gui_playback::{CurrentSong, PlayPauseToggle},
     gui_queue::QueueViewer,
     gui_settings::Settings,
@@ -34,15 +35,16 @@ pub fn transition(p: f32) -> f32 {
 #[derive(Clone)]
 pub struct GuiScreen {
     config: GuiElemCfg,
-    /// 0: StatusBar / Idle display
-    /// 1: Settings
-    /// 2: Panel for Main view
+    /// 0: Notifications
+    /// 1: StatusBar / Idle display
+    /// 2: Settings
+    /// 3: Panel for Main view
     ///  0: settings button
     ///  1: exit button
     ///  2: library browser
     ///  3: queue
     ///  4: queue clear button
-    /// 3: Edit Panel
+    /// 4: Edit Panel
     children: Vec<GuiElem>,
     pub idle: (bool, Option<Instant>),
     pub settings: (bool, Option<Instant>),
@@ -59,21 +61,22 @@ impl GuiScreen {
         } else {
             edit.inner.config_mut().pos = Rectangle::from_tuples((0.0, 0.0), (0.5, 0.9));
         }
-        if let Some(prev) = self.children.get_mut(3) {
+        if let Some(prev) = self.children.get_mut(4) {
             prev.inner.config_mut().enabled = false;
         }
-        self.children.insert(3, edit);
+        self.children.insert(4, edit);
     }
     pub fn close_edit(&mut self) {
-        if self.children.len() > 4 {
-            self.children.remove(3);
-            self.children[3].inner.config_mut().enabled = true;
+        if self.children.len() > 5 {
+            self.children.remove(4);
+            self.children[4].inner.config_mut().enabled = true;
         } else if self.edit_panel.0 {
             self.edit_panel = (false, Some(Instant::now()));
         }
     }
     pub fn new(
         config: GuiElemCfg,
+        notif_overlay: NotifOverlay,
         line_height: f32,
         scroll_sensitivity_pixels: f64,
         scroll_sensitivity_lines: f64,
@@ -82,6 +85,7 @@ impl GuiScreen {
         Self {
             config: config.w_keyboard_watch().w_mouse(),
             children: vec![
+                GuiElem::new(notif_overlay),
                 GuiElem::new(StatusBar::new(
                     GuiElemCfg::at(Rectangle::from_tuples((0.0, 0.9), (1.0, 1.0))),
                     true,
@@ -261,20 +265,20 @@ impl GuiElemTrait for GuiScreen {
                 if let Some(h) = &info.helper {
                     h.set_cursor_visible(!self.idle.0);
                     if self.settings.0 {
-                        self.children[1].inner.config_mut().enabled = !self.idle.0;
+                        self.children[2].inner.config_mut().enabled = !self.idle.0;
                     }
                     if self.edit_panel.0 {
-                        if let Some(c) = self.children.get_mut(3) {
+                        if let Some(c) = self.children.get_mut(4) {
                             c.inner.config_mut().enabled = !self.idle.0;
                         }
                     }
-                    self.children[2].inner.config_mut().enabled = !self.idle.0;
+                    self.children[3].inner.config_mut().enabled = !self.idle.0;
                 }
             }
             let p = transition(p1);
-            self.children[0].inner.config_mut().pos =
+            self.children[1].inner.config_mut().pos =
                 Rectangle::from_tuples((0.0, 0.9 - 0.9 * p), (1.0, 1.0));
-            self.children[0]
+            self.children[1]
                 .inner
                 .any_mut()
                 .downcast_mut::<StatusBar>()
@@ -285,7 +289,7 @@ impl GuiElemTrait for GuiScreen {
         if self.settings.1.is_some() {
             let p1 = Self::get_prog(&mut self.settings, 0.3);
             let p = transition(p1);
-            let cfg = self.children[1].inner.config_mut();
+            let cfg = self.children[2].inner.config_mut();
             cfg.enabled = p > 0.0;
             cfg.pos = Rectangle::from_tuples((0.0, 0.9 - 0.9 * p), (1.0, 0.9));
         }
@@ -293,22 +297,22 @@ impl GuiElemTrait for GuiScreen {
         if self.edit_panel.1.is_some() {
             let p1 = Self::get_prog(&mut self.edit_panel, 0.3);
             let p = transition(p1);
-            if let Some(c) = self.children.get_mut(3) {
+            if let Some(c) = self.children.get_mut(4) {
                 c.inner.config_mut().enabled = p > 0.0;
                 c.inner.config_mut().pos =
                     Rectangle::from_tuples((-0.5 + 0.5 * p, 0.0), (0.5 * p, 0.9));
             }
             if !self.edit_panel.0 && p == 0.0 {
-                while self.children.len() > 3 {
+                while self.children.len() > 4 {
                     self.children.pop();
                 }
             }
-            self.children[2].inner.config_mut().pos =
+            self.children[3].inner.config_mut().pos =
                 Rectangle::from_tuples((0.5 * p, 0.0), (1.0 + 0.5 * p, 0.9));
         }
         // set idle timeout (only when settings are open)
         if self.settings.0 || self.settings.1.is_some() {
-            self.idle_timeout = self.children[1]
+            self.idle_timeout = self.children[2]
                 .inner
                 .any()
                 .downcast_ref::<Settings>()

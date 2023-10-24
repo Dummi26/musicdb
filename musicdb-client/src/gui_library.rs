@@ -1,7 +1,7 @@
 use std::{
     cmp::Ordering,
     collections::HashSet,
-    rc::Rc,
+    sync::Arc,
     sync::{
         atomic::{AtomicBool, AtomicUsize},
         mpsc, Mutex,
@@ -57,17 +57,17 @@ pub struct LibraryBrowser {
     search_album_regex: Option<Regex>,
     search_song: String,
     search_song_regex: Option<Regex>,
-    filter_target_state: Rc<AtomicBool>,
+    filter_target_state: Arc<AtomicBool>,
     filter_state: f32,
     library_updated: bool,
-    search_settings_changed: Rc<AtomicBool>,
-    search_is_case_sensitive: Rc<AtomicBool>,
+    search_settings_changed: Arc<AtomicBool>,
+    search_is_case_sensitive: Arc<AtomicBool>,
     search_was_case_sensitive: bool,
-    search_prefer_start_matches: Rc<AtomicBool>,
+    search_prefer_start_matches: Arc<AtomicBool>,
     search_prefers_start_matches: bool,
-    filter_songs: Rc<Mutex<Filter>>,
-    filter_albums: Rc<Mutex<Filter>>,
-    filter_artists: Rc<Mutex<Filter>>,
+    filter_songs: Arc<Mutex<Filter>>,
+    filter_albums: Arc<Mutex<Filter>>,
+    filter_artists: Arc<Mutex<Filter>>,
     do_something_receiver: mpsc::Receiver<Box<dyn FnOnce(&mut Self)>>,
 }
 impl Clone for LibraryBrowser {
@@ -76,7 +76,7 @@ impl Clone for LibraryBrowser {
     }
 }
 #[derive(Clone)]
-struct Selected(Rc<Mutex<(HashSet<ArtistId>, HashSet<AlbumId>, HashSet<SongId>)>>);
+struct Selected(Arc<Mutex<(HashSet<ArtistId>, HashSet<AlbumId>, HashSet<SongId>)>>);
 impl Selected {
     pub fn as_queue(&self, lb: &LibraryBrowser, db: &Database) -> Vec<Queue> {
         let lock = self.0.lock().unwrap();
@@ -185,13 +185,13 @@ impl LibraryBrowser {
             vec![],
         );
         let (do_something_sender, do_something_receiver) = mpsc::channel();
-        let search_settings_changed = Rc::new(AtomicBool::new(false));
+        let search_settings_changed = Arc::new(AtomicBool::new(false));
         let search_was_case_sensitive = false;
-        let search_is_case_sensitive = Rc::new(AtomicBool::new(search_was_case_sensitive));
+        let search_is_case_sensitive = Arc::new(AtomicBool::new(search_was_case_sensitive));
         let search_prefers_start_matches = true;
-        let search_prefer_start_matches = Rc::new(AtomicBool::new(search_prefers_start_matches));
-        let filter_target_state = Rc::new(AtomicBool::new(false));
-        let fts = Rc::clone(&filter_target_state);
+        let search_prefer_start_matches = Arc::new(AtomicBool::new(search_prefers_start_matches));
+        let filter_target_state = Arc::new(AtomicBool::new(false));
+        let fts = Arc::clone(&filter_target_state);
         let filter_button = Button::new(
             GuiElemCfg::at(Rectangle::from_tuples((0.46, 0.01), (0.54, 0.05))),
             move |_| {
@@ -209,19 +209,19 @@ impl LibraryBrowser {
                 Vec2::new(0.5, 0.5),
             ))],
         );
-        let filter_songs = Rc::new(Mutex::new(Filter {
+        let filter_songs = Arc::new(Mutex::new(Filter {
             and: true,
             filters: vec![],
         }));
-        let filter_albums = Rc::new(Mutex::new(Filter {
+        let filter_albums = Arc::new(Mutex::new(Filter {
             and: true,
             filters: vec![],
         }));
-        let filter_artists = Rc::new(Mutex::new(Filter {
+        let filter_artists = Arc::new(Mutex::new(Filter {
             and: true,
             filters: vec![],
         }));
-        let selected = Selected(Rc::new(Mutex::new((
+        let selected = Selected(Arc::new(Mutex::new((
             HashSet::new(),
             HashSet::new(),
             HashSet::new(),
@@ -235,12 +235,12 @@ impl LibraryBrowser {
                 GuiElem::new(library_scroll_box),
                 GuiElem::new(filter_button),
                 GuiElem::new(FilterPanel::new(
-                    Rc::clone(&search_settings_changed),
-                    Rc::clone(&search_is_case_sensitive),
-                    Rc::clone(&search_prefer_start_matches),
-                    Rc::clone(&filter_songs),
-                    Rc::clone(&filter_albums),
-                    Rc::clone(&filter_artists),
+                    Arc::clone(&search_settings_changed),
+                    Arc::clone(&search_is_case_sensitive),
+                    Arc::clone(&search_prefer_start_matches),
+                    Arc::clone(&filter_songs),
+                    Arc::clone(&filter_albums),
+                    Arc::clone(&filter_artists),
                     selected.clone(),
                     do_something_sender.clone(),
                 )),
@@ -1137,13 +1137,13 @@ impl GuiElemTrait for ListSong {
 struct FilterPanel {
     config: GuiElemCfg,
     children: Vec<GuiElem>,
-    search_settings_changed: Rc<AtomicBool>,
+    search_settings_changed: Arc<AtomicBool>,
     tab: usize,
-    new_tab: Rc<AtomicUsize>,
+    new_tab: Arc<AtomicUsize>,
     line_height: f32,
-    filter_songs: Rc<Mutex<Filter>>,
-    filter_albums: Rc<Mutex<Filter>>,
-    filter_artists: Rc<Mutex<Filter>>,
+    filter_songs: Arc<Mutex<Filter>>,
+    filter_albums: Arc<Mutex<Filter>>,
+    filter_artists: Arc<Mutex<Filter>>,
 }
 const FP_CASESENS_N: &'static str = "search is case-insensitive";
 const FP_CASESENS_Y: &'static str = "search is case-sensitive!";
@@ -1151,21 +1151,21 @@ const FP_PREFSTART_N: &'static str = "simple search";
 const FP_PREFSTART_Y: &'static str = "will prefer matches at the start of a word";
 impl FilterPanel {
     pub fn new(
-        search_settings_changed: Rc<AtomicBool>,
-        search_is_case_sensitive: Rc<AtomicBool>,
-        search_prefer_start_matches: Rc<AtomicBool>,
-        filter_songs: Rc<Mutex<Filter>>,
-        filter_albums: Rc<Mutex<Filter>>,
-        filter_artists: Rc<Mutex<Filter>>,
+        search_settings_changed: Arc<AtomicBool>,
+        search_is_case_sensitive: Arc<AtomicBool>,
+        search_prefer_start_matches: Arc<AtomicBool>,
+        filter_songs: Arc<Mutex<Filter>>,
+        filter_albums: Arc<Mutex<Filter>>,
+        filter_artists: Arc<Mutex<Filter>>,
         selected: Selected,
         do_something_sender: mpsc::Sender<Box<dyn FnOnce(&mut LibraryBrowser)>>,
     ) -> Self {
         let is_case_sensitive = search_is_case_sensitive.load(std::sync::atomic::Ordering::Relaxed);
         let prefer_start_matches =
             search_prefer_start_matches.load(std::sync::atomic::Ordering::Relaxed);
-        let ssc1 = Rc::clone(&search_settings_changed);
-        let ssc2 = Rc::clone(&search_settings_changed);
-        let ssc3 = Rc::clone(&search_settings_changed);
+        let ssc1 = Arc::clone(&search_settings_changed);
+        let ssc2 = Arc::clone(&search_settings_changed);
+        let ssc3 = Arc::clone(&search_settings_changed);
         let sel3 = selected.clone();
         const VSPLIT: f32 = 0.4;
         let tab_main = GuiElem::new(ScrollBox::new(
@@ -1387,10 +1387,10 @@ impl FilterPanel {
             crate::gui_base::ScrollBoxSizeUnit::Pixels,
             vec![],
         ));
-        let new_tab = Rc::new(AtomicUsize::new(0));
-        let set_tab_1 = Rc::clone(&new_tab);
-        let set_tab_2 = Rc::clone(&new_tab);
-        let set_tab_3 = Rc::clone(&new_tab);
+        let new_tab = Arc::new(AtomicUsize::new(0));
+        let set_tab_1 = Arc::clone(&new_tab);
+        let set_tab_2 = Arc::clone(&new_tab);
+        let set_tab_3 = Arc::clone(&new_tab);
         const HEIGHT: f32 = 0.1;
         Self {
             config: GuiElemCfg::default().disabled(),
@@ -1458,17 +1458,17 @@ impl FilterPanel {
         }
     }
     fn build_filter(
-        filter: &Rc<Mutex<Filter>>,
+        filter: &Arc<Mutex<Filter>>,
         line_height: f32,
-        on_change: &Rc<impl Fn(bool) + 'static>,
+        on_change: &Arc<impl Fn(bool) + 'static>,
         path: Vec<usize>,
     ) -> Vec<(GuiElem, f32)> {
-        let f0 = Rc::clone(filter);
-        let oc0 = Rc::clone(on_change);
-        let f1 = Rc::clone(filter);
-        let f2 = Rc::clone(filter);
-        let oc1 = Rc::clone(on_change);
-        let oc2 = Rc::clone(on_change);
+        let f0 = Arc::clone(filter);
+        let oc0 = Arc::clone(on_change);
+        let f1 = Arc::clone(filter);
+        let f2 = Arc::clone(filter);
+        let oc1 = Arc::clone(on_change);
+        let oc2 = Arc::clone(on_change);
         let mut children = vec![
             GuiElem::new(Button::new(
                 GuiElemCfg::default(),
@@ -1536,16 +1536,16 @@ impl FilterPanel {
     }
     fn build_filter_editor(
         filter: &Filter,
-        mutex: &Rc<Mutex<Filter>>,
+        mutex: &Arc<Mutex<Filter>>,
         children: &mut Vec<GuiElem>,
         mut indent: f32,
         indent_by: f32,
-        on_change: &Rc<impl Fn(bool) + 'static>,
+        on_change: &Arc<impl Fn(bool) + 'static>,
         path: Vec<usize>,
     ) {
         if filter.filters.len() > 1 {
-            let mx = Rc::clone(mutex);
-            let oc = Rc::clone(on_change);
+            let mx = Arc::clone(mutex);
+            let oc = Arc::clone(on_change);
             let p = path.clone();
             children.push(GuiElem::new(Button::new(
                 GuiElemCfg::at(Rectangle::from_tuples((indent, 0.0), (1.0, 1.0))),
@@ -1597,8 +1597,8 @@ impl FilterPanel {
                         Color::GRAY,
                         Color::WHITE,
                     );
-                    let mx = Rc::clone(mutex);
-                    let oc = Rc::clone(on_change);
+                    let mx = Arc::clone(mutex);
+                    let oc = Arc::clone(on_change);
                     tf.on_changed = Some(Box::new(move |text| {
                         if let Some(Ok(FilterType::TagEq(v))) = mx.lock().unwrap().get_mut(&path) {
                             *v = text.to_owned();
@@ -1627,8 +1627,8 @@ impl FilterPanel {
                         Color::GRAY,
                         Color::WHITE,
                     );
-                    let mx = Rc::clone(mutex);
-                    let oc = Rc::clone(on_change);
+                    let mx = Arc::clone(mutex);
+                    let oc = Arc::clone(on_change);
                     tf.on_changed = Some(Box::new(move |text| {
                         if let Some(Ok(FilterType::TagStartsWith(v))) =
                             mx.lock().unwrap().get_mut(&path)
@@ -1659,8 +1659,8 @@ impl FilterPanel {
                         Color::GRAY,
                         Color::WHITE,
                     );
-                    let mx = Rc::clone(mutex);
-                    let oc = Rc::clone(on_change);
+                    let mx = Arc::clone(mutex);
+                    let oc = Arc::clone(on_change);
                     let p = path.clone();
                     tf.on_changed = Some(Box::new(move |text| {
                         if let Some(Ok(FilterType::TagWithValueInt(v, _, _))) =
@@ -1684,8 +1684,8 @@ impl FilterPanel {
                         Color::GRAY,
                         Color::WHITE,
                     );
-                    let mx = Rc::clone(mutex);
-                    let oc = Rc::clone(on_change);
+                    let mx = Arc::clone(mutex);
+                    let oc = Arc::clone(on_change);
                     let p = path.clone();
                     tf1.on_changed = Some(Box::new(move |text| {
                         if let Ok(n) = text.parse() {
@@ -1697,8 +1697,8 @@ impl FilterPanel {
                             }
                         }
                     }));
-                    let mx = Rc::clone(mutex);
-                    let oc = Rc::clone(on_change);
+                    let mx = Arc::clone(mutex);
+                    let oc = Arc::clone(on_change);
                     let p = path.clone();
                     tf2.on_changed = Some(Box::new(move |text| {
                         if let Ok(n) = text.parse() {
@@ -1813,9 +1813,9 @@ impl GuiElemTrait for FilterPanel {
                         .unwrap()
                         .try_as_mut::<ScrollBox>()
                         .unwrap();
-                    let ssc = Rc::clone(&self.search_settings_changed);
+                    let ssc = Arc::clone(&self.search_settings_changed);
                     let my_tab = new_tab;
-                    let ntab = Rc::clone(&self.new_tab);
+                    let ntab = Arc::clone(&self.new_tab);
                     sb.children = Self::build_filter(
                         match new_tab {
                             0 => &self.filter_songs,
@@ -1824,7 +1824,7 @@ impl GuiElemTrait for FilterPanel {
                             _ => unreachable!(),
                         },
                         info.line_height,
-                        &Rc::new(move |update_ui| {
+                        &Arc::new(move |update_ui| {
                             if update_ui {
                                 ntab.store(my_tab, std::sync::atomic::Ordering::Relaxed);
                             }

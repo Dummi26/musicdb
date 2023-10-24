@@ -438,7 +438,9 @@ async fn sse_handler(
                             .collect::<String>(),
                     )
                 }
-                Command::Save | Command::InitComplete => return Poll::Pending,
+                Command::Save | Command::InitComplete | Command::ErrorInfo(..) => {
+                    return Poll::Pending
+                }
             }))
         } else {
             return Poll::Pending;
