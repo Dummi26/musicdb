@@ -96,3 +96,9 @@ musicdb-client 127.0.0.1:26314 syncplayer-network
 ```sh
 musicdb-client 127.0.0.1:26314 syncplayer-local ~/music
 ```
+# TODOs
+
+If the server can't play a song, it seems to get stuck.
+It should instead send a notification to all clients about the error and skip to the next song.
+The clients should then display this notification to the user.
+TODO: Figure out what to do when no user acknowledges the notification. Send it again later or just pretend nothing happened?
