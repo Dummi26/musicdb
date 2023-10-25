@@ -153,17 +153,17 @@ impl GuiElemTrait for CurrentSong {
             // redraw
             if self.config.redraw {
                 self.config.redraw = false;
-                if let Some(song) = new_song {
-                    let status_bar_text = info
-                        .gui_config
-                        .status_bar_text
-                        .gen(&info.database, info.database.get_song(&song));
-                    self.children[0]
-                        .try_as_mut::<AdvancedLabel>()
-                        .unwrap()
-                        .content = status_bar_text;
+                self.children[0]
+                    .try_as_mut::<AdvancedLabel>()
+                    .unwrap()
+                    .content = if let Some(song) = new_song {
                     self.text_updated = Some(Instant::now());
-                }
+                    info.gui_config
+                        .status_bar_text
+                        .gen(&info.database, info.database.get_song(&song))
+                } else {
+                    vec![]
+                };
             }
         }
         if let Some(updated) = &self.text_updated {

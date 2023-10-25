@@ -1,7 +1,13 @@
 use std::time::Instant;
 
-use musicdb_lib::data::queue::QueueContent;
-use speedy2d::{color::Color, dimen::Vec2, shape::Rectangle, Graphics2D};
+use musicdb_lib::{data::queue::QueueContent, server::Command};
+use speedy2d::{
+    color::Color,
+    dimen::Vec2,
+    shape::Rectangle,
+    window::{KeyScancode, VirtualKeyCode},
+    Graphics2D,
+};
 
 use crate::{
     gui::{morph_rect, DrawInfo, GuiAction, GuiElem, GuiElemCfg, GuiElemTrait},
@@ -83,7 +89,7 @@ impl GuiScreen {
         scroll_sensitivity_pages: f64,
     ) -> Self {
         Self {
-            config: config.w_keyboard_watch().w_mouse(),
+            config: config.w_keyboard_watch().w_mouse().w_keyboard_focus(),
             children: vec![
                 GuiElem::new(notif_overlay),
                 GuiElem::new(StatusBar::new(
@@ -318,6 +324,25 @@ impl GuiElemTrait for GuiScreen {
                 .downcast_ref::<Settings>()
                 .unwrap()
                 .get_timeout_val();
+        }
+    }
+    fn key_focus(
+        &mut self,
+        modifiers: speedy2d::window::ModifiersState,
+        down: bool,
+        key: Option<speedy2d::window::VirtualKeyCode>,
+        scan: speedy2d::window::KeyScancode,
+    ) -> Vec<GuiAction> {
+        if down && matches!(key, Some(VirtualKeyCode::Space)) {
+            vec![GuiAction::Build(Box::new(|db| {
+                vec![GuiAction::SendToServer(if db.playing {
+                    Command::Pause
+                } else {
+                    Command::Resume
+                })]
+            }))]
+        } else {
+            vec![]
         }
     }
 }
