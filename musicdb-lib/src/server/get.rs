@@ -1,6 +1,8 @@
 use std::{
+    fs,
     io::BufRead,
     io::{BufReader, Read, Write},
+    path::Path,
     sync::{Arc, Mutex},
 };
 
@@ -118,16 +120,24 @@ pub fn handle_one_connection_as_get(
                             writeln!(connection.get_mut(), "no data")?;
                         }
                     }
-                    "song-file-blocking" => {
-                        if let Some(bytes) =
-                            request
-                                .next()
-                                .and_then(|id| id.parse().ok())
-                                .and_then(|id| {
-                                    let db = db.lock().unwrap();
-                                    db.get_song(&id).and_then(|song| song.cached_data_now(&db))
-                                })
-                        {
+                    "custom-file" => {
+                        if let Some(bytes) = request.next().and_then(|path| {
+                            let db = db.lock().unwrap();
+                            let mut parent = match &db.custom_files {
+                                None => None,
+                                Some(None) => Some(db.lib_directory.clone()),
+                                Some(Some(p)) => Some(p.clone()),
+                            };
+                            // check for malicious paths
+                            if Path::new(path).is_absolute() {
+                                parent = None;
+                            }
+                            if let Some(parent) = parent {
+                                fs::read(parent.join(path)).ok()
+                            } else {
+                                None
+                            }
+                        }) {
                             writeln!(connection.get_mut(), "len: {}", bytes.len())?;
                             connection.get_mut().write_all(&bytes)?;
                         } else {

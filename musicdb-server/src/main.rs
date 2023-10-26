@@ -31,13 +31,17 @@ struct Args {
     /// requires the `assets/` folder to be present!
     #[arg(long)]
     web: Option<SocketAddr>,
+
+    /// allow clients to access files in this directory, or the lib_dir if not specified.
+    #[arg(long)]
+    custom_files: Option<Option<PathBuf>>,
 }
 
 #[tokio::main]
 async fn main() {
     // parse args
     let args = Args::parse();
-    let database = if args.init {
+    let mut database = if args.init {
         Database::new_empty(args.dbfile, args.lib_dir)
     } else {
         match Database::load_database(args.dbfile.clone(), args.lib_dir.clone()) {
@@ -51,6 +55,7 @@ async fn main() {
             }
         }
     };
+    database.custom_files = args.custom_files;
     // database can be shared by multiple threads using Arc<Mutex<_>>
     let database = Arc::new(Mutex::new(database));
     if args.tcp.is_some() || args.web.is_some() {

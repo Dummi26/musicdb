@@ -26,6 +26,12 @@ pub struct Database {
     albums: HashMap<AlbumId, Album>,
     songs: HashMap<SongId, Song>,
     covers: HashMap<CoverId, Cover>,
+    /// clients can access files in this directory if they know the relative path.
+    /// can be used to embed custom images in tags of songs/albums/artists.
+    /// None -> no access
+    /// Some(None) -> access to lib_directory
+    /// Some(Some(path)) -> access to path
+    pub custom_files: Option<Option<PathBuf>>,
     // These will be used for autosave once that gets implemented
     db_data_file_change_first: Option<Instant>,
     db_data_file_change_last: Option<Instant>,
@@ -374,6 +380,7 @@ impl Database {
             albums: HashMap::new(),
             songs: HashMap::new(),
             covers: HashMap::new(),
+            custom_files: None,
             db_data_file_change_first: None,
             db_data_file_change_last: None,
             queue: QueueContent::Folder(0, vec![], String::new()).into(),
@@ -392,6 +399,7 @@ impl Database {
             albums: HashMap::new(),
             songs: HashMap::new(),
             covers: HashMap::new(),
+            custom_files: None,
             db_data_file_change_first: None,
             db_data_file_change_last: None,
             queue: QueueContent::Folder(0, vec![], String::new()).into(),
@@ -412,6 +420,7 @@ impl Database {
             albums: ToFromBytes::from_bytes(&mut file)?,
             songs: ToFromBytes::from_bytes(&mut file)?,
             covers: ToFromBytes::from_bytes(&mut file)?,
+            custom_files: None,
             db_data_file_change_first: None,
             db_data_file_change_last: None,
             queue: QueueContent::Folder(0, vec![], String::new()).into(),
