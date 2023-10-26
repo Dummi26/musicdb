@@ -341,6 +341,11 @@ impl GuiElemTrait for GuiScreen {
                     Command::Resume
                 })]
             }))]
+        } else if down && matches!(key, Some(VirtualKeyCode::F8)) {
+            vec![GuiAction::SendToServer(Command::ErrorInfo(
+                "".to_owned(),
+                "tEsT".to_owned(),
+            ))]
         } else {
             vec![]
         }

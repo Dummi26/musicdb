@@ -31,6 +31,8 @@ use crate::{
     gui_wrappers::WithFocusHotkey,
 };
 
+use self::selected::Selected;
+
 /*
 
 This is responsible for showing the library,
@@ -75,70 +77,140 @@ impl Clone for LibraryBrowser {
         Self::new(self.config.clone())
     }
 }
-#[derive(Clone)]
-struct Selected(Arc<Mutex<(HashSet<ArtistId>, HashSet<AlbumId>, HashSet<SongId>)>>);
-impl Selected {
-    pub fn as_queue(&self, lb: &LibraryBrowser, db: &Database) -> Vec<Queue> {
-        let lock = self.0.lock().unwrap();
-        let (sel_artists, sel_albums, sel_songs) = &*lock;
-        let mut out = vec![];
-        for (artist, singles, albums, _) in &lb.library_filtered {
-            let artist_selected = sel_artists.contains(artist);
-            let mut local_artist_owned = vec![];
-            let mut local_artist = if artist_selected {
-                &mut local_artist_owned
-            } else {
-                &mut out
-            };
-            for (song, _) in singles {
-                let song_selected = sel_songs.contains(song);
-                if song_selected {
-                    local_artist.push(QueueContent::Song(*song).into());
-                }
-            }
-            for (album, songs, _) in albums {
-                let album_selected = sel_albums.contains(album);
-                let mut local_album_owned = vec![];
-                let local_album = if album_selected {
-                    &mut local_album_owned
+mod selected {
+    use super::*;
+    #[derive(Clone)]
+    pub struct Selected(
+        // artist, album, songs
+        Arc<Mutex<(HashSet<ArtistId>, HashSet<AlbumId>, HashSet<SongId>)>>,
+        Arc<AtomicBool>,
+    );
+    impl Selected {
+        pub fn new(update: Arc<AtomicBool>) -> Self {
+            Self(Default::default(), update)
+        }
+        pub fn clear(&self) {
+            self.set_to(HashSet::new(), HashSet::new(), HashSet::new())
+        }
+        pub fn set_to(&self, artists: HashSet<u64>, albums: HashSet<u64>, songs: HashSet<u64>) {
+            let mut s = self.0.lock().unwrap();
+            s.0 = artists;
+            s.1 = albums;
+            s.2 = songs;
+            self.changed();
+        }
+        pub fn contains_artist(&self, id: &ArtistId) -> bool {
+            self.0.lock().unwrap().0.contains(id)
+        }
+        pub fn contains_album(&self, id: &AlbumId) -> bool {
+            self.0.lock().unwrap().1.contains(id)
+        }
+        pub fn contains_song(&self, id: &SongId) -> bool {
+            self.0.lock().unwrap().2.contains(id)
+        }
+        pub fn insert_artist(&self, id: ArtistId) -> bool {
+            self.changed();
+            self.0.lock().unwrap().0.insert(id)
+        }
+        pub fn insert_album(&self, id: AlbumId) -> bool {
+            self.changed();
+            self.0.lock().unwrap().1.insert(id)
+        }
+        pub fn insert_song(&self, id: SongId) -> bool {
+            self.changed();
+            self.0.lock().unwrap().2.insert(id)
+        }
+        pub fn remove_artist(&self, id: &ArtistId) -> bool {
+            self.changed();
+            self.0.lock().unwrap().0.remove(id)
+        }
+        pub fn remove_album(&self, id: &AlbumId) -> bool {
+            self.changed();
+            self.0.lock().unwrap().1.remove(id)
+        }
+        pub fn remove_song(&self, id: &SongId) -> bool {
+            self.changed();
+            self.0.lock().unwrap().2.remove(id)
+        }
+        pub fn view<T>(
+            &self,
+            f: impl FnOnce(&(HashSet<ArtistId>, HashSet<AlbumId>, HashSet<SongId>)) -> T,
+        ) -> T {
+            f(&self.0.lock().unwrap())
+        }
+        pub fn view_mut<T>(
+            &self,
+            f: impl FnOnce(&mut (HashSet<ArtistId>, HashSet<AlbumId>, HashSet<SongId>)) -> T,
+        ) -> T {
+            let v = f(&mut self.0.lock().unwrap());
+            self.changed();
+            v
+        }
+        fn changed(&self) {
+            self.1.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+        pub fn as_queue(&self, lb: &LibraryBrowser, db: &Database) -> Vec<Queue> {
+            let lock = self.0.lock().unwrap();
+            let (sel_artists, sel_albums, sel_songs) = &*lock;
+            let mut out = vec![];
+            for (artist, singles, albums, _) in &lb.library_filtered {
+                let artist_selected = sel_artists.contains(artist);
+                let mut local_artist_owned = vec![];
+                let mut local_artist = if artist_selected {
+                    &mut local_artist_owned
                 } else {
-                    &mut local_artist
+                    &mut out
                 };
-                for (song, _) in songs {
+                for (song, _) in singles {
                     let song_selected = sel_songs.contains(song);
                     if song_selected {
-                        local_album.push(QueueContent::Song(*song).into());
+                        local_artist.push(QueueContent::Song(*song).into());
                     }
                 }
-                if album_selected {
-                    local_artist.push(
+                for (album, songs, _) in albums {
+                    let album_selected = sel_albums.contains(album);
+                    let mut local_album_owned = vec![];
+                    let local_album = if album_selected {
+                        &mut local_album_owned
+                    } else {
+                        &mut local_artist
+                    };
+                    for (song, _) in songs {
+                        let song_selected = sel_songs.contains(song);
+                        if song_selected {
+                            local_album.push(QueueContent::Song(*song).into());
+                        }
+                    }
+                    if album_selected {
+                        local_artist.push(
+                            QueueContent::Folder(
+                                0,
+                                local_album_owned,
+                                match db.albums().get(album) {
+                                    Some(v) => v.name.clone(),
+                                    None => "< unknown album >".to_owned(),
+                                },
+                            )
+                            .into(),
+                        );
+                    }
+                }
+                if artist_selected {
+                    out.push(
                         QueueContent::Folder(
                             0,
-                            local_album_owned,
-                            match db.albums().get(album) {
-                                Some(v) => v.name.clone(),
-                                None => "< unknown album >".to_owned(),
+                            local_artist_owned,
+                            match db.artists().get(artist) {
+                                Some(v) => v.name.to_owned(),
+                                None => "< unknown artist >".to_owned(),
                             },
                         )
                         .into(),
                     );
                 }
             }
-            if artist_selected {
-                out.push(
-                    QueueContent::Folder(
-                        0,
-                        local_artist_owned,
-                        match db.artists().get(artist) {
-                            Some(v) => v.name.to_owned(),
-                            None => "< unknown artist >".to_owned(),
-                        },
-                    )
-                    .into(),
-                );
-            }
+            out
         }
-        out
     }
 }
 fn search_regex_new(pat: &str, case_insensitive: bool) -> Result<Option<Regex>, regex::Error> {
@@ -221,13 +293,9 @@ impl LibraryBrowser {
             and: true,
             filters: vec![],
         }));
-        let selected = Selected(Arc::new(Mutex::new((
-            HashSet::new(),
-            HashSet::new(),
-            HashSet::new(),
-        ))));
+        let selected = Selected::new(Arc::clone(&search_settings_changed));
         Self {
-            config,
+            config: config.w_keyboard_watch(),
             children: vec![
                 GuiElem::new(search_artist),
                 GuiElem::new(search_album),
@@ -269,6 +337,48 @@ impl LibraryBrowser {
             filter_artists,
             do_something_receiver,
         }
+    }
+    pub fn selected_add_all(&self) {
+        self.selected.view_mut(|sel| {
+            for (id, singles, albums, _) in &self.library_filtered {
+                sel.0.insert(*id);
+                for (s, _) in singles {
+                    sel.2.insert(*s);
+                }
+                for (id, album, _) in albums {
+                    sel.1.insert(*id);
+                    for (s, _) in album {
+                        sel.2.insert(*s);
+                    }
+                }
+            }
+        })
+    }
+    pub fn selected_add_songs(&self) {
+        self.selected.view_mut(|sel| {
+            for (_, singles, albums, _) in &self.library_filtered {
+                for (s, _) in singles {
+                    sel.2.insert(*s);
+                }
+                for (_, album, _) in albums {
+                    for (s, _) in album {
+                        sel.2.insert(*s);
+                    }
+                }
+            }
+        })
+    }
+    pub fn selected_add_albums(&self) {
+        self.selected.view_mut(|sel| {
+            for (_, _, albums, _) in &self.library_filtered {
+                for (id, album, _) in albums {
+                    sel.1.insert(*id);
+                    for (s, _) in album {
+                        sel.2.insert(*s);
+                    }
+                }
+            }
+        })
     }
 }
 impl GuiElemTrait for LibraryBrowser {
@@ -521,6 +631,27 @@ impl GuiElemTrait for LibraryBrowser {
     fn updated_library(&mut self) {
         self.library_updated = true;
     }
+    fn key_watch(
+        &mut self,
+        modifiers: speedy2d::window::ModifiersState,
+        down: bool,
+        key: Option<VirtualKeyCode>,
+        scan: speedy2d::window::KeyScancode,
+    ) -> Vec<GuiAction> {
+        if down && crate::gui::hotkey_deselect_all(&modifiers, key) {
+            self.selected.clear();
+        }
+        if down && crate::gui::hotkey_select_all(&modifiers, key) {
+            self.selected_add_all();
+        }
+        if down && crate::gui::hotkey_select_albums(&modifiers, key) {
+            self.selected_add_albums();
+        }
+        if down && crate::gui::hotkey_select_songs(&modifiers, key) {
+            self.selected_add_songs();
+        }
+        vec![]
+    }
 }
 impl LibraryBrowser {
     /// Sets `self.library_sorted` based on the contents of the `Database`.
@@ -757,7 +888,7 @@ impl GuiElemTrait for ListArtist {
     fn draw(&mut self, info: &mut DrawInfo, _g: &mut speedy2d::Graphics2D) {
         if self.config.redraw {
             self.config.redraw = false;
-            let sel = self.selected.0.lock().unwrap().0.contains(&self.id);
+            let sel = self.selected.contains_artist(&self.id);
             if sel != self.sel {
                 self.sel = sel;
                 if sel {
@@ -783,7 +914,7 @@ impl GuiElemTrait for ListArtist {
                             gui.gui
                                 .inner
                                 .children()
-                                .nth(2)
+                                .nth(3)
                                 .unwrap()
                                 .inner
                                 .children()
@@ -838,9 +969,9 @@ impl GuiElemTrait for ListArtist {
             self.mouse = false;
             self.config.redraw = true;
             if !self.sel {
-                self.selected.0.lock().unwrap().0.insert(self.id);
+                self.selected.insert_artist(self.id);
             } else {
-                self.selected.0.lock().unwrap().0.remove(&self.id);
+                self.selected.remove_artist(&self.id);
             }
         }
         vec![]
@@ -900,7 +1031,7 @@ impl GuiElemTrait for ListAlbum {
     fn draw(&mut self, info: &mut DrawInfo, _g: &mut speedy2d::Graphics2D) {
         if self.config.redraw {
             self.config.redraw = false;
-            let sel = self.selected.0.lock().unwrap().1.contains(&self.id);
+            let sel = self.selected.contains_album(&self.id);
             if sel != self.sel {
                 self.sel = sel;
                 if sel {
@@ -926,7 +1057,7 @@ impl GuiElemTrait for ListAlbum {
                             gui.gui
                                 .inner
                                 .children()
-                                .nth(2)
+                                .nth(3)
                                 .unwrap()
                                 .inner
                                 .children()
@@ -981,9 +1112,9 @@ impl GuiElemTrait for ListAlbum {
             self.mouse = false;
             self.config.redraw = true;
             if !self.sel {
-                self.selected.0.lock().unwrap().1.insert(self.id);
+                self.selected.insert_album(self.id);
             } else {
-                self.selected.0.lock().unwrap().1.remove(&self.id);
+                self.selected.remove_album(&self.id);
             }
         }
         vec![]
@@ -1043,7 +1174,7 @@ impl GuiElemTrait for ListSong {
     fn draw(&mut self, info: &mut DrawInfo, _g: &mut speedy2d::Graphics2D) {
         if self.config.redraw {
             self.config.redraw = false;
-            let sel = self.selected.0.lock().unwrap().2.contains(&self.id);
+            let sel = self.selected.contains_song(&self.id);
             if sel != self.sel {
                 self.sel = sel;
                 if sel {
@@ -1069,7 +1200,7 @@ impl GuiElemTrait for ListSong {
                             gui.gui
                                 .inner
                                 .children()
-                                .nth(2)
+                                .nth(3)
                                 .unwrap()
                                 .inner
                                 .children()
@@ -1124,9 +1255,9 @@ impl GuiElemTrait for ListSong {
             self.mouse = false;
             self.config.redraw = true;
             if !self.sel {
-                self.selected.0.lock().unwrap().2.insert(self.id);
+                self.selected.insert_song(self.id);
             } else {
-                self.selected.0.lock().unwrap().2.remove(&self.id);
+                self.selected.remove_song(&self.id);
             }
         }
         vec![]
@@ -1165,7 +1296,6 @@ impl FilterPanel {
             search_prefer_start_matches.load(std::sync::atomic::Ordering::Relaxed);
         let ssc1 = Arc::clone(&search_settings_changed);
         let ssc2 = Arc::clone(&search_settings_changed);
-        let ssc3 = Arc::clone(&search_settings_changed);
         let sel3 = selected.clone();
         const VSPLIT: f32 = 0.4;
         let tab_main = GuiElem::new(ScrollBox::new(
@@ -1249,11 +1379,7 @@ impl FilterPanel {
                     GuiElem::new(Button::new(
                         GuiElemCfg::default(),
                         move |_| {
-                            ssc3.store(true, std::sync::atomic::Ordering::Relaxed);
-                            let mut sel = sel3.0.lock().unwrap();
-                            sel.2 = HashSet::new();
-                            sel.1 = HashSet::new();
-                            sel.0 = HashSet::new();
+                            let mut sel = sel3.clear();
                             vec![]
                         },
                         vec![GuiElem::new(Label::new(
@@ -1275,24 +1401,7 @@ impl FilterPanel {
                                 {
                                     let dss = do_something_sender.clone();
                                     move |_| {
-                                        dss.send(Box::new(|s| {
-                                            s.search_settings_changed
-                                                .store(true, std::sync::atomic::Ordering::Relaxed);
-                                            let mut sel = s.selected.0.lock().unwrap();
-                                            for (id, singles, albums, _) in &s.library_filtered {
-                                                sel.0.insert(*id);
-                                                for (s, _) in singles {
-                                                    sel.2.insert(*s);
-                                                }
-                                                for (id, album, _) in albums {
-                                                    sel.1.insert(*id);
-                                                    for (s, _) in album {
-                                                        sel.2.insert(*s);
-                                                    }
-                                                }
-                                            }
-                                        }))
-                                        .unwrap();
+                                        dss.send(Box::new(|s| s.selected_add_all())).unwrap();
                                         vec![]
                                     }
                                 },
@@ -1309,22 +1418,7 @@ impl FilterPanel {
                                 {
                                     let dss = do_something_sender.clone();
                                     move |_| {
-                                        dss.send(Box::new(|s| {
-                                            s.search_settings_changed
-                                                .store(true, std::sync::atomic::Ordering::Relaxed);
-                                            let mut sel = s.selected.0.lock().unwrap();
-                                            for (_, singles, albums, _) in &s.library_filtered {
-                                                for (s, _) in singles {
-                                                    sel.2.insert(*s);
-                                                }
-                                                for (_, album, _) in albums {
-                                                    for (s, _) in album {
-                                                        sel.2.insert(*s);
-                                                    }
-                                                }
-                                            }
-                                        }))
-                                        .unwrap();
+                                        dss.send(Box::new(|s| s.selected_add_songs())).unwrap();
                                         vec![]
                                     }
                                 },
@@ -1341,20 +1435,7 @@ impl FilterPanel {
                                 {
                                     let dss = do_something_sender.clone();
                                     move |_| {
-                                        dss.send(Box::new(|s| {
-                                            s.search_settings_changed
-                                                .store(true, std::sync::atomic::Ordering::Relaxed);
-                                            let mut sel = s.selected.0.lock().unwrap();
-                                            for (_, _, albums, _) in &s.library_filtered {
-                                                for (id, album, _) in albums {
-                                                    sel.1.insert(*id);
-                                                    for (s, _) in album {
-                                                        sel.2.insert(*s);
-                                                    }
-                                                }
-                                            }
-                                        }))
-                                        .unwrap();
+                                        dss.send(Box::new(|s| s.selected_add_albums())).unwrap();
                                         vec![]
                                     }
                                 },

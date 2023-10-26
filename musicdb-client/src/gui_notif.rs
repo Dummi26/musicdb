@@ -185,7 +185,7 @@ impl GuiElemTrait for NotifOverlay {
         }
     }
     fn draw_rev(&self) -> bool {
-        true
+        false
     }
 
     fn config(&self) -> &GuiElemCfg {

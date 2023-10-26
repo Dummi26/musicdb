@@ -44,6 +44,35 @@ pub enum GuiEvent {
     Exit,
 }
 
+pub fn hotkey_deselect_all(modifiers: &ModifiersState, key: Option<VirtualKeyCode>) -> bool {
+    !modifiers.logo()
+        && !modifiers.alt()
+        && modifiers.ctrl()
+        && !modifiers.shift()
+        && matches!(key, Some(VirtualKeyCode::S))
+}
+pub fn hotkey_select_all(modifiers: &ModifiersState, key: Option<VirtualKeyCode>) -> bool {
+    !modifiers.logo()
+        && !modifiers.alt()
+        && modifiers.ctrl()
+        && !modifiers.shift()
+        && matches!(key, Some(VirtualKeyCode::A))
+}
+pub fn hotkey_select_albums(modifiers: &ModifiersState, key: Option<VirtualKeyCode>) -> bool {
+    !modifiers.logo()
+        && !modifiers.alt()
+        && modifiers.ctrl()
+        && modifiers.shift()
+        && matches!(key, Some(VirtualKeyCode::A))
+}
+pub fn hotkey_select_songs(modifiers: &ModifiersState, key: Option<VirtualKeyCode>) -> bool {
+    !modifiers.logo()
+        && !modifiers.alt()
+        && modifiers.ctrl()
+        && modifiers.shift()
+        && matches!(key, Some(VirtualKeyCode::S))
+}
+
 pub fn main(
     database: Arc<Mutex<Database>>,
     connection: TcpStream,
@@ -234,7 +263,6 @@ impl Gui {
                     }
                 }
                 Command::ErrorInfo(t, d) => {
-                    eprintln!("{t:?} | {d:?}");
                     let (t, d) = (t.clone(), d.clone());
                     notif_sender
                         .send(Box::new(move |_| {

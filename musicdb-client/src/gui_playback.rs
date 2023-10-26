@@ -23,6 +23,9 @@ This file could probably have a better name.
 #[derive(Clone)]
 pub struct CurrentSong {
     config: GuiElemCfg,
+    /// 0: AdvancedLabel for small mode
+    /// 1: AdvancedLabel for big mode heading
+    /// 2: AdvancedLabel for big mode info text
     children: Vec<GuiElem>,
     prev_song: Option<SongId>,
     cover_pos: Rectangle,
