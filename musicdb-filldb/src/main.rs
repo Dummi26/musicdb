@@ -178,7 +178,7 @@ fn main() {
             cover: None,
             file_size: song_file_metadata.len(),
             duration_millis: if let Some(dur) = song_tags.duration() {
-                dur as u64 * 1000
+                dur as u64
             } else {
                 if skip_duration {
                     eprintln!(
