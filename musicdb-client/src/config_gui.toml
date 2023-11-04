@@ -29,4 +29,4 @@ font = ''
 # If we know the title, write it. If not, write "(no title found)" instead.
 
 status_bar = '''\t
-\s0.5;?\A#\c505050by \c593D6E\A##?\a#?\A# ##\c505050on \c264524\a##?%>Year=%#\c808080 (%>Year=%)##'''
+\s0.5;?\A#\c505050by \c593D6E\A##?\a#?\A# ##\c505050on \c264524\a##\c808080?%>Year=%# (%>Year=%)## | \d'''

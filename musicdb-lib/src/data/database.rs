@@ -359,6 +359,11 @@ impl Database {
             Command::RemoveArtist(artist) => {
                 _ = self.remove_artist(artist);
             }
+            Command::SetSongDuration(id, duration) => {
+                if let Some(song) = self.get_song_mut(&id) {
+                    song.duration_millis = duration;
+                }
+            }
             Command::InitComplete => {
                 self.client_is_init = true;
             }

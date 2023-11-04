@@ -17,12 +17,27 @@ use musicdb_lib::data::{
 
 fn main() {
     // arg parsing
-    let lib_dir = if let Some(arg) = std::env::args().nth(1) {
+    let mut args = std::env::args().skip(1);
+    let lib_dir = if let Some(arg) = args.next() {
         arg
     } else {
-        eprintln!("usage: musicdb-filldb <library root>");
+        eprintln!("usage: musicdb-filldb <library root> [--skip-duration]");
         std::process::exit(1);
     };
+    let mut unknown_arg = false;
+    let mut skip_duration = false;
+    for arg in args {
+        match arg.as_str() {
+            "--skip-duration" => skip_duration = true,
+            _ => {
+                unknown_arg = true;
+                eprintln!("Unknown argument: {arg}");
+            }
+        }
+    }
+    if unknown_arg {
+        return;
+    }
     eprintln!("Library: {lib_dir}. press enter to start. result will be saved in 'dbfile'.");
     std::io::stdin().read_line(&mut String::new()).unwrap();
     // start
@@ -34,15 +49,20 @@ fn main() {
     for (i, file) in files.into_iter().enumerate() {
         let mut newline = OnceNewline::new();
         eprint!("\r{}/{}", i + 1, files_count);
-        _ = std::io::stderr().flush();
-        if let Some("mp3") = file.extension().and_then(|ext_os| ext_os.to_str()) {
-            match id3::Tag::read_from_path(&file) {
-                Err(e) => {
-                    newline.now();
-                    eprintln!("[{file:?}] error reading id3 tag: {e}");
+        if let Ok(metadata) = file.metadata() {
+            _ = std::io::stderr().flush();
+            if let Some("mp3") = file.extension().and_then(|ext_os| ext_os.to_str()) {
+                match id3::Tag::read_from_path(&file) {
+                    Err(e) => {
+                        newline.now();
+                        eprintln!("[{file:?}] error reading id3 tag: {e}");
+                    }
+                    Ok(tag) => songs.push((file, metadata, tag)),
                 }
-                Ok(tag) => songs.push((file, tag)),
             }
+        } else {
+            newline.now();
+            eprintln!("[err] couldn't get metadata of file {:?}, skipping", file);
         }
     }
     eprintln!("\nloaded metadata of {} files.", songs.len());
@@ -55,21 +75,30 @@ fn main() {
         singles: vec![],
         general: GeneralData::default(),
     });
-    eprintln!("searching for artists...");
+    eprintln!(
+        "searching for artists and adding songs... (this will be much faster with --skip-duration because it avoids loading and decoding all the mp3 files)"
+    );
     let mut artists = HashMap::new();
-    for song in songs {
+    let len = songs.len();
+    let mut prev_perc = 999;
+    for (i, (song_path, song_file_metadata, song_tags)) in songs.into_iter().enumerate() {
+        let perc = i * 100 / len;
+        if perc != prev_perc {
+            eprint!("{perc: >2}%\r");
+            _ = std::io::stderr().lock().flush();
+            prev_perc = perc;
+        }
         let mut general = GeneralData::default();
-        if let Some(year) = song.1.year() {
+        if let Some(year) = song_tags.year() {
             general.tags.push(format!("Year={year}"));
         }
-        if let Some(genre) = song.1.genre_parsed() {
+        if let Some(genre) = song_tags.genre_parsed() {
             general.tags.push(format!("Genre={genre}"));
         }
-        let (artist_id, album_id) = if let Some(artist) = song
-            .1
+        let (artist_id, album_id) = if let Some(artist) = song_tags
             .album_artist()
             .filter(|v| !v.trim().is_empty())
-            .or_else(|| song.1.artist().filter(|v| !v.trim().is_empty()))
+            .or_else(|| song_tags.artist().filter(|v| !v.trim().is_empty()))
         {
             let artist_id = if !artists.contains_key(artist) {
                 let artist_id = database.add_artist_new(Artist {
@@ -85,7 +114,7 @@ fn main() {
             } else {
                 artists.get(artist).unwrap().0
             };
-            if let Some(album) = song.1.album().filter(|a| !a.trim().is_empty()) {
+            if let Some(album) = song_tags.album().filter(|a| !a.trim().is_empty()) {
                 let (_, albums) = artists.get_mut(artist).unwrap();
                 let album_id = if !albums.contains_key(album) {
                     let album_id = database.add_album_new(Album {
@@ -98,7 +127,7 @@ fn main() {
                     });
                     albums.insert(
                         album.to_string(),
-                        (album_id, song.0.parent().map(|dir| dir.to_path_buf())),
+                        (album_id, song_path.parent().map(|dir| dir.to_path_buf())),
                     );
                     album_id
                 } else {
@@ -106,7 +135,7 @@ fn main() {
                     if album
                         .1
                         .as_ref()
-                        .is_some_and(|dir| Some(dir.as_path()) != song.0.parent())
+                        .is_some_and(|dir| Some(dir.as_path()) != song_path.parent())
                     {
                         // album directory is inconsistent
                         album.1 = None;
@@ -120,9 +149,8 @@ fn main() {
         } else {
             (unknown_artist, None)
         };
-        let path = song.0.strip_prefix(&lib_dir).unwrap();
-        let title = song
-            .1
+        let path = song_path.strip_prefix(&lib_dir).unwrap();
+        let title = song_tags
             .title()
             .map_or(None, |title| {
                 if title.trim().is_empty() {
@@ -131,7 +159,13 @@ fn main() {
                     Some(title.to_string())
                 }
             })
-            .unwrap_or_else(|| song.0.file_stem().unwrap().to_string_lossy().into_owned());
+            .unwrap_or_else(|| {
+                song_path
+                    .file_stem()
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned()
+            });
         database.add_song_new(Song {
             id: 0,
             title: title.clone(),
@@ -142,6 +176,26 @@ fn main() {
             artist: artist_id,
             more_artists: vec![],
             cover: None,
+            file_size: song_file_metadata.len(),
+            duration_millis: if let Some(dur) = song_tags.duration() {
+                dur as u64 * 1000
+            } else {
+                if skip_duration {
+                    eprintln!(
+                        "Duration of song {:?} not found in tags, using 0 instead!",
+                        song_path
+                    );
+                    0
+                } else {
+                    match mp3_duration::from_path(&song_path) {
+                        Ok(dur) => dur.as_millis().min(u64::MAX as _) as u64,
+                        Err(e) => {
+                            eprintln!("Duration of song {song_path:?} not found in tags and can't be determined from the file contents either ({e}). Using duration 0 instead.");
+                            0
+                        }
+                    }
+                }
+            },
             general,
             cached_data: Arc::new(Mutex::new(None)),
         });

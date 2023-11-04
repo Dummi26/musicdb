@@ -257,7 +257,8 @@ impl Gui {
                 | Command::ModifyArtist(_)
                 | Command::RemoveSong(_)
                 | Command::RemoveAlbum(_)
-                | Command::RemoveArtist(_) => {
+                | Command::RemoveArtist(_)
+                | Command::SetSongDuration(..) => {
                     if let Some(s) = &*event_sender_arc.lock().unwrap() {
                         _ = s.send_event(GuiEvent::UpdatedLibrary);
                     }

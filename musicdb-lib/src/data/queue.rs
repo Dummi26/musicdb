@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::{collections::VecDeque, ops::AddAssign};
 
 use rand::seq::{IteratorRandom, SliceRandom};
 
@@ -96,6 +96,60 @@ impl Queue {
                 }
             }
             QueueContent::Shuffle { inner, state: _ } => inner.len(),
+        }
+    }
+    pub fn duration_total(&self, db: &Database) -> QueueDuration {
+        let mut dur = QueueDuration::new_total();
+        self.add_duration(&mut dur, db);
+        dur
+    }
+    // remaining time, including current song
+    pub fn duration_remaining(&self, db: &Database) -> QueueDuration {
+        let mut dur = QueueDuration::new_remaining();
+        self.add_duration(&mut dur, db);
+        dur
+    }
+    pub fn add_duration(&self, dur: &mut QueueDuration, db: &Database) {
+        if self.enabled {
+            match &self.content {
+                QueueContent::Song(v) => {
+                    dur.millis += db.get_song(v).map(|s| s.duration_millis).unwrap_or(0)
+                }
+                QueueContent::Folder(c, inner, _) => {
+                    for (i, inner) in inner.iter().enumerate() {
+                        if dur.include_past || i >= *c {
+                            inner.add_duration(dur, db);
+                        }
+                    }
+                }
+                QueueContent::Loop(total, done, inner) => {
+                    if *total == 0 {
+                        dur.infinite = true;
+                    } else if dur.include_past {
+                        // <total duration> * <total iterations>
+                        let dt = inner.duration_total(db);
+                        for _ in 0..*total {
+                            *dur += dt;
+                        }
+                    } else {
+                        // <remaining duration> + <total duration> * <remaining iterations>
+                        inner.add_duration(dur, db);
+                        let dt = inner.duration_total(db);
+                        for _ in 0..(total.saturating_sub(*done + 1)) {
+                            *dur += dt;
+                        }
+                    }
+                }
+                QueueContent::Random(q) => {
+                    if let Some(el) = q.iter().next() {
+                        dur.random_known_millis += el.duration_total(db).millis;
+                    }
+                    dur.random_counter += 1;
+                }
+                QueueContent::Shuffle { inner, state: _ } => {
+                    inner.add_duration(dur, db);
+                }
+            }
         }
     }
 
@@ -639,5 +693,44 @@ impl ToFromBytes for ShuffleState {
                 Self::Shuffled
             }
         })
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct QueueDuration {
+    pub include_past: bool,
+    pub infinite: bool,
+    /// number of milliseconds (that we know of)
+    pub millis: u64,
+    /// number of milliseconds from the <random> element - only accurate the first time it is reached in queue.
+    pub random_known_millis: u64,
+    /// number of <random> elements, which could have pretty much any duration.
+    pub random_counter: u64,
+}
+impl QueueDuration {
+    fn new_total() -> Self {
+        Self::new(true)
+    }
+    fn new_remaining() -> Self {
+        Self::new(false)
+    }
+    fn new(include_past: bool) -> Self {
+        QueueDuration {
+            include_past,
+            infinite: false,
+            millis: 0,
+            random_known_millis: 0,
+            random_counter: 0,
+        }
+    }
+}
+impl AddAssign<QueueDuration> for QueueDuration {
+    fn add_assign(&mut self, rhs: QueueDuration) {
+        if rhs.infinite {
+            self.infinite = true;
+        }
+        self.millis += rhs.millis;
+        self.random_known_millis += rhs.random_known_millis;
+        self.random_counter += rhs.random_counter;
     }
 }

@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 use musicdb_lib::{
     data::{
         database::Database,
-        queue::{Queue, QueueContent, ShuffleState},
+        queue::{Queue, QueueContent, QueueDuration, ShuffleState},
         song::Song,
         AlbumId, ArtistId,
     },
@@ -19,7 +19,7 @@ use speedy2d::{
 use crate::{
     gui::{Dragging, DrawInfo, GuiAction, GuiElem, GuiElemCfg, GuiElemTrait},
     gui_base::{Panel, ScrollBox},
-    gui_text::Label,
+    gui_text::{self, AdvancedLabel, Label},
 };
 
 /*
@@ -35,6 +35,7 @@ because simple clicks have to be GoTo events.
 pub struct QueueViewer {
     config: GuiElemCfg,
     children: Vec<GuiElem>,
+    queue_updated: bool,
 }
 const QP_QUEUE1: f32 = 0.0;
 const QP_QUEUE2: f32 = 0.95;
@@ -63,7 +64,7 @@ impl QueueViewer {
                     Rectangle::from_tuples((0.0, QP_QUEUE1), (1.0, QP_QUEUE2)),
                 ))),
                 GuiElem::new(Panel::new(
-                    GuiElemCfg::at(Rectangle::from_tuples((0.0, QP_INV1), (1.0, QP_INV2))),
+                    GuiElemCfg::at(Rectangle::from_tuples((0.0, QP_INV1), (0.5, QP_INV2))),
                     vec![
                         GuiElem::new(
                             QueueLoop::new(
@@ -129,7 +130,13 @@ impl QueueViewer {
                         ),
                     ],
                 )),
+                GuiElem::new(AdvancedLabel::new(
+                    GuiElemCfg::at(Rectangle::from_tuples((0.5, QP_INV1), (1.0, QP_INV2))),
+                    Vec2::new(0.0, 0.5),
+                    vec![],
+                )),
             ],
+            queue_updated: false,
         }
     }
 }
@@ -153,6 +160,58 @@ impl GuiElemTrait for QueueViewer {
         Box::new(self.clone())
     }
     fn draw(&mut self, info: &mut DrawInfo, _g: &mut speedy2d::Graphics2D) {
+        if self.queue_updated {
+            self.queue_updated = false;
+            let label = self.children[3]
+                .inner
+                .any_mut()
+                .downcast_mut::<AdvancedLabel>()
+                .unwrap();
+            fn fmt_dur(dur: QueueDuration) -> String {
+                if dur.infinite {
+                    "∞".to_owned()
+                } else {
+                    let seconds = dur.millis / 1000;
+                    let minutes = seconds / 60;
+                    let h = minutes / 60;
+                    let m = minutes % 60;
+                    let s = seconds % 60;
+                    if dur.random_counter == 0 {
+                        if h > 0 {
+                            format!("{h}:{m:0>2}:{s:0>2}")
+                        } else {
+                            format!("{m:0>2}:{s:0>2}")
+                        }
+                    } else {
+                        let r = dur.random_counter;
+                        if dur.millis > 0 {
+                            if h > 0 {
+                                format!("{h}:{m:0>2}:{s:0>2} + {r} random songs")
+                            } else {
+                                format!("{m:0>2}:{s:0>2} + {r} random songs")
+                            }
+                        } else {
+                            format!("{r} random songs")
+                        }
+                    }
+                }
+            }
+            let dt = fmt_dur(info.database.queue.duration_total(&info.database));
+            let dr = fmt_dur(info.database.queue.duration_remaining(&info.database));
+            label.content = vec![
+                vec![(
+                    gui_text::Content::new(format!("Total: {dt}"), Color::GRAY),
+                    1.0,
+                    1.0,
+                )],
+                vec![(
+                    gui_text::Content::new(format!("Remaining: {dr}"), Color::GRAY),
+                    1.0,
+                    1.0,
+                )],
+            ];
+            label.config_mut().redraw = true;
+        }
         if self.config.redraw || info.pos.size() != self.config.pixel_pos.size() {
             self.config.redraw = false;
             let mut c = vec![];
@@ -173,6 +232,7 @@ impl GuiElemTrait for QueueViewer {
         }
     }
     fn updated_queue(&mut self) {
+        self.queue_updated = true;
         self.config.redraw = true;
     }
 }
@@ -412,16 +472,38 @@ impl QueueSong {
         Self {
             config: config.w_mouse().w_keyboard_watch().w_drag_target(),
             children: vec![
-                GuiElem::new(Label::new(
+                GuiElem::new(AdvancedLabel::new(
                     GuiElemCfg::at(Rectangle::from_tuples((0.0, 0.0), (1.0, 0.57))),
-                    song.title.clone(),
-                    if current {
-                        Color::from_int_rgb(194, 76, 178)
-                    } else {
-                        Color::from_int_rgb(120, 76, 194)
-                    },
-                    None,
                     Vec2::new(0.0, 0.5),
+                    vec![vec![
+                        (
+                            gui_text::Content::new(
+                                song.title.clone(),
+                                if current {
+                                    Color::from_int_rgb(194, 76, 178)
+                                } else {
+                                    Color::from_int_rgb(120, 76, 194)
+                                },
+                            ),
+                            1.0,
+                            1.0,
+                        ),
+                        (
+                            gui_text::Content::new(
+                                {
+                                    let duration = song.duration_millis / 1000;
+                                    format!("  {}:{:0>2}", duration / 60, duration % 60)
+                                },
+                                if current {
+                                    Color::GRAY
+                                } else {
+                                    Color::DARK_GRAY
+                                },
+                            ),
+                            0.6,
+                            1.0,
+                        ),
+                    ]],
                 )),
                 GuiElem::new(Label::new(
                     GuiElemCfg::at(Rectangle::from_tuples((sub_offset, 0.57), (1.0, 1.0))),
@@ -443,9 +525,9 @@ impl QueueSong {
                         }
                     },
                     if current {
-                        Color::from_int_rgb(146, 57, 133)
+                        Color::from_int_rgb(97, 38, 89)
                     } else {
-                        Color::from_int_rgb(95, 57, 146)
+                        Color::from_int_rgb(60, 38, 97)
                     },
                     None,
                     Vec2::new(0.0, 0.5),
@@ -498,9 +580,13 @@ impl GuiElemTrait for QueueSong {
     fn mouse_up(&mut self, button: MouseButton) -> Vec<GuiAction> {
         if self.mouse && button == MouseButton::Left {
             self.mouse = false;
-            vec![GuiAction::SendToServer(Command::QueueGoto(
-                self.path.clone(),
-            ))]
+            if !self.always_copy {
+                vec![GuiAction::SendToServer(Command::QueueGoto(
+                    self.path.clone(),
+                ))]
+            } else {
+                vec![]
+            }
         } else {
             vec![]
         }
@@ -717,9 +803,13 @@ impl GuiElemTrait for QueueFolder {
     fn mouse_up(&mut self, button: MouseButton) -> Vec<GuiAction> {
         if self.mouse && button == MouseButton::Left {
             self.mouse = false;
-            vec![GuiAction::SendToServer(Command::QueueGoto(
-                self.path.clone(),
-            ))]
+            if !self.always_copy {
+                vec![GuiAction::SendToServer(Command::QueueGoto(
+                    self.path.clone(),
+                ))]
+            } else {
+                vec![]
+            }
         } else {
             vec![]
         }
@@ -944,9 +1034,13 @@ impl GuiElemTrait for QueueLoop {
     fn mouse_up(&mut self, button: MouseButton) -> Vec<GuiAction> {
         if self.mouse && button == MouseButton::Left {
             self.mouse = false;
-            vec![GuiAction::SendToServer(Command::QueueGoto(
-                self.path.clone(),
-            ))]
+            if !self.always_copy {
+                vec![GuiAction::SendToServer(Command::QueueGoto(
+                    self.path.clone(),
+                ))]
+            } else {
+                vec![]
+            }
         } else {
             vec![]
         }
@@ -1077,9 +1171,13 @@ impl GuiElemTrait for QueueRandom {
     fn mouse_up(&mut self, button: MouseButton) -> Vec<GuiAction> {
         if self.mouse && button == MouseButton::Left {
             self.mouse = false;
-            vec![GuiAction::SendToServer(Command::QueueGoto(
-                self.path.clone(),
-            ))]
+            if !self.always_copy {
+                vec![GuiAction::SendToServer(Command::QueueGoto(
+                    self.path.clone(),
+                ))]
+            } else {
+                vec![]
+            }
         } else {
             vec![]
         }
@@ -1209,9 +1307,13 @@ impl GuiElemTrait for QueueShuffle {
     fn mouse_up(&mut self, button: MouseButton) -> Vec<GuiAction> {
         if self.mouse && button == MouseButton::Left {
             self.mouse = false;
-            vec![GuiAction::SendToServer(Command::QueueGoto(
-                self.path.clone(),
-            ))]
+            if !self.always_copy {
+                vec![GuiAction::SendToServer(Command::QueueGoto(
+                    self.path.clone(),
+                ))]
+            } else {
+                vec![]
+            }
         } else {
             vec![]
         }

@@ -22,6 +22,9 @@ pub struct Song {
     pub artist: ArtistId,
     pub more_artists: Vec<ArtistId>,
     pub cover: Option<CoverId>,
+    pub file_size: u64,
+    /// song duration in milliseconds
+    pub duration_millis: u64,
     pub general: GeneralData,
     /// None => No cached data
     /// Some(Err) => No cached data yet, but a thread is working on loading it.
@@ -36,6 +39,8 @@ impl Song {
         artist: ArtistId,
         more_artists: Vec<ArtistId>,
         cover: Option<CoverId>,
+        file_size: u64,
+        duration_millis: u64,
     ) -> Self {
         Self {
             id: 0,
@@ -45,6 +50,8 @@ impl Song {
             artist,
             more_artists,
             cover,
+            file_size,
+            duration_millis,
             general: GeneralData::default(),
             cached_data: Arc::new(Mutex::new(None)),
         }
@@ -185,6 +192,8 @@ impl ToFromBytes for Song {
         self.artist.to_bytes(s)?;
         self.more_artists.to_bytes(s)?;
         self.cover.to_bytes(s)?;
+        self.file_size.to_bytes(s)?;
+        self.duration_millis.to_bytes(s)?;
         self.general.to_bytes(s)?;
         Ok(())
     }
@@ -200,6 +209,8 @@ impl ToFromBytes for Song {
             artist: ToFromBytes::from_bytes(s)?,
             more_artists: ToFromBytes::from_bytes(s)?,
             cover: ToFromBytes::from_bytes(s)?,
+            file_size: ToFromBytes::from_bytes(s)?,
+            duration_millis: ToFromBytes::from_bytes(s)?,
             general: ToFromBytes::from_bytes(s)?,
             cached_data: Arc::new(Mutex::new(None)),
         })

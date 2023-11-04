@@ -353,7 +353,8 @@ async fn sse_handler(
                 | Command::AddCover(..)
                 | Command::RemoveSong(_)
                 | Command::RemoveAlbum(_)
-                | Command::RemoveArtist(_) => Event::default().event("artists").data({
+                | Command::RemoveArtist(_)
+                | Command::SetSongDuration(..) => Event::default().event("artists").data({
                     let db = state.db.lock().unwrap();
                     let mut a = db.artists().iter().collect::<Vec<_>>();
                     a.sort_unstable_by_key(|(_id, artist)| &artist.name);

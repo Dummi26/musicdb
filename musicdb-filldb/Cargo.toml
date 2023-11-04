@@ -7,4 +7,5 @@ edition = "2021"
 
 [dependencies]
 id3 = "1.7.0"
+mp3-duration = "0.1.10"
 musicdb-lib = { version = "0.1.0", path = "../musicdb-lib" }

@@ -34,7 +34,11 @@ pub struct Content {
 impl Content {
     pub fn new(text: String, color: Color) -> Self {
         Self {
-            text,
+            text: if text.starts_with(' ') {
+                text.replacen(' ', "\u{00A0}", 1)
+            } else {
+                text
+            },
             color,
             background: None,
             formatted: None,

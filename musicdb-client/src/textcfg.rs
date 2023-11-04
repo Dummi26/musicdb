@@ -1,10 +1,9 @@
 use std::{
     fmt::Display,
-    iter::Peekable,
     str::{Chars, FromStr},
 };
 
-use musicdb_lib::data::{database::Database, song::Song, GeneralData, SongId};
+use musicdb_lib::data::{database::Database, song::Song, GeneralData};
 use speedy2d::color::Color;
 
 use crate::gui_text::Content;
@@ -22,6 +21,7 @@ pub enum TextPart {
     SongTitle,
     AlbumName,
     ArtistName,
+    SongDuration(bool),
     /// Searches for a tag with exactly the provided value.
     /// Returns nothing or one of the following characters:
     /// `s` for Song, `a` for Album, and `A` for Artist.
@@ -114,6 +114,19 @@ impl TextBuilder {
                         }
                     }
                 }
+                TextPart::SongDuration(show_millis) => {
+                    if let Some(s) = current_song {
+                        let seconds = s.duration_millis / 1000;
+                        let minutes = seconds / 60;
+                        let seconds = seconds % 60;
+                        push!(if *show_millis {
+                            let ms = s.duration_millis % 1000;
+                            format!("{minutes}:{seconds:0>2}.{ms:0>4}")
+                        } else {
+                            format!("{minutes}:{seconds:0>2}")
+                        });
+                    }
+                }
                 TextPart::TagEq(p) => {
                     for (i, gen) in all_general(db, &current_song).into_iter().enumerate() {
                         if let Some(_) = gen.and_then(|gen| gen.tags.iter().find(|t| *t == p)) {
@@ -204,6 +217,14 @@ impl TextBuilder {
                         Some('A') => {
                             done!();
                             vec.push(TextPart::ArtistName);
+                        }
+                        Some('d') => {
+                            done!();
+                            vec.push(TextPart::SongDuration(false));
+                        }
+                        Some('D') => {
+                            done!();
+                            vec.push(TextPart::SongDuration(true));
                         }
                         Some('s') => {
                             done!();

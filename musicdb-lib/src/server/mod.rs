@@ -49,6 +49,7 @@ pub enum Command {
     RemoveAlbum(AlbumId),
     RemoveArtist(ArtistId),
     ModifyArtist(Artist),
+    SetSongDuration(SongId, u64),
     InitComplete,
     ErrorInfo(String, String),
 }
@@ -102,7 +103,7 @@ pub fn run_server(
                 let command_sender = command_sender.clone();
                 let db = Arc::clone(&database);
                 thread::spawn(move || loop {
-                    if let Ok((connection, con_addr)) = v.accept() {
+                    if let Ok((connection, _con_addr)) = v.accept() {
                         let command_sender = command_sender.clone();
                         let db = Arc::clone(&db);
                         thread::spawn(move || {
@@ -275,6 +276,11 @@ impl ToFromBytes for Command {
                 s.write_all(&[0b11011100])?;
                 artist.to_bytes(s)?;
             }
+            Self::SetSongDuration(i, d) => {
+                s.write_all(&[0b11100000])?;
+                i.to_bytes(s)?;
+                d.to_bytes(s)?;
+            }
             Self::InitComplete => {
                 s.write_all(&[0b00110001])?;
             }
@@ -326,6 +332,9 @@ impl ToFromBytes for Command {
             0b11010000 => Self::RemoveSong(ToFromBytes::from_bytes(s)?),
             0b11010011 => Self::RemoveAlbum(ToFromBytes::from_bytes(s)?),
             0b11011100 => Self::RemoveArtist(ToFromBytes::from_bytes(s)?),
+            0b11100000 => {
+                Self::SetSongDuration(ToFromBytes::from_bytes(s)?, ToFromBytes::from_bytes(s)?)
+            }
             0b01011101 => Self::AddCover(ToFromBytes::from_bytes(s)?),
             0b00110001 => Self::InitComplete,
             0b11011011 => Self::ErrorInfo(ToFromBytes::from_bytes(s)?, ToFromBytes::from_bytes(s)?),
