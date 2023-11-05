@@ -3,17 +3,16 @@ use speedy2d::{
     Graphics2D,
 };
 
-use crate::gui::{DrawInfo, GuiAction, GuiElem, GuiElemCfg, GuiElemTrait};
+use crate::gui::{DrawInfo, GuiAction, GuiElemCfg, GuiElemTrait};
 
-#[derive(Clone)]
-pub struct WithFocusHotkey<T: GuiElemTrait + Clone> {
+pub struct WithFocusHotkey<T: GuiElemTrait> {
     pub inner: T,
     /// 4 * (ignore, pressed): 10 or 11 -> doesn't matter, 01 -> must be pressed, 00 -> must not be pressed
     /// logo alt shift ctrl
     pub modifiers: u8,
     pub key: VirtualKeyCode,
 }
-impl<T: GuiElemTrait + Clone> WithFocusHotkey<T> {
+impl<T: GuiElemTrait> WithFocusHotkey<T> {
     /// unlike noshift, this ignores the shift modifier
     pub fn new_key(key: VirtualKeyCode, inner: T) -> WithFocusHotkey<T> {
         Self::new(0b1000, key, inner)
@@ -52,7 +51,7 @@ impl<T: GuiElemTrait + Clone> WithFocusHotkey<T> {
         }
     }
 }
-impl<T: Clone + 'static> GuiElemTrait for WithFocusHotkey<T>
+impl<T: GuiElemTrait> GuiElemTrait for WithFocusHotkey<T>
 where
     T: GuiElemTrait,
 {
@@ -62,7 +61,7 @@ where
     fn config_mut(&mut self) -> &mut GuiElemCfg {
         self.inner.config_mut()
     }
-    fn children(&mut self) -> Box<dyn Iterator<Item = &mut GuiElem> + '_> {
+    fn children(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElemTrait> + '_> {
         self.inner.children()
     }
     fn any(&self) -> &dyn std::any::Any {
@@ -71,8 +70,11 @@ where
     fn any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }
-    fn clone_gui(&self) -> Box<dyn GuiElemTrait> {
-        Box::new(self.clone())
+    fn elem(&self) -> &dyn GuiElemTrait {
+        self
+    }
+    fn elem_mut(&mut self) -> &mut dyn GuiElemTrait {
+        self
     }
     fn draw(&mut self, info: &mut DrawInfo, g: &mut Graphics2D) {
         self.inner.draw(info, g)

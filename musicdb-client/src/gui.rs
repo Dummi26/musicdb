@@ -196,7 +196,7 @@ pub struct Gui {
     pub database: Arc<Mutex<Database>>,
     pub connection: TcpStream,
     pub get_con: Arc<Mutex<get::Client<TcpStream>>>,
-    pub gui: GuiElem,
+    pub gui: WithFocusHotkey<GuiScreen>,
     pub size: UVec2,
     pub mouse_pos: Vec2,
     pub font: Font,
@@ -268,9 +268,9 @@ impl Gui {
                     notif_sender
                         .send(Box::new(move |_| {
                             (
-                                GuiElem::new(Panel::with_background(
+                                Box::new(Panel::with_background(
                                     GuiElemCfg::default(),
-                                    vec![GuiElem::new(Label::new(
+                                    vec![Box::new(Label::new(
                                         GuiElemCfg::default(),
                                         if t.is_empty() {
                                             format!("Server message\n{d}")
@@ -300,7 +300,7 @@ impl Gui {
             database,
             connection,
             get_con,
-            gui: GuiElem::new(WithFocusHotkey::new_noshift(
+            gui: WithFocusHotkey::new_noshift(
                 VirtualKeyCode::Escape,
                 GuiScreen::new(
                     GuiElemCfg::default(),
@@ -310,7 +310,7 @@ impl Gui {
                     scroll_lines_multiplier,
                     scroll_pages_multiplier,
                 ),
-            )),
+            ),
             size: UVec2::ZERO,
             mouse_pos: Vec2::ZERO,
             font,
@@ -332,19 +332,20 @@ impl Gui {
 /// the trait implemented by all Gui elements.
 /// feel free to override the methods you wish to use.
 #[allow(unused)]
-pub trait GuiElemTrait {
+pub trait GuiElemTrait: 'static {
     fn config(&self) -> &GuiElemCfg;
     fn config_mut(&mut self) -> &mut GuiElemCfg;
     /// note: drawing happens from the last to the first element, while priority is from first to last.
     /// if you wish to add a "high priority" child to a Vec<GuiElem> using push, .rev() the iterator in this method and change draw_rev to false.
-    fn children(&mut self) -> Box<dyn Iterator<Item = &mut GuiElem> + '_>;
+    fn children(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElemTrait> + '_>;
     /// defaults to true.
     fn draw_rev(&self) -> bool {
         true
     }
     fn any(&self) -> &dyn Any;
     fn any_mut(&mut self) -> &mut dyn Any;
-    fn clone_gui(&self) -> Box<dyn GuiElemTrait>;
+    fn elem(&self) -> &dyn GuiElemTrait;
+    fn elem_mut(&mut self) -> &mut dyn GuiElemTrait;
     /// handles drawing.
     fn draw(&mut self, info: &mut DrawInfo, g: &mut Graphics2D) {}
     /// an event that is invoked whenever a mouse button is pressed on the element.
@@ -392,6 +393,281 @@ pub trait GuiElemTrait {
     }
     fn updated_library(&mut self) {}
     fn updated_queue(&mut self) {}
+
+    fn _draw(&mut self, info: &mut DrawInfo, g: &mut Graphics2D) {
+        if !self.config_mut().enabled {
+            return;
+        }
+        // adjust info
+        let npos = adjust_area(&info.pos, &self.config_mut().pos);
+        let ppos = std::mem::replace(&mut info.pos, npos);
+        if info.child_has_keyboard_focus {
+            if self.config().keyboard_focus_index == usize::MAX {
+                info.has_keyboard_focus = true;
+                info.child_has_keyboard_focus = false;
+            }
+        }
+        // call trait's draw function
+        self.draw(info, g);
+        // reset info
+        info.has_keyboard_focus = false;
+        let focus_path = info.child_has_keyboard_focus;
+        // children (in reverse order - first element has the highest priority)
+        let kbd_focus_index = self.config().keyboard_focus_index;
+        if self.draw_rev() {
+            for (i, c) in self
+                .children()
+                .collect::<Vec<_>>()
+                .into_iter()
+                .enumerate()
+                .rev()
+            {
+                info.child_has_keyboard_focus = focus_path && i == kbd_focus_index;
+                c._draw(info, g);
+            }
+        } else {
+            for (i, c) in self.children().enumerate() {
+                info.child_has_keyboard_focus = focus_path && i == kbd_focus_index;
+                c._draw(info, g);
+            }
+        }
+        // reset pt. 2
+        info.child_has_keyboard_focus = focus_path;
+        self.config_mut().pixel_pos = std::mem::replace(&mut info.pos, ppos);
+    }
+    /// recursively applies the function to all gui elements below and including this one
+    fn _recursive_all(&mut self, f: &mut dyn FnMut(&mut dyn GuiElemTrait)) {
+        f(self.elem_mut());
+        for c in self.children() {
+            c._recursive_all(f);
+        }
+    }
+    fn _mouse_event(
+        &mut self,
+        condition: &mut dyn FnMut(&mut dyn GuiElemTrait) -> Option<Vec<GuiAction>>,
+        pos: Vec2,
+    ) -> Option<Vec<GuiAction>> {
+        for c in &mut self.children() {
+            if c.config().enabled {
+                if c.config().pixel_pos.contains(pos) {
+                    if let Some(v) = c._mouse_event(condition, pos) {
+                        return Some(v);
+                    }
+                }
+            }
+        }
+        condition(self.elem_mut())
+    }
+    fn _release_drag(
+        &mut self,
+        dragged: &mut Option<Dragging>,
+        pos: Vec2,
+    ) -> Option<Vec<GuiAction>> {
+        self._mouse_event(
+            &mut |v| {
+                if v.config().drag_target {
+                    if let Some(d) = dragged.take() {
+                        return Some(v.dragged(d));
+                    }
+                }
+                None
+            },
+            pos,
+        )
+    }
+    fn _mouse_button(
+        &mut self,
+        button: MouseButton,
+        down: bool,
+        pos: Vec2,
+    ) -> Option<Vec<GuiAction>> {
+        if down {
+            self._mouse_event(
+                &mut |v: &mut dyn GuiElemTrait| {
+                    if v.config().mouse_events {
+                        match button {
+                            MouseButton::Left => v.config_mut().mouse_down.0 = true,
+                            MouseButton::Middle => v.config_mut().mouse_down.1 = true,
+                            MouseButton::Right => v.config_mut().mouse_down.2 = true,
+                            MouseButton::Other(_) => {}
+                        }
+                        Some(v.mouse_down(button))
+                    } else {
+                        None
+                    }
+                },
+                pos,
+            )
+        } else {
+            let mut vec = vec![];
+            if let Some(a) = self._mouse_event(
+                &mut |v: &mut dyn GuiElemTrait| {
+                    let down = v.config().mouse_down;
+                    if v.config().mouse_events
+                        && ((button == MouseButton::Left && down.0)
+                            || (button == MouseButton::Middle && down.1)
+                            || (button == MouseButton::Right && down.2))
+                    {
+                        Some(v.mouse_pressed(button))
+                    } else {
+                        None
+                    }
+                },
+                pos,
+            ) {
+                vec.extend(a);
+            };
+            self._recursive_all(&mut |v| {
+                if v.config().mouse_events {
+                    match button {
+                        MouseButton::Left => v.config_mut().mouse_down.0 = false,
+                        MouseButton::Middle => v.config_mut().mouse_down.1 = false,
+                        MouseButton::Right => v.config_mut().mouse_down.2 = false,
+                        MouseButton::Other(_) => {}
+                    }
+                    vec.extend(v.mouse_up(button));
+                }
+            });
+            Some(vec)
+        }
+    }
+    fn _mouse_wheel(&mut self, diff: f32, pos: Vec2) -> Option<Vec<GuiAction>> {
+        self._mouse_event(
+            &mut |v| {
+                if v.config().scroll_events {
+                    Some(v.mouse_wheel(diff))
+                } else {
+                    None
+                }
+            },
+            pos,
+        )
+    }
+    fn _keyboard_event(
+        &mut self,
+        f_focus: &mut dyn FnMut(&mut dyn GuiElemTrait, &mut Vec<GuiAction>),
+        f_watch: &mut dyn FnMut(&mut dyn GuiElemTrait, &mut Vec<GuiAction>),
+    ) -> Vec<GuiAction> {
+        let mut o = vec![];
+        self._keyboard_event_inner(&mut Some(f_focus), f_watch, &mut o, true);
+        o
+    }
+    fn _keyboard_event_inner(
+        &mut self,
+        f_focus: &mut Option<&mut dyn FnMut(&mut dyn GuiElemTrait, &mut Vec<GuiAction>)>,
+        f_watch: &mut dyn FnMut(&mut dyn GuiElemTrait, &mut Vec<GuiAction>),
+        events: &mut Vec<GuiAction>,
+        focus: bool,
+    ) {
+        f_watch(self.elem_mut(), events);
+        let focus_index = self.config().keyboard_focus_index;
+        for (i, child) in self.children().enumerate() {
+            child._keyboard_event_inner(f_focus, f_watch, events, focus && i == focus_index);
+        }
+        if focus {
+            // we have focus and no child has consumed f_focus
+            if let Some(f) = f_focus.take() {
+                f(self.elem_mut(), events)
+            }
+        }
+    }
+    fn _keyboard_move_focus(&mut self, decrement: bool, refocus: bool) -> bool {
+        let mut focus_index = if refocus {
+            usize::MAX
+        } else {
+            self.config().keyboard_focus_index
+        };
+        let allow_focus = self.config().keyboard_events_focus;
+        let mut children = self.children().collect::<Vec<_>>();
+        if focus_index == usize::MAX {
+            if decrement {
+                focus_index = children.len().saturating_sub(1);
+            } else {
+                focus_index = 0;
+            }
+        }
+        let mut changed = refocus;
+        let ok = loop {
+            if let Some(child) = children.get_mut(focus_index) {
+                if child._keyboard_move_focus(decrement, changed) {
+                    break true;
+                } else {
+                    changed = true;
+                    if !decrement {
+                        focus_index += 1;
+                    } else {
+                        focus_index = focus_index.wrapping_sub(1);
+                    }
+                }
+            } else {
+                focus_index = usize::MAX;
+                break allow_focus && refocus;
+            }
+        };
+        self.config_mut().keyboard_focus_index = focus_index;
+        ok
+    }
+    fn _keyboard_reset_focus(&mut self) -> bool {
+        let mut index = usize::MAX;
+        for (i, c) in self.children().enumerate() {
+            if c._keyboard_reset_focus() {
+                index = i;
+                break;
+            }
+        }
+        let wants = std::mem::replace(&mut self.config_mut().request_keyboard_focus, false);
+        self.config_mut().keyboard_focus_index = index;
+        index != usize::MAX || wants
+    }
+}
+pub trait GuiElemChildren {
+    fn iter(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElemTrait> + '_>;
+}
+impl<T: GuiElemTrait> GuiElemChildren for T {
+    fn iter(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElemTrait> + '_> {
+        Box::new([self.elem_mut()].into_iter())
+    }
+}
+impl<A: GuiElemTrait, B: GuiElemTrait> GuiElemChildren for (A, B) {
+    fn iter(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElemTrait> + '_> {
+        Box::new([self.0.elem_mut(), self.1.elem_mut()].into_iter())
+    }
+}
+impl<A: GuiElemTrait, B: GuiElemTrait, C: GuiElemTrait> GuiElemChildren for (A, B, C) {
+    fn iter(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElemTrait> + '_> {
+        Box::new([self.0.elem_mut(), self.1.elem_mut(), self.2.elem_mut()].into_iter())
+    }
+}
+impl<A: GuiElemTrait, B: GuiElemTrait, C: GuiElemTrait, D: GuiElemTrait> GuiElemChildren
+    for (A, B, C, D)
+{
+    fn iter(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElemTrait> + '_> {
+        Box::new(
+            [
+                self.0.elem_mut(),
+                self.1.elem_mut(),
+                self.2.elem_mut(),
+                self.3.elem_mut(),
+            ]
+            .into_iter(),
+        )
+    }
+}
+impl<A: GuiElemTrait, B: GuiElemTrait, C: GuiElemTrait, D: GuiElemTrait, E: GuiElemTrait>
+    GuiElemChildren for (A, B, C, D, E)
+{
+    fn iter(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElemTrait> + '_> {
+        Box::new(
+            [
+                self.0.elem_mut(),
+                self.1.elem_mut(),
+                self.2.elem_mut(),
+                self.3.elem_mut(),
+                self.4.elem_mut(),
+            ]
+            .into_iter(),
+        )
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -485,7 +761,7 @@ pub enum GuiAction {
     OpenMain,
     SetIdle(bool),
     OpenSettings(bool),
-    OpenEditPanel(GuiElem),
+    OpenEditPanel(Box<dyn GuiElemTrait>),
     CloseEditPanel,
     /// Build the GuiAction(s) later, when we have access to the Database (can turn an AlbumId into a QueueContent::Folder, etc)
     Build(Box<dyn FnOnce(&mut Database) -> Vec<Self>>),
@@ -536,263 +812,6 @@ pub struct DrawInfo<'a> {
     pub gui_config: &'a GuiConfig,
 }
 
-/// Generic wrapper over anything that implements GuiElemTrait
-pub struct GuiElem {
-    pub inner: Box<dyn GuiElemTrait>,
-}
-impl Clone for GuiElem {
-    fn clone(&self) -> Self {
-        Self {
-            inner: self.inner.clone_gui(),
-        }
-    }
-}
-impl GuiElem {
-    pub fn new<T: GuiElemTrait + 'static>(inner: T) -> Self {
-        Self {
-            inner: Box::new(inner),
-        }
-    }
-    pub fn try_as<T: Any>(&self) -> Option<&T> {
-        self.inner.any().downcast_ref()
-    }
-    pub fn try_as_mut<T: Any>(&mut self) -> Option<&mut T> {
-        self.inner.any_mut().downcast_mut()
-    }
-    pub fn draw(&mut self, info: &mut DrawInfo, g: &mut Graphics2D) {
-        if !self.inner.config_mut().enabled {
-            return;
-        }
-        // adjust info
-        let npos = adjust_area(&info.pos, &self.inner.config_mut().pos);
-        let ppos = std::mem::replace(&mut info.pos, npos);
-        if info.child_has_keyboard_focus {
-            if self.inner.config().keyboard_focus_index == usize::MAX {
-                info.has_keyboard_focus = true;
-                info.child_has_keyboard_focus = false;
-            }
-        }
-        // call trait's draw function
-        self.inner.draw(info, g);
-        // reset info
-        info.has_keyboard_focus = false;
-        let focus_path = info.child_has_keyboard_focus;
-        // children (in reverse order - first element has the highest priority)
-        let kbd_focus_index = self.inner.config().keyboard_focus_index;
-        if self.inner.draw_rev() {
-            for (i, c) in self
-                .inner
-                .children()
-                .collect::<Vec<_>>()
-                .into_iter()
-                .enumerate()
-                .rev()
-            {
-                info.child_has_keyboard_focus = focus_path && i == kbd_focus_index;
-                c.draw(info, g);
-            }
-        } else {
-            for (i, c) in self.inner.children().enumerate() {
-                info.child_has_keyboard_focus = focus_path && i == kbd_focus_index;
-                c.draw(info, g);
-            }
-        }
-        // reset pt. 2
-        info.child_has_keyboard_focus = focus_path;
-        self.inner.config_mut().pixel_pos = std::mem::replace(&mut info.pos, ppos);
-    }
-    /// recursively applies the function to all gui elements below and including this one
-    pub fn recursive_all<F: FnMut(&mut GuiElem)>(&mut self, f: &mut F) {
-        f(self);
-        for c in self.inner.children() {
-            c.recursive_all(f);
-        }
-    }
-    fn mouse_event<F: FnMut(&mut GuiElem) -> Option<Vec<GuiAction>>>(
-        &mut self,
-        condition: &mut F,
-        pos: Vec2,
-    ) -> Option<Vec<GuiAction>> {
-        for c in &mut self.inner.children() {
-            if c.inner.config().enabled {
-                if c.inner.config().pixel_pos.contains(pos) {
-                    if let Some(v) = c.mouse_event(condition, pos) {
-                        return Some(v);
-                    }
-                }
-            }
-        }
-        condition(self)
-    }
-    fn release_drag(
-        &mut self,
-        dragged: &mut Option<Dragging>,
-        pos: Vec2,
-    ) -> Option<Vec<GuiAction>> {
-        self.mouse_event(
-            &mut |v| {
-                if v.inner.config().drag_target {
-                    if let Some(d) = dragged.take() {
-                        return Some(v.inner.dragged(d));
-                    }
-                }
-                None
-            },
-            pos,
-        )
-    }
-    fn mouse_button(
-        &mut self,
-        button: MouseButton,
-        down: bool,
-        pos: Vec2,
-    ) -> Option<Vec<GuiAction>> {
-        if down {
-            self.mouse_event(
-                &mut |v: &mut GuiElem| {
-                    if v.inner.config().mouse_events {
-                        match button {
-                            MouseButton::Left => v.inner.config_mut().mouse_down.0 = true,
-                            MouseButton::Middle => v.inner.config_mut().mouse_down.1 = true,
-                            MouseButton::Right => v.inner.config_mut().mouse_down.2 = true,
-                            MouseButton::Other(_) => {}
-                        }
-                        Some(v.inner.mouse_down(button))
-                    } else {
-                        None
-                    }
-                },
-                pos,
-            )
-        } else {
-            let mut vec = vec![];
-            if let Some(a) = self.mouse_event(
-                &mut |v: &mut GuiElem| {
-                    let down = v.inner.config().mouse_down;
-                    if v.inner.config().mouse_events
-                        && ((button == MouseButton::Left && down.0)
-                            || (button == MouseButton::Middle && down.1)
-                            || (button == MouseButton::Right && down.2))
-                    {
-                        Some(v.inner.mouse_pressed(button))
-                    } else {
-                        None
-                    }
-                },
-                pos,
-            ) {
-                vec.extend(a);
-            };
-            self.recursive_all(&mut |v| {
-                if v.inner.config().mouse_events {
-                    match button {
-                        MouseButton::Left => v.inner.config_mut().mouse_down.0 = false,
-                        MouseButton::Middle => v.inner.config_mut().mouse_down.1 = false,
-                        MouseButton::Right => v.inner.config_mut().mouse_down.2 = false,
-                        MouseButton::Other(_) => {}
-                    }
-                    vec.extend(v.inner.mouse_up(button));
-                }
-            });
-            Some(vec)
-        }
-    }
-    fn mouse_wheel(&mut self, diff: f32, pos: Vec2) -> Option<Vec<GuiAction>> {
-        self.mouse_event(
-            &mut |v| {
-                if v.inner.config().scroll_events {
-                    Some(v.inner.mouse_wheel(diff))
-                } else {
-                    None
-                }
-            },
-            pos,
-        )
-    }
-    fn keyboard_event<
-        F: FnOnce(&mut Self, &mut Vec<GuiAction>),
-        G: FnMut(&mut Self, &mut Vec<GuiAction>),
-    >(
-        &mut self,
-        f_focus: F,
-        mut f_watch: G,
-    ) -> Vec<GuiAction> {
-        let mut o = vec![];
-        self.keyboard_event_inner(&mut Some(f_focus), &mut f_watch, &mut o, true);
-        o
-    }
-    fn keyboard_event_inner<
-        F: FnOnce(&mut Self, &mut Vec<GuiAction>),
-        G: FnMut(&mut Self, &mut Vec<GuiAction>),
-    >(
-        &mut self,
-        f_focus: &mut Option<F>,
-        f_watch: &mut G,
-        events: &mut Vec<GuiAction>,
-        focus: bool,
-    ) {
-        f_watch(self, events);
-        let focus_index = self.inner.config().keyboard_focus_index;
-        for (i, child) in self.inner.children().enumerate() {
-            child.keyboard_event_inner(f_focus, f_watch, events, focus && i == focus_index);
-        }
-        if focus {
-            // we have focus and no child has consumed f_focus
-            if let Some(f) = f_focus.take() {
-                f(self, events)
-            }
-        }
-    }
-    fn keyboard_move_focus(&mut self, decrement: bool, refocus: bool) -> bool {
-        let mut focus_index = if refocus {
-            usize::MAX
-        } else {
-            self.inner.config().keyboard_focus_index
-        };
-        let allow_focus = self.inner.config().keyboard_events_focus;
-        let mut children = self.inner.children().collect::<Vec<_>>();
-        if focus_index == usize::MAX {
-            if decrement {
-                focus_index = children.len().saturating_sub(1);
-            } else {
-                focus_index = 0;
-            }
-        }
-        let mut changed = refocus;
-        let ok = loop {
-            if let Some(child) = children.get_mut(focus_index) {
-                if child.keyboard_move_focus(decrement, changed) {
-                    break true;
-                } else {
-                    changed = true;
-                    if !decrement {
-                        focus_index += 1;
-                    } else {
-                        focus_index = focus_index.wrapping_sub(1);
-                    }
-                }
-            } else {
-                focus_index = usize::MAX;
-                break allow_focus && refocus;
-            }
-        };
-        self.inner.config_mut().keyboard_focus_index = focus_index;
-        ok
-    }
-    fn keyboard_reset_focus(&mut self) -> bool {
-        let mut index = usize::MAX;
-        for (i, c) in self.inner.children().enumerate() {
-            if c.keyboard_reset_focus() {
-                index = i;
-                break;
-            }
-        }
-        let wants = std::mem::replace(&mut self.inner.config_mut().request_keyboard_focus, false);
-        self.inner.config_mut().keyboard_focus_index = index;
-        index != usize::MAX || wants
-    }
-}
-
 pub fn adjust_area(outer: &Rectangle, rel_area: &Rectangle) -> Rectangle {
     Rectangle::new(
         adjust_pos(outer, rel_area.top_left()),
@@ -820,12 +839,12 @@ impl Gui {
                     eprintln!("Error sending command to server: {e}");
                 }
             }
-            GuiAction::ResetKeyboardFocus => _ = self.gui.keyboard_reset_focus(),
+            GuiAction::ResetKeyboardFocus => _ = self.gui._keyboard_reset_focus(),
             GuiAction::SetDragging(d) => self.dragging = d,
             GuiAction::SetLineHeight(h) => {
                 self.line_height = h;
                 self.gui
-                    .recursive_all(&mut |e| e.inner.config_mut().redraw = true);
+                    ._recursive_all(&mut |e| e.config_mut().redraw = true);
             }
             GuiAction::LoadCover(id) => {
                 self.covers
@@ -838,7 +857,6 @@ impl Gui {
             GuiAction::SetIdle(v) => {
                 if let Some(gui) = self
                     .gui
-                    .inner
                     .any_mut()
                     .downcast_mut::<WithFocusHotkey<GuiScreen>>()
                 {
@@ -850,7 +868,6 @@ impl Gui {
             GuiAction::OpenSettings(v) => {
                 if let Some(gui) = self
                     .gui
-                    .inner
                     .any_mut()
                     .downcast_mut::<WithFocusHotkey<GuiScreen>>()
                 {
@@ -865,7 +882,6 @@ impl Gui {
             GuiAction::OpenMain => {
                 if let Some(gui) = self
                     .gui
-                    .inner
                     .any_mut()
                     .downcast_mut::<WithFocusHotkey<GuiScreen>>()
                 {
@@ -880,7 +896,6 @@ impl Gui {
             GuiAction::OpenEditPanel(p) => {
                 if let Some(gui) = self
                     .gui
-                    .inner
                     .any_mut()
                     .downcast_mut::<WithFocusHotkey<GuiScreen>>()
                 {
@@ -896,7 +911,6 @@ impl Gui {
             GuiAction::CloseEditPanel => {
                 if let Some(gui) = self
                     .gui
-                    .inner
                     .any_mut()
                     .downcast_mut::<WithFocusHotkey<GuiScreen>>()
                 {
@@ -937,7 +951,7 @@ impl WindowHandler<GuiEvent> for Gui {
             dragging: self.dragging.take(),
             gui_config: &cfg,
         };
-        self.gui.draw(&mut info, graphics);
+        self.gui._draw(&mut info, graphics);
         let actions = std::mem::replace(&mut info.actions, Vec::with_capacity(0));
         self.dragging = info.dragging.take();
         if let Some((d, f)) = &mut self.dragging {
@@ -988,7 +1002,7 @@ impl WindowHandler<GuiEvent> for Gui {
         self.last_draw = start;
     }
     fn on_mouse_button_down(&mut self, helper: &mut WindowHelper<GuiEvent>, button: MouseButton) {
-        if let Some(a) = self.gui.mouse_button(button, true, self.mouse_pos.clone()) {
+        if let Some(a) = self.gui._mouse_button(button, true, self.mouse_pos.clone()) {
             for a in a {
                 self.exec_gui_action(a)
             }
@@ -997,7 +1011,7 @@ impl WindowHandler<GuiEvent> for Gui {
     }
     fn on_mouse_button_up(&mut self, helper: &mut WindowHelper<GuiEvent>, button: MouseButton) {
         if self.dragging.is_some() {
-            if let Some(a) = self.gui.release_drag(
+            if let Some(a) = self.gui._release_drag(
                 &mut self.dragging.take().map(|v| v.0),
                 self.mouse_pos.clone(),
             ) {
@@ -1006,7 +1020,10 @@ impl WindowHandler<GuiEvent> for Gui {
                 }
             }
         }
-        if let Some(a) = self.gui.mouse_button(button, false, self.mouse_pos.clone()) {
+        if let Some(a) = self
+            .gui
+            ._mouse_button(button, false, self.mouse_pos.clone())
+        {
             for a in a {
                 self.exec_gui_action(a)
             }
@@ -1030,7 +1047,7 @@ impl WindowHandler<GuiEvent> for Gui {
                     * self.last_height
             }
         };
-        if let Some(a) = self.gui.mouse_wheel(dist, self.mouse_pos.clone()) {
+        if let Some(a) = self.gui._mouse_wheel(dist, self.mouse_pos.clone()) {
             for a in a {
                 self.exec_gui_action(a)
             }
@@ -1039,23 +1056,15 @@ impl WindowHandler<GuiEvent> for Gui {
     }
     fn on_keyboard_char(&mut self, helper: &mut WindowHelper<GuiEvent>, unicode_codepoint: char) {
         helper.request_redraw();
-        for a in self.gui.keyboard_event(
-            |e, a| {
-                if e.inner.config().keyboard_events_focus {
-                    a.append(
-                        &mut e
-                            .inner
-                            .char_focus(self.modifiers.clone(), unicode_codepoint),
-                    );
+        for a in self.gui._keyboard_event(
+            &mut |e, a| {
+                if e.config().keyboard_events_focus {
+                    a.append(&mut e.char_focus(self.modifiers.clone(), unicode_codepoint));
                 }
             },
-            |e, a| {
-                if e.inner.config().keyboard_events_watch {
-                    a.append(
-                        &mut e
-                            .inner
-                            .char_watch(self.modifiers.clone(), unicode_codepoint),
-                    );
+            &mut |e, a| {
+                if e.config().keyboard_events_watch {
+                    a.append(&mut e.char_watch(self.modifiers.clone(), unicode_codepoint));
                 }
             },
         ) {
@@ -1071,13 +1080,13 @@ impl WindowHandler<GuiEvent> for Gui {
         helper.request_redraw();
         if let Some(VirtualKeyCode::Tab) = virtual_key_code {
             if !(self.modifiers.ctrl() || self.modifiers.alt() || self.modifiers.logo()) {
-                self.gui.keyboard_move_focus(self.modifiers.shift(), false);
+                self.gui._keyboard_move_focus(self.modifiers.shift(), false);
             }
         }
-        for a in self.gui.keyboard_event(
-            |e, a| {
-                if e.inner.config().keyboard_events_focus {
-                    a.append(&mut e.inner.key_focus(
+        for a in self.gui._keyboard_event(
+            &mut |e, a| {
+                if e.config().keyboard_events_focus {
+                    a.append(&mut e.key_focus(
                         self.modifiers.clone(),
                         true,
                         virtual_key_code,
@@ -1085,9 +1094,9 @@ impl WindowHandler<GuiEvent> for Gui {
                     ));
                 }
             },
-            |e, a| {
-                if e.inner.config().keyboard_events_watch {
-                    a.append(&mut e.inner.key_watch(
+            &mut |e, a| {
+                if e.config().keyboard_events_watch {
+                    a.append(&mut e.key_watch(
                         self.modifiers.clone(),
                         true,
                         virtual_key_code,
@@ -1106,10 +1115,10 @@ impl WindowHandler<GuiEvent> for Gui {
         scancode: KeyScancode,
     ) {
         helper.request_redraw();
-        for a in self.gui.keyboard_event(
-            |e, a| {
-                if e.inner.config().keyboard_events_focus {
-                    a.append(&mut e.inner.key_focus(
+        for a in self.gui._keyboard_event(
+            &mut |e, a| {
+                if e.config().keyboard_events_focus {
+                    a.append(&mut e.key_focus(
                         self.modifiers.clone(),
                         false,
                         virtual_key_code,
@@ -1117,9 +1126,9 @@ impl WindowHandler<GuiEvent> for Gui {
                     ));
                 }
             },
-            |e, a| {
-                if e.inner.config().keyboard_events_watch {
-                    a.append(&mut e.inner.key_watch(
+            &mut |e, a| {
+                if e.config().keyboard_events_watch {
+                    a.append(&mut e.key_watch(
                         self.modifiers.clone(),
                         false,
                         virtual_key_code,
@@ -1142,11 +1151,11 @@ impl WindowHandler<GuiEvent> for Gui {
         match user_event {
             GuiEvent::Refresh => helper.request_redraw(),
             GuiEvent::UpdatedLibrary => {
-                self.gui.recursive_all(&mut |e| e.inner.updated_library());
+                self.gui._recursive_all(&mut |e| e.updated_library());
                 helper.request_redraw();
             }
             GuiEvent::UpdatedQueue => {
-                self.gui.recursive_all(&mut |e| e.inner.updated_queue());
+                self.gui._recursive_all(&mut |e| e.updated_queue());
                 helper.request_redraw();
             }
             GuiEvent::Exit => helper.terminate_loop(),
@@ -1159,7 +1168,7 @@ impl WindowHandler<GuiEvent> for Gui {
     fn on_resize(&mut self, _helper: &mut WindowHelper<GuiEvent>, size_pixels: UVec2) {
         self.size = size_pixels;
         self.gui
-            .recursive_all(&mut |e| e.inner.config_mut().redraw = true);
+            ._recursive_all(&mut |e| e.config_mut().redraw = true);
     }
 }
 

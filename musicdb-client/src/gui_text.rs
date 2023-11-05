@@ -8,7 +8,7 @@ use speedy2d::{
     window::{ModifiersState, MouseButton},
 };
 
-use crate::gui::{GuiAction, GuiElem, GuiElemCfg, GuiElemTrait};
+use crate::gui::{GuiAction, GuiElemCfg, GuiElemTrait};
 
 /*
 
@@ -17,10 +17,9 @@ except they are all text-related.
 
 */
 
-#[derive(Clone)]
 pub struct Label {
     config: GuiElemCfg,
-    children: Vec<GuiElem>,
+    children: Vec<Box<dyn GuiElemTrait>>,
     pub content: Content,
     pub pos: Vec2,
 }
@@ -91,8 +90,8 @@ impl GuiElemTrait for Label {
     fn config_mut(&mut self) -> &mut GuiElemCfg {
         &mut self.config
     }
-    fn children(&mut self) -> Box<dyn Iterator<Item = &mut GuiElem> + '_> {
-        Box::new(self.children.iter_mut())
+    fn children(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElemTrait> + '_> {
+        Box::new(self.children.iter_mut().map(|v| v.as_mut()))
     }
     fn any(&self) -> &dyn std::any::Any {
         self
@@ -100,8 +99,11 @@ impl GuiElemTrait for Label {
     fn any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }
-    fn clone_gui(&self) -> Box<dyn GuiElemTrait> {
-        Box::new(self.clone())
+    fn elem(&self) -> &dyn GuiElemTrait {
+        self
+    }
+    fn elem_mut(&mut self) -> &mut dyn GuiElemTrait {
+        self
     }
     fn draw(&mut self, info: &mut crate::gui::DrawInfo, g: &mut speedy2d::Graphics2D) {
         if self.config.pixel_pos.size() != info.pos.size() {
@@ -144,7 +146,7 @@ impl GuiElemTrait for Label {
 /// a single-line text field for users to type text into.
 pub struct TextField {
     config: GuiElemCfg,
-    pub children: Vec<GuiElem>,
+    pub children: Vec<Box<dyn GuiElemTrait>>,
     pub on_changed: Option<Box<dyn FnMut(&str)>>,
     pub on_changed_mut: Option<Box<dyn FnMut(&mut Self, String)>>,
 }
@@ -163,14 +165,14 @@ impl TextField {
         Self {
             config: config.w_mouse().w_keyboard_focus(),
             children: vec![
-                GuiElem::new(Label::new(
+                Box::new(Label::new(
                     GuiElemCfg::default(),
                     text,
                     color_input,
                     None,
                     Vec2::new(0.0, 0.5),
                 )),
-                GuiElem::new(Label::new(
+                Box::new(Label::new(
                     if text_is_empty {
                         GuiElemCfg::default()
                     } else {
@@ -187,16 +189,16 @@ impl TextField {
         }
     }
     pub fn label_input(&self) -> &Label {
-        self.children[0].inner.any().downcast_ref().unwrap()
+        self.children[0].any().downcast_ref().unwrap()
     }
     pub fn label_input_mut(&mut self) -> &mut Label {
-        self.children[0].inner.any_mut().downcast_mut().unwrap()
+        self.children[0].any_mut().downcast_mut().unwrap()
     }
     pub fn label_hint(&self) -> &Label {
-        self.children[1].inner.any().downcast_ref().unwrap()
+        self.children[1].any().downcast_ref().unwrap()
     }
     pub fn label_hint_mut(&mut self) -> &mut Label {
-        self.children[1].inner.any_mut().downcast_mut().unwrap()
+        self.children[1].any_mut().downcast_mut().unwrap()
     }
 }
 impl GuiElemTrait for TextField {
@@ -206,8 +208,8 @@ impl GuiElemTrait for TextField {
     fn config_mut(&mut self) -> &mut GuiElemCfg {
         &mut self.config
     }
-    fn children(&mut self) -> Box<dyn Iterator<Item = &mut GuiElem> + '_> {
-        Box::new(self.children.iter_mut())
+    fn children(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElemTrait> + '_> {
+        Box::new(self.children.iter_mut().map(|v| v.as_mut()))
     }
     fn any(&self) -> &dyn std::any::Any {
         self
@@ -215,8 +217,11 @@ impl GuiElemTrait for TextField {
     fn any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }
-    fn clone_gui(&self) -> Box<dyn GuiElemTrait> {
-        Box::new(self.clone())
+    fn elem(&self) -> &dyn GuiElemTrait {
+        self
+    }
+    fn elem_mut(&mut self) -> &mut dyn GuiElemTrait {
+        self
     }
     fn draw(&mut self, info: &mut crate::gui::DrawInfo, g: &mut speedy2d::Graphics2D) {
         let (t, c) = if info.has_keyboard_focus {
@@ -235,7 +240,11 @@ impl GuiElemTrait for TextField {
     }
     fn char_focus(&mut self, modifiers: ModifiersState, key: char) -> Vec<GuiAction> {
         if !(modifiers.ctrl() || modifiers.alt() || modifiers.logo()) && !key.is_control() {
-            let content = &mut self.children[0].try_as_mut::<Label>().unwrap().content;
+            let content = &mut self.children[0]
+                .any_mut()
+                .downcast_mut::<Label>()
+                .unwrap()
+                .content;
             let was_empty = content.get_text().is_empty();
             content.text().push(key);
             if let Some(f) = &mut self.on_changed {
@@ -247,7 +256,7 @@ impl GuiElemTrait for TextField {
                 self.on_changed_mut = Some(f);
             }
             if was_empty {
-                self.children[1].inner.config_mut().enabled = false;
+                self.children[1].config_mut().enabled = false;
             }
         }
         vec![]
@@ -263,7 +272,11 @@ impl GuiElemTrait for TextField {
             && !(modifiers.alt() || modifiers.logo())
             && key == Some(speedy2d::window::VirtualKeyCode::Backspace)
         {
-            let content = &mut self.children[0].try_as_mut::<Label>().unwrap().content;
+            let content = &mut self.children[0]
+                .any_mut()
+                .downcast_mut::<Label>()
+                .unwrap()
+                .content;
             if !content.get_text().is_empty() {
                 if modifiers.ctrl() {
                     for s in [true, false, true] {
@@ -286,30 +299,19 @@ impl GuiElemTrait for TextField {
                     self.on_changed_mut = Some(f);
                 }
                 if is_now_empty {
-                    self.children[1].inner.config_mut().enabled = true;
+                    self.children[1].config_mut().enabled = true;
                 }
             }
         }
         vec![]
     }
 }
-impl Clone for TextField {
-    fn clone(&self) -> Self {
-        Self {
-            config: self.config.clone(),
-            children: self.children.clone(),
-            on_changed: None,
-            on_changed_mut: None,
-        }
-    }
-}
 
 /// More advanced version of `Label`.
 /// Allows stringing together multiple `Content`s in one line.
-#[derive(Clone)]
 pub struct AdvancedLabel {
     config: GuiElemCfg,
-    children: Vec<GuiElem>,
+    children: Vec<Box<dyn GuiElemTrait>>,
     /// 0.0 => align to top/left
     /// 0.5 => center
     /// 1.0 => align to bottom/right
@@ -339,8 +341,8 @@ impl GuiElemTrait for AdvancedLabel {
     fn config_mut(&mut self) -> &mut GuiElemCfg {
         &mut self.config
     }
-    fn children(&mut self) -> Box<dyn Iterator<Item = &mut GuiElem> + '_> {
-        Box::new(self.children.iter_mut())
+    fn children(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElemTrait> + '_> {
+        Box::new(self.children.iter_mut().map(|v| v.as_mut()))
     }
     fn any(&self) -> &dyn std::any::Any {
         self
@@ -348,8 +350,11 @@ impl GuiElemTrait for AdvancedLabel {
     fn any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }
-    fn clone_gui(&self) -> Box<dyn GuiElemTrait> {
-        Box::new(self.clone())
+    fn elem(&self) -> &dyn GuiElemTrait {
+        self
+    }
+    fn elem_mut(&mut self) -> &mut dyn GuiElemTrait {
+        self
     }
     fn draw(&mut self, info: &mut crate::gui::DrawInfo, g: &mut speedy2d::Graphics2D) {
         if self.config.redraw

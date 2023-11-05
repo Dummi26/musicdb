@@ -1,17 +1,14 @@
-use std::{ops::DerefMut, time::Duration};
-
 use speedy2d::{color::Color, dimen::Vec2, shape::Rectangle, Graphics2D};
 
 use crate::{
-    gui::{DrawInfo, GuiAction, GuiElem, GuiElemCfg, GuiElemTrait},
+    gui::{DrawInfo, GuiAction, GuiElemCfg, GuiElemTrait},
     gui_base::{Button, Panel, ScrollBox, Slider},
     gui_text::Label,
 };
 
-#[derive(Clone)]
 pub struct Settings {
     pub config: GuiElemCfg,
-    pub children: Vec<GuiElem>,
+    pub children: Vec<Box<dyn GuiElemTrait>>,
 }
 impl Settings {
     pub fn new(
@@ -25,15 +22,15 @@ impl Settings {
         Self {
             config,
             children: vec![
-                GuiElem::new(ScrollBox::new(
+                Box::new(ScrollBox::new(
                     GuiElemCfg::default(),
                     crate::gui_base::ScrollBoxSizeUnit::Pixels,
                     vec![
                         (
-                            GuiElem::new(Button::new(
+                            Box::new(Button::new(
                                 GuiElemCfg::at(Rectangle::from_tuples((0.75, 0.0), (1.0, 1.0))),
                                 |btn| vec![GuiAction::OpenSettings(false)],
-                                vec![GuiElem::new(Label::new(
+                                vec![Box::new(Label::new(
                                     GuiElemCfg::default(),
                                     "Back".to_string(),
                                     Color::WHITE,
@@ -44,10 +41,10 @@ impl Settings {
                             0.0,
                         ),
                         (
-                            GuiElem::new(Panel::new(
+                            Box::new(Panel::new(
                                 GuiElemCfg::default(),
                                 vec![
-                                    GuiElem::new(Label::new(
+                                    Box::new(Label::new(
                                         GuiElemCfg::at(Rectangle::from_tuples(
                                             (0.0, 0.0),
                                             (0.33, 1.0),
@@ -57,7 +54,7 @@ impl Settings {
                                         None,
                                         Vec2::new(0.9, 0.5),
                                     )),
-                                    GuiElem::new({
+                                    Box::new({
                                         let mut s = Slider::new_labeled(
                                             GuiElemCfg::at(Rectangle::from_tuples(
                                                 (0.33, 0.0),
@@ -81,10 +78,10 @@ impl Settings {
                             0.0,
                         ),
                         (
-                            GuiElem::new(Panel::new(
+                            Box::new(Panel::new(
                                 GuiElemCfg::default(),
                                 vec![
-                                    GuiElem::new(Label::new(
+                                    Box::new(Label::new(
                                         GuiElemCfg::at(Rectangle::from_tuples(
                                             (0.0, 0.0),
                                             (0.33, 1.0),
@@ -94,7 +91,7 @@ impl Settings {
                                         None,
                                         Vec2::new(0.9, 0.5),
                                     )),
-                                    GuiElem::new(Slider::new_labeled(
+                                    Box::new(Slider::new_labeled(
                                         GuiElemCfg::at(Rectangle::from_tuples(
                                             (0.33, 0.0),
                                             (1.0, 1.0),
@@ -116,10 +113,10 @@ impl Settings {
                             0.0,
                         ),
                         (
-                            GuiElem::new(Panel::new(
+                            Box::new(Panel::new(
                                 GuiElemCfg::default(),
                                 vec![
-                                    GuiElem::new(Label::new(
+                                    Box::new(Label::new(
                                         GuiElemCfg::at(Rectangle::from_tuples(
                                             (0.0, 0.0),
                                             (0.33, 1.0),
@@ -129,7 +126,7 @@ impl Settings {
                                         None,
                                         Vec2::new(0.9, 0.5),
                                     )),
-                                    GuiElem::new(Slider::new_labeled(
+                                    Box::new(Slider::new_labeled(
                                         GuiElemCfg::at(Rectangle::from_tuples(
                                             (0.33, 0.0),
                                             (1.0, 1.0),
@@ -153,10 +150,10 @@ impl Settings {
                             0.0,
                         ),
                         (
-                            GuiElem::new(Panel::new(
+                            Box::new(Panel::new(
                                 GuiElemCfg::default(),
                                 vec![
-                                    GuiElem::new(Label::new(
+                                    Box::new(Label::new(
                                         GuiElemCfg::at(Rectangle::from_tuples(
                                             (0.0, 0.0),
                                             (0.33, 1.0),
@@ -166,7 +163,7 @@ impl Settings {
                                         None,
                                         Vec2::new(0.9, 0.5),
                                     )),
-                                    GuiElem::new(Slider::new_labeled(
+                                    Box::new(Slider::new_labeled(
                                         GuiElemCfg::at(Rectangle::from_tuples(
                                             (0.33, 0.0),
                                             (1.0, 1.0),
@@ -219,7 +216,7 @@ impl Settings {
                         ),
                     ],
                 )),
-                GuiElem::new(Panel::with_background(
+                Box::new(Panel::with_background(
                     GuiElemCfg::default().w_mouse(),
                     vec![],
                     Color::BLACK,
@@ -229,18 +226,15 @@ impl Settings {
     }
     pub fn get_timeout_val(&self) -> Option<f64> {
         let v = self.children[0]
-            .inner
             .any()
             .downcast_ref::<ScrollBox>()
             .unwrap()
             .children[4]
             .0
-            .inner
             .any()
             .downcast_ref::<Panel>()
             .unwrap()
             .children[1]
-            .inner
             .any()
             .downcast_ref::<Slider>()
             .unwrap()
@@ -259,11 +253,8 @@ impl GuiElemTrait for Settings {
     fn config_mut(&mut self) -> &mut GuiElemCfg {
         &mut self.config
     }
-    fn children(&mut self) -> Box<dyn Iterator<Item = &mut GuiElem> + '_> {
-        Box::new(self.children.iter_mut())
-    }
-    fn clone_gui(&self) -> Box<dyn GuiElemTrait> {
-        Box::new(self.clone())
+    fn children(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElemTrait> + '_> {
+        Box::new(self.children.iter_mut().map(|v| v.as_mut()))
     }
     fn any(&self) -> &dyn std::any::Any {
         self
@@ -271,24 +262,27 @@ impl GuiElemTrait for Settings {
     fn any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }
+    fn elem(&self) -> &dyn GuiElemTrait {
+        self
+    }
+    fn elem_mut(&mut self) -> &mut dyn GuiElemTrait {
+        self
+    }
     fn draw(&mut self, info: &mut DrawInfo, _g: &mut Graphics2D) {
         let (rest, background) = self.children.split_at_mut(1);
-        let scrollbox = rest[0].inner.any_mut().downcast_mut::<ScrollBox>().unwrap();
+        let scrollbox = rest[0].any_mut().downcast_mut::<ScrollBox>().unwrap();
         let settings_opacity_slider = scrollbox.children[1]
             .0
-            .inner
             .any_mut()
             .downcast_mut::<Panel>()
             .unwrap()
             .children[1]
-            .inner
             .any_mut()
             .downcast_mut::<Slider>()
             .unwrap();
         if settings_opacity_slider.val_changed_subs[0] {
             settings_opacity_slider.val_changed_subs[0] = false;
             let color = background[0]
-                .inner
                 .any_mut()
                 .downcast_mut::<Panel>()
                 .unwrap()

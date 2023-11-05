@@ -17,7 +17,7 @@ use speedy2d::{
 };
 
 use crate::{
-    gui::{Dragging, DrawInfo, GuiAction, GuiElem, GuiElemCfg, GuiElemTrait},
+    gui::{Dragging, DrawInfo, GuiAction, GuiElemCfg, GuiElemTrait},
     gui_base::{Panel, ScrollBox},
     gui_text::{self, AdvancedLabel, Label},
 };
@@ -31,10 +31,9 @@ because simple clicks have to be GoTo events.
 
 */
 
-#[derive(Clone)]
 pub struct QueueViewer {
     config: GuiElemCfg,
-    children: Vec<GuiElem>,
+    children: Vec<Box<dyn GuiElemTrait>>,
     queue_updated: bool,
 }
 const QP_QUEUE1: f32 = 0.0;
@@ -46,11 +45,11 @@ impl QueueViewer {
         Self {
             config,
             children: vec![
-                GuiElem::new(ScrollBox::new(
+                Box::new(ScrollBox::new(
                     GuiElemCfg::at(Rectangle::from_tuples((0.0, QP_QUEUE1), (1.0, QP_QUEUE2))),
                     crate::gui_base::ScrollBoxSizeUnit::Pixels,
                     vec![(
-                        GuiElem::new(Label::new(
+                        Box::new(Label::new(
                             GuiElemCfg::default(),
                             "loading...".to_string(),
                             Color::DARK_GRAY,
@@ -60,13 +59,13 @@ impl QueueViewer {
                         1.0,
                     )],
                 )),
-                GuiElem::new(QueueEmptySpaceDragHandler::new(GuiElemCfg::at(
+                Box::new(QueueEmptySpaceDragHandler::new(GuiElemCfg::at(
                     Rectangle::from_tuples((0.0, QP_QUEUE1), (1.0, QP_QUEUE2)),
                 ))),
-                GuiElem::new(Panel::new(
+                Box::new(Panel::new(
                     GuiElemCfg::at(Rectangle::from_tuples((0.0, QP_INV1), (0.5, QP_INV2))),
                     vec![
-                        GuiElem::new(
+                        Box::new(
                             QueueLoop::new(
                                 GuiElemCfg::at(Rectangle::from_tuples((0.0, 0.0), (0.5, 0.5)))
                                     .w_mouse(),
@@ -84,7 +83,7 @@ impl QueueViewer {
                             )
                             .alwayscopy(),
                         ),
-                        GuiElem::new(
+                        Box::new(
                             QueueLoop::new(
                                 GuiElemCfg::at(Rectangle::from_tuples((0.0, 0.5), (0.5, 1.0)))
                                     .w_mouse(),
@@ -102,7 +101,7 @@ impl QueueViewer {
                             )
                             .alwayscopy(),
                         ),
-                        GuiElem::new(
+                        Box::new(
                             QueueRandom::new(
                                 GuiElemCfg::at(Rectangle::from_tuples((0.5, 0.0), (1.0, 0.5)))
                                     .w_mouse(),
@@ -112,7 +111,7 @@ impl QueueViewer {
                             )
                             .alwayscopy(),
                         ),
-                        GuiElem::new(
+                        Box::new(
                             QueueShuffle::new(
                                 GuiElemCfg::at(Rectangle::from_tuples((0.5, 0.5), (1.0, 1.0)))
                                     .w_mouse(),
@@ -130,7 +129,7 @@ impl QueueViewer {
                         ),
                     ],
                 )),
-                GuiElem::new(AdvancedLabel::new(
+                Box::new(AdvancedLabel::new(
                     GuiElemCfg::at(Rectangle::from_tuples((0.5, QP_INV1), (1.0, QP_INV2))),
                     Vec2::new(0.0, 0.5),
                     vec![],
@@ -147,8 +146,8 @@ impl GuiElemTrait for QueueViewer {
     fn config_mut(&mut self) -> &mut GuiElemCfg {
         &mut self.config
     }
-    fn children(&mut self) -> Box<dyn Iterator<Item = &mut GuiElem> + '_> {
-        Box::new(self.children.iter_mut())
+    fn children(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElemTrait> + '_> {
+        Box::new(self.children.iter_mut().map(|v| v.as_mut()))
     }
     fn any(&self) -> &dyn std::any::Any {
         self
@@ -156,14 +155,16 @@ impl GuiElemTrait for QueueViewer {
     fn any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }
-    fn clone_gui(&self) -> Box<dyn GuiElemTrait> {
-        Box::new(self.clone())
+    fn elem(&self) -> &dyn GuiElemTrait {
+        self
+    }
+    fn elem_mut(&mut self) -> &mut dyn GuiElemTrait {
+        self
     }
     fn draw(&mut self, info: &mut DrawInfo, _g: &mut speedy2d::Graphics2D) {
         if self.queue_updated {
             self.queue_updated = false;
             let label = self.children[3]
-                .inner
                 .any_mut()
                 .downcast_mut::<AdvancedLabel>()
                 .unwrap();
@@ -226,7 +227,10 @@ impl GuiElemTrait for QueueViewer {
                 true,
                 true,
             );
-            let mut scroll_box = self.children[0].try_as_mut::<ScrollBox>().unwrap();
+            let mut scroll_box = self.children[0]
+                .any_mut()
+                .downcast_mut::<ScrollBox>()
+                .unwrap();
             scroll_box.children = c;
             scroll_box.config_mut().redraw = true;
         }
@@ -243,7 +247,7 @@ fn queue_gui(
     depth: f32,
     depth_inc_by: f32,
     line_height: f32,
-    target: &mut Vec<(GuiElem, f32)>,
+    target: &mut Vec<(Box<dyn GuiElemTrait>, f32)>,
     path: Vec<usize>,
     current: bool,
     skip_folder: bool,
@@ -253,7 +257,7 @@ fn queue_gui(
         QueueContent::Song(id) => {
             if let Some(s) = db.songs().get(id) {
                 target.push((
-                    GuiElem::new(QueueSong::new(
+                    Box::new(QueueSong::new(
                         cfg,
                         path,
                         s.clone(),
@@ -268,7 +272,7 @@ fn queue_gui(
         QueueContent::Folder(ia, q, _) => {
             if !skip_folder {
                 target.push((
-                    GuiElem::new(QueueFolder::new(
+                    Box::new(QueueFolder::new(
                         cfg.clone(),
                         path.clone(),
                         queue.clone(),
@@ -296,7 +300,7 @@ fn queue_gui(
                 let mut p1 = path;
                 let p2 = p1.pop().unwrap_or(0) + 1;
                 target.push((
-                    GuiElem::new(QueueIndentEnd::new(cfg, (p1, p2))),
+                    Box::new(QueueIndentEnd::new(cfg, (p1, p2))),
                     line_height * 0.4,
                 ));
             }
@@ -307,7 +311,7 @@ fn queue_gui(
             let mut p1 = path.clone();
             let p2 = p1.pop().unwrap_or(0) + 1;
             target.push((
-                GuiElem::new(QueueLoop::new(cfg.clone(), path, queue.clone(), current)),
+                Box::new(QueueLoop::new(cfg.clone(), path, queue.clone(), current)),
                 line_height * 0.8,
             ));
             queue_gui(
@@ -322,13 +326,13 @@ fn queue_gui(
                 true,
             );
             target.push((
-                GuiElem::new(QueueIndentEnd::new(cfg, (p1, p2))),
+                Box::new(QueueIndentEnd::new(cfg, (p1, p2))),
                 line_height * 0.4,
             ));
         }
         QueueContent::Random(q) => {
             target.push((
-                GuiElem::new(QueueRandom::new(
+                Box::new(QueueRandom::new(
                     cfg.clone(),
                     path.clone(),
                     queue.clone(),
@@ -354,13 +358,13 @@ fn queue_gui(
             let mut p1 = path.clone();
             let p2 = p1.pop().unwrap_or(0) + 1;
             target.push((
-                GuiElem::new(QueueIndentEnd::new(cfg, (p1, p2))),
+                Box::new(QueueIndentEnd::new(cfg, (p1, p2))),
                 line_height * 0.4,
             ));
         }
         QueueContent::Shuffle { inner, state: _ } => {
             target.push((
-                GuiElem::new(QueueShuffle::new(
+                Box::new(QueueShuffle::new(
                     cfg.clone(),
                     path.clone(),
                     queue.clone(),
@@ -384,17 +388,16 @@ fn queue_gui(
             let mut p1 = path.clone();
             let p2 = p1.pop().unwrap_or(0) + 1;
             target.push((
-                GuiElem::new(QueueIndentEnd::new(cfg, (p1, p2))),
+                Box::new(QueueIndentEnd::new(cfg, (p1, p2))),
                 line_height * 0.4,
             ));
         }
     }
 }
 
-#[derive(Clone)]
 struct QueueEmptySpaceDragHandler {
     config: GuiElemCfg,
-    children: Vec<GuiElem>,
+    children: Vec<Box<dyn GuiElemTrait>>,
 }
 impl QueueEmptySpaceDragHandler {
     pub fn new(config: GuiElemCfg) -> Self {
@@ -411,8 +414,8 @@ impl GuiElemTrait for QueueEmptySpaceDragHandler {
     fn config_mut(&mut self) -> &mut GuiElemCfg {
         &mut self.config
     }
-    fn children(&mut self) -> Box<dyn Iterator<Item = &mut GuiElem> + '_> {
-        Box::new(self.children.iter_mut())
+    fn children(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElemTrait> + '_> {
+        Box::new(self.children.iter_mut().map(|v| v.as_mut()))
     }
     fn any(&self) -> &dyn std::any::Any {
         self
@@ -420,8 +423,11 @@ impl GuiElemTrait for QueueEmptySpaceDragHandler {
     fn any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }
-    fn clone_gui(&self) -> Box<dyn GuiElemTrait> {
-        Box::new(self.clone())
+    fn elem(&self) -> &dyn GuiElemTrait {
+        self
+    }
+    fn elem_mut(&mut self) -> &mut dyn GuiElemTrait {
+        self
     }
     fn dragged(&mut self, dragged: Dragging) -> Vec<GuiAction> {
         dragged_add_to_queue(dragged, |q, _| Command::QueueAdd(vec![], q))
@@ -446,10 +452,9 @@ fn generic_queue_draw(
     }
 }
 
-#[derive(Clone)]
 struct QueueSong {
     config: GuiElemCfg,
-    children: Vec<GuiElem>,
+    children: Vec<Box<dyn GuiElemTrait>>,
     path: Vec<usize>,
     song: Song,
     current: bool,
@@ -472,7 +477,7 @@ impl QueueSong {
         Self {
             config: config.w_mouse().w_keyboard_watch().w_drag_target(),
             children: vec![
-                GuiElem::new(AdvancedLabel::new(
+                Box::new(AdvancedLabel::new(
                     GuiElemCfg::at(Rectangle::from_tuples((0.0, 0.0), (1.0, 0.57))),
                     Vec2::new(0.0, 0.5),
                     vec![vec![
@@ -505,7 +510,7 @@ impl QueueSong {
                         ),
                     ]],
                 )),
-                GuiElem::new(Label::new(
+                Box::new(Label::new(
                     GuiElemCfg::at(Rectangle::from_tuples((sub_offset, 0.57), (1.0, 1.0))),
                     match (
                         db.artists().get(&song.artist),
@@ -558,8 +563,8 @@ impl GuiElemTrait for QueueSong {
     fn config_mut(&mut self) -> &mut GuiElemCfg {
         &mut self.config
     }
-    fn children(&mut self) -> Box<dyn Iterator<Item = &mut GuiElem> + '_> {
-        Box::new(self.children.iter_mut())
+    fn children(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElemTrait> + '_> {
+        Box::new(self.children.iter_mut().map(|v| v.as_mut()))
     }
     fn any(&self) -> &dyn std::any::Any {
         self
@@ -567,8 +572,11 @@ impl GuiElemTrait for QueueSong {
     fn any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }
-    fn clone_gui(&self) -> Box<dyn GuiElemTrait> {
-        Box::new(self.clone())
+    fn elem(&self) -> &dyn GuiElemTrait {
+        self
+    }
+    fn elem_mut(&mut self) -> &mut dyn GuiElemTrait {
+        self
     }
     fn mouse_down(&mut self, button: MouseButton) -> Vec<GuiAction> {
         if button == MouseButton::Left {
@@ -625,18 +633,9 @@ impl GuiElemTrait for QueueSong {
             let mouse_pos = self.mouse_pos;
             let w = self.config.pixel_pos.width();
             let h = self.config.pixel_pos.height();
-            let mut el = GuiElem::new(self.clone());
             info.actions.push(GuiAction::SetDragging(Some((
                 Dragging::Queue(QueueContent::Song(self.song.id).into()),
-                Some(Box::new(move |i, g| {
-                    let sw = i.pos.width();
-                    let sh = i.pos.height();
-                    let x = (i.mouse_pos.x - mouse_pos.x) / sw;
-                    let y = (i.mouse_pos.y - mouse_pos.y) / sh;
-                    el.inner.config_mut().pos =
-                        Rectangle::from_tuples((x, y), (x + w / sw, y + h / sh));
-                    el.draw(i, g)
-                })),
+                None,
             ))));
         }
     }
@@ -667,10 +666,9 @@ impl GuiElemTrait for QueueSong {
     }
 }
 
-#[derive(Clone)]
 struct QueueFolder {
     config: GuiElemCfg,
-    children: Vec<GuiElem>,
+    children: Vec<Box<dyn GuiElemTrait>>,
     path: Vec<usize>,
     queue: Queue,
     current: bool,
@@ -690,7 +688,7 @@ impl QueueFolder {
                 config.w_mouse().w_keyboard_watch()
             }
             .w_drag_target(),
-            children: vec![GuiElem::new(Label::new(
+            children: vec![Box::new(Label::new(
                 GuiElemCfg::default(),
                 match queue.content() {
                     QueueContent::Folder(_, q, n) => format!(
@@ -732,8 +730,8 @@ impl GuiElemTrait for QueueFolder {
     fn config_mut(&mut self) -> &mut GuiElemCfg {
         &mut self.config
     }
-    fn children(&mut self) -> Box<dyn Iterator<Item = &mut GuiElem> + '_> {
-        Box::new(self.children.iter_mut())
+    fn children(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElemTrait> + '_> {
+        Box::new(self.children.iter_mut().map(|v| v.as_mut()))
     }
     fn any(&self) -> &dyn std::any::Any {
         self
@@ -741,8 +739,11 @@ impl GuiElemTrait for QueueFolder {
     fn any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }
-    fn clone_gui(&self) -> Box<dyn GuiElemTrait> {
-        Box::new(self.clone())
+    fn elem(&self) -> &dyn GuiElemTrait {
+        self
+    }
+    fn elem_mut(&mut self) -> &mut dyn GuiElemTrait {
+        self
     }
     fn draw(&mut self, info: &mut DrawInfo, g: &mut speedy2d::Graphics2D) {
         self.insert_into = info.mouse_pos.y > info.pos.top_left().y + info.pos.height() * 0.5;
@@ -778,18 +779,9 @@ impl GuiElemTrait for QueueFolder {
             let mouse_pos = self.mouse_pos;
             let w = self.config.pixel_pos.width();
             let h = self.config.pixel_pos.height();
-            let mut el = GuiElem::new(self.clone());
             info.actions.push(GuiAction::SetDragging(Some((
                 Dragging::Queue(self.queue.clone()),
-                Some(Box::new(move |i, g| {
-                    let sw = i.pos.width();
-                    let sh = i.pos.height();
-                    let x = (i.mouse_pos.x - mouse_pos.x) / sw;
-                    let y = (i.mouse_pos.y - mouse_pos.y) / sh;
-                    el.inner.config_mut().pos =
-                        Rectangle::from_tuples((x, y), (x + w / sw, y + h / sh));
-                    el.draw(i, g)
-                })),
+                None,
             ))));
         }
     }
@@ -841,10 +833,9 @@ impl GuiElemTrait for QueueFolder {
         }
     }
 }
-#[derive(Clone)]
 pub struct QueueIndentEnd {
     config: GuiElemCfg,
-    children: Vec<GuiElem>,
+    children: Vec<Box<dyn GuiElemTrait>>,
     path_insert: (Vec<usize>, usize),
 }
 impl QueueIndentEnd {
@@ -863,8 +854,8 @@ impl GuiElemTrait for QueueIndentEnd {
     fn config_mut(&mut self) -> &mut GuiElemCfg {
         &mut self.config
     }
-    fn children(&mut self) -> Box<dyn Iterator<Item = &mut GuiElem> + '_> {
-        Box::new(self.children.iter_mut())
+    fn children(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElemTrait> + '_> {
+        Box::new(self.children.iter_mut().map(|v| v.as_mut()))
     }
     fn any(&self) -> &dyn std::any::Any {
         self
@@ -872,8 +863,11 @@ impl GuiElemTrait for QueueIndentEnd {
     fn any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }
-    fn clone_gui(&self) -> Box<dyn GuiElemTrait> {
-        Box::new(self.clone())
+    fn elem(&self) -> &dyn GuiElemTrait {
+        self
+    }
+    fn elem_mut(&mut self) -> &mut dyn GuiElemTrait {
+        self
     }
     fn draw(&mut self, info: &mut DrawInfo, g: &mut speedy2d::Graphics2D) {
         if info.dragging.is_some() {
@@ -900,10 +894,9 @@ impl GuiElemTrait for QueueIndentEnd {
     }
 }
 
-#[derive(Clone)]
 struct QueueLoop {
     config: GuiElemCfg,
-    children: Vec<GuiElem>,
+    children: Vec<Box<dyn GuiElemTrait>>,
     path: Vec<usize>,
     queue: Queue,
     current: bool,
@@ -922,7 +915,7 @@ impl QueueLoop {
                 config.w_mouse().w_keyboard_watch()
             }
             .w_drag_target(),
-            children: vec![GuiElem::new(Label::new(
+            children: vec![Box::new(Label::new(
                 GuiElemCfg::default(),
                 Self::get_label_text(&queue),
                 Color::from_int_rgb(217, 197, 65),
@@ -967,8 +960,8 @@ impl GuiElemTrait for QueueLoop {
     fn config_mut(&mut self) -> &mut GuiElemCfg {
         &mut self.config
     }
-    fn children(&mut self) -> Box<dyn Iterator<Item = &mut GuiElem> + '_> {
-        Box::new(self.children.iter_mut())
+    fn children(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElemTrait> + '_> {
+        Box::new(self.children.iter_mut().map(|v| v.as_mut()))
     }
     fn any(&self) -> &dyn std::any::Any {
         self
@@ -976,8 +969,11 @@ impl GuiElemTrait for QueueLoop {
     fn any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }
-    fn clone_gui(&self) -> Box<dyn GuiElemTrait> {
-        Box::new(self.clone())
+    fn elem(&self) -> &dyn GuiElemTrait {
+        self
+    }
+    fn elem_mut(&mut self) -> &mut dyn GuiElemTrait {
+        self
     }
     fn mouse_wheel(&mut self, diff: f32) -> Vec<GuiAction> {
         if self.always_copy {
@@ -989,7 +985,6 @@ impl GuiElemTrait for QueueLoop {
                 }
             }
             *self.children[0]
-                .inner
                 .any_mut()
                 .downcast_mut::<Label>()
                 .unwrap()
@@ -1009,18 +1004,9 @@ impl GuiElemTrait for QueueLoop {
             let mouse_pos = self.mouse_pos;
             let w = self.config.pixel_pos.width();
             let h = self.config.pixel_pos.height();
-            let mut el = GuiElem::new(self.clone());
             info.actions.push(GuiAction::SetDragging(Some((
                 Dragging::Queue(self.queue.clone()),
-                Some(Box::new(move |i, g| {
-                    let sw = i.pos.width();
-                    let sh = i.pos.height();
-                    let x = (i.mouse_pos.x - mouse_pos.x) / sw;
-                    let y = (i.mouse_pos.y - mouse_pos.y) / sh;
-                    el.inner.config_mut().pos =
-                        Rectangle::from_tuples((x, y), (x + w / sw, y + h / sh));
-                    el.draw(i, g)
-                })),
+                None,
             ))));
         }
     }
@@ -1066,10 +1052,9 @@ impl GuiElemTrait for QueueLoop {
     }
 }
 
-#[derive(Clone)]
 struct QueueRandom {
     config: GuiElemCfg,
-    children: Vec<GuiElem>,
+    children: Vec<Box<dyn GuiElemTrait>>,
     path: Vec<usize>,
     queue: Queue,
     current: bool,
@@ -1088,7 +1073,7 @@ impl QueueRandom {
                 config.w_mouse().w_keyboard_watch()
             }
             .w_drag_target(),
-            children: vec![GuiElem::new(Label::new(
+            children: vec![Box::new(Label::new(
                 GuiElemCfg::default(),
                 match queue.content() {
                     QueueContent::Random(_) => {
@@ -1123,8 +1108,8 @@ impl GuiElemTrait for QueueRandom {
     fn config_mut(&mut self) -> &mut GuiElemCfg {
         &mut self.config
     }
-    fn children(&mut self) -> Box<dyn Iterator<Item = &mut GuiElem> + '_> {
-        Box::new(self.children.iter_mut())
+    fn children(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElemTrait> + '_> {
+        Box::new(self.children.iter_mut().map(|v| v.as_mut()))
     }
     fn any(&self) -> &dyn std::any::Any {
         self
@@ -1132,8 +1117,11 @@ impl GuiElemTrait for QueueRandom {
     fn any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }
-    fn clone_gui(&self) -> Box<dyn GuiElemTrait> {
-        Box::new(self.clone())
+    fn elem(&self) -> &dyn GuiElemTrait {
+        self
+    }
+    fn elem_mut(&mut self) -> &mut dyn GuiElemTrait {
+        self
     }
     fn draw(&mut self, info: &mut DrawInfo, _g: &mut speedy2d::Graphics2D) {
         if !self.mouse {
@@ -1146,18 +1134,9 @@ impl GuiElemTrait for QueueRandom {
             let mouse_pos = self.mouse_pos;
             let w = self.config.pixel_pos.width();
             let h = self.config.pixel_pos.height();
-            let mut el = GuiElem::new(self.clone());
             info.actions.push(GuiAction::SetDragging(Some((
                 Dragging::Queue(self.queue.clone()),
-                Some(Box::new(move |i, g| {
-                    let sw = i.pos.width();
-                    let sh = i.pos.height();
-                    let x = (i.mouse_pos.x - mouse_pos.x) / sw;
-                    let y = (i.mouse_pos.y - mouse_pos.y) / sh;
-                    el.inner.config_mut().pos =
-                        Rectangle::from_tuples((x, y), (x + w / sw, y + h / sh));
-                    el.draw(i, g)
-                })),
+                None,
             ))));
         }
     }
@@ -1202,10 +1181,9 @@ impl GuiElemTrait for QueueRandom {
     }
 }
 
-#[derive(Clone)]
 struct QueueShuffle {
     config: GuiElemCfg,
-    children: Vec<GuiElem>,
+    children: Vec<Box<dyn GuiElemTrait>>,
     path: Vec<usize>,
     queue: Queue,
     current: bool,
@@ -1224,7 +1202,7 @@ impl QueueShuffle {
                 config.w_mouse().w_keyboard_watch()
             }
             .w_drag_target(),
-            children: vec![GuiElem::new(Label::new(
+            children: vec![Box::new(Label::new(
                 GuiElemCfg::default(),
                 match queue.content() {
                     QueueContent::Shuffle { .. } => {
@@ -1259,8 +1237,8 @@ impl GuiElemTrait for QueueShuffle {
     fn config_mut(&mut self) -> &mut GuiElemCfg {
         &mut self.config
     }
-    fn children(&mut self) -> Box<dyn Iterator<Item = &mut GuiElem> + '_> {
-        Box::new(self.children.iter_mut())
+    fn children(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElemTrait> + '_> {
+        Box::new(self.children.iter_mut().map(|v| v.as_mut()))
     }
     fn any(&self) -> &dyn std::any::Any {
         self
@@ -1268,8 +1246,11 @@ impl GuiElemTrait for QueueShuffle {
     fn any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }
-    fn clone_gui(&self) -> Box<dyn GuiElemTrait> {
-        Box::new(self.clone())
+    fn elem(&self) -> &dyn GuiElemTrait {
+        self
+    }
+    fn elem_mut(&mut self) -> &mut dyn GuiElemTrait {
+        self
     }
     fn draw(&mut self, info: &mut DrawInfo, _g: &mut speedy2d::Graphics2D) {
         if !self.mouse {
@@ -1282,18 +1263,9 @@ impl GuiElemTrait for QueueShuffle {
             let mouse_pos = self.mouse_pos;
             let w = self.config.pixel_pos.width();
             let h = self.config.pixel_pos.height();
-            let mut el = GuiElem::new(self.clone());
             info.actions.push(GuiAction::SetDragging(Some((
                 Dragging::Queue(self.queue.clone()),
-                Some(Box::new(move |i, g| {
-                    let sw = i.pos.width();
-                    let sh = i.pos.height();
-                    let x = (i.mouse_pos.x - mouse_pos.x) / sw;
-                    let y = (i.mouse_pos.y - mouse_pos.y) / sh;
-                    el.inner.config_mut().pos =
-                        Rectangle::from_tuples((x, y), (x + w / sw, y + h / sh));
-                    el.draw(i, g)
-                })),
+                None,
             ))));
         }
     }

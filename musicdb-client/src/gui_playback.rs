@@ -7,9 +7,7 @@ use musicdb_lib::{
 use speedy2d::{color::Color, dimen::Vec2, shape::Rectangle, window::MouseButton};
 
 use crate::{
-    gui::{
-        adjust_area, adjust_pos, morph_rect, GuiAction, GuiCover, GuiElem, GuiElemCfg, GuiElemTrait,
-    },
+    gui::{adjust_area, adjust_pos, morph_rect, GuiAction, GuiCover, GuiElemCfg, GuiElemTrait},
     gui_text::AdvancedLabel,
 };
 
@@ -20,13 +18,12 @@ This file could probably have a better name.
 
 */
 
-#[derive(Clone)]
 pub struct CurrentSong {
     config: GuiElemCfg,
     /// 0: AdvancedLabel for small mode
     /// 1: AdvancedLabel for big mode heading
     /// 2: AdvancedLabel for big mode info text
-    children: Vec<GuiElem>,
+    children: Vec<Box<dyn GuiElemTrait>>,
     prev_song: Option<SongId>,
     cover_pos: Rectangle,
     covers: VecDeque<(CoverId, Option<(bool, Instant)>)>,
@@ -46,7 +43,7 @@ impl CurrentSong {
         let cover_pos_l = Rectangle::from_tuples((0.0, 0.26), (0.4, 0.80));
         Self {
             config,
-            children: vec![GuiElem::new(AdvancedLabel::new(
+            children: vec![Box::new(AdvancedLabel::new(
                 GuiElemCfg::at(text_pos_s.clone()),
                 Vec2::new(0.0, 0.5),
                 vec![],
@@ -66,7 +63,10 @@ impl CurrentSong {
     pub fn set_idle_mode(&mut self, idle_mode: f32) {
         self.idle = idle_mode;
         self.idle_changed = true;
-        let label = self.children[0].try_as_mut::<AdvancedLabel>().unwrap();
+        let label = self.children[0]
+            .any_mut()
+            .downcast_mut::<AdvancedLabel>()
+            .unwrap();
         label.config_mut().pos = morph_rect(&self.text_pos_s, &self.text_pos_l, idle_mode);
         label.align = Vec2::new(0.5 * idle_mode, 0.5);
     }
@@ -96,8 +96,8 @@ impl GuiElemTrait for CurrentSong {
     fn config_mut(&mut self) -> &mut GuiElemCfg {
         &mut self.config
     }
-    fn children(&mut self) -> Box<dyn Iterator<Item = &mut GuiElem> + '_> {
-        Box::new(self.children.iter_mut())
+    fn children(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElemTrait> + '_> {
+        Box::new(self.children.iter_mut().map(|v| v.as_mut()))
     }
     fn any(&self) -> &dyn std::any::Any {
         self
@@ -105,8 +105,11 @@ impl GuiElemTrait for CurrentSong {
     fn any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }
-    fn clone_gui(&self) -> Box<dyn GuiElemTrait> {
-        Box::new(self.clone())
+    fn elem(&self) -> &dyn GuiElemTrait {
+        self
+    }
+    fn elem_mut(&mut self) -> &mut dyn GuiElemTrait {
+        self
     }
     fn draw(&mut self, info: &mut crate::gui::DrawInfo, g: &mut speedy2d::Graphics2D) {
         // check if there is a new song
@@ -157,7 +160,8 @@ impl GuiElemTrait for CurrentSong {
             if self.config.redraw {
                 self.config.redraw = false;
                 self.children[0]
-                    .try_as_mut::<AdvancedLabel>()
+                    .any_mut()
+                    .downcast_mut::<AdvancedLabel>()
                     .unwrap()
                     .content = if let Some(song) = new_song {
                     self.text_updated = Some(Instant::now());
@@ -179,7 +183,8 @@ impl GuiElemTrait for CurrentSong {
                 self.text_updated = None;
             }
             for c in self.children[0]
-                .try_as_mut::<AdvancedLabel>()
+                .any_mut()
+                .downcast_mut::<AdvancedLabel>()
                 .unwrap()
                 .content
                 .iter_mut()
@@ -312,10 +317,9 @@ impl GuiElemTrait for CurrentSong {
     }
 }
 
-#[derive(Clone)]
 pub struct PlayPauseToggle {
     config: GuiElemCfg,
-    children: Vec<GuiElem>,
+    children: Vec<Box<dyn GuiElemTrait>>,
     playing_target: bool,
     playing_waiting_for_change: bool,
 }
@@ -337,8 +341,8 @@ impl GuiElemTrait for PlayPauseToggle {
     fn config_mut(&mut self) -> &mut GuiElemCfg {
         &mut self.config
     }
-    fn children(&mut self) -> Box<dyn Iterator<Item = &mut GuiElem> + '_> {
-        Box::new(self.children.iter_mut())
+    fn children(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElemTrait> + '_> {
+        Box::new(self.children.iter_mut().map(|v| v.as_mut()))
     }
     fn any(&self) -> &dyn std::any::Any {
         self
@@ -346,8 +350,11 @@ impl GuiElemTrait for PlayPauseToggle {
     fn any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }
-    fn clone_gui(&self) -> Box<dyn GuiElemTrait> {
-        Box::new(self.clone())
+    fn elem(&self) -> &dyn GuiElemTrait {
+        self
+    }
+    fn elem_mut(&mut self) -> &mut dyn GuiElemTrait {
+        self
     }
     fn draw(&mut self, info: &mut crate::gui::DrawInfo, g: &mut speedy2d::Graphics2D) {
         if self.playing_waiting_for_change {

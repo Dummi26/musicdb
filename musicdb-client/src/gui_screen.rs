@@ -1,16 +1,10 @@
 use std::time::Instant;
 
 use musicdb_lib::{data::queue::QueueContent, server::Command};
-use speedy2d::{
-    color::Color,
-    dimen::Vec2,
-    shape::Rectangle,
-    window::{KeyScancode, VirtualKeyCode},
-    Graphics2D,
-};
+use speedy2d::{color::Color, dimen::Vec2, shape::Rectangle, window::VirtualKeyCode, Graphics2D};
 
 use crate::{
-    gui::{morph_rect, DrawInfo, GuiAction, GuiElem, GuiElemCfg, GuiElemTrait},
+    gui::{morph_rect, DrawInfo, GuiAction, GuiElemCfg, GuiElemTrait},
     gui_base::{Button, Panel},
     gui_library::LibraryBrowser,
     gui_notif::NotifOverlay,
@@ -38,7 +32,6 @@ pub fn transition(p: f32) -> f32 {
     3.0 * p * p - 2.0 * p * p * p
 }
 
-#[derive(Clone)]
 pub struct GuiScreen {
     config: GuiElemCfg,
     /// 0: Notifications
@@ -51,7 +44,7 @@ pub struct GuiScreen {
     ///  3: queue
     ///  4: queue clear button
     /// 4: Edit Panel
-    children: Vec<GuiElem>,
+    children: Vec<Box<dyn GuiElemTrait>>,
     pub idle: (bool, Option<Instant>),
     pub settings: (bool, Option<Instant>),
     pub edit_panel: (bool, Option<Instant>),
@@ -60,22 +53,22 @@ pub struct GuiScreen {
     pub prev_mouse_pos: Vec2,
 }
 impl GuiScreen {
-    pub fn open_edit(&mut self, mut edit: GuiElem) {
+    pub fn open_edit(&mut self, mut edit: Box<dyn GuiElemTrait>) {
         if !self.edit_panel.0 {
             self.edit_panel = (true, Some(Instant::now()));
-            edit.inner.config_mut().pos = Rectangle::from_tuples((-0.5, 0.0), (0.0, 0.9));
+            edit.config_mut().pos = Rectangle::from_tuples((-0.5, 0.0), (0.0, 0.9));
         } else {
-            edit.inner.config_mut().pos = Rectangle::from_tuples((0.0, 0.0), (0.5, 0.9));
+            edit.config_mut().pos = Rectangle::from_tuples((0.0, 0.0), (0.5, 0.9));
         }
         if let Some(prev) = self.children.get_mut(4) {
-            prev.inner.config_mut().enabled = false;
+            prev.config_mut().enabled = false;
         }
         self.children.insert(4, edit);
     }
     pub fn close_edit(&mut self) {
         if self.children.len() > 5 {
             self.children.remove(4);
-            self.children[4].inner.config_mut().enabled = true;
+            self.children[4].config_mut().enabled = true;
         } else if self.edit_panel.0 {
             self.edit_panel = (false, Some(Instant::now()));
         }
@@ -91,25 +84,25 @@ impl GuiScreen {
         Self {
             config: config.w_keyboard_watch().w_mouse().w_keyboard_focus(),
             children: vec![
-                GuiElem::new(notif_overlay),
-                GuiElem::new(StatusBar::new(
+                Box::new(notif_overlay),
+                Box::new(StatusBar::new(
                     GuiElemCfg::at(Rectangle::from_tuples((0.0, 0.9), (1.0, 1.0))),
                     true,
                 )),
-                GuiElem::new(Settings::new(
+                Box::new(Settings::new(
                     GuiElemCfg::default().disabled(),
                     line_height,
                     scroll_sensitivity_pixels,
                     scroll_sensitivity_lines,
                     scroll_sensitivity_pages,
                 )),
-                GuiElem::new(Panel::new(
+                Box::new(Panel::new(
                     GuiElemCfg::at(Rectangle::from_tuples((0.0, 0.0), (1.0, 0.9))),
                     vec![
-                        GuiElem::new(Button::new(
+                        Box::new(Button::new(
                             GuiElemCfg::at(Rectangle::from_tuples((0.75, 0.0), (0.875, 0.03))),
                             |_| vec![GuiAction::OpenSettings(true)],
-                            vec![GuiElem::new(Label::new(
+                            vec![Box::new(Label::new(
                                 GuiElemCfg::default(),
                                 "Settings".to_string(),
                                 Color::WHITE,
@@ -117,10 +110,10 @@ impl GuiScreen {
                                 Vec2::new(0.5, 0.5),
                             ))],
                         )),
-                        GuiElem::new(Button::new(
+                        Box::new(Button::new(
                             GuiElemCfg::at(Rectangle::from_tuples((0.875, 0.0), (1.0, 0.03))),
                             |_| vec![GuiAction::Exit],
-                            vec![GuiElem::new(Label::new(
+                            vec![Box::new(Label::new(
                                 GuiElemCfg::default(),
                                 "Exit".to_string(),
                                 Color::WHITE,
@@ -128,15 +121,15 @@ impl GuiScreen {
                                 Vec2::new(0.5, 0.5),
                             ))],
                         )),
-                        GuiElem::new(LibraryBrowser::new(GuiElemCfg::at(Rectangle::from_tuples(
+                        Box::new(LibraryBrowser::new(GuiElemCfg::at(Rectangle::from_tuples(
                             (0.0, 0.0),
                             (0.5, 1.0),
                         )))),
-                        GuiElem::new(QueueViewer::new(GuiElemCfg::at(Rectangle::from_tuples(
+                        Box::new(QueueViewer::new(GuiElemCfg::at(Rectangle::from_tuples(
                             (0.5, 0.03),
                             (1.0, 1.0),
                         )))),
-                        GuiElem::new(Button::new(
+                        Box::new(Button::new(
                             GuiElemCfg::at(Rectangle::from_tuples((0.5, 0.0), (0.75, 0.03))),
                             |_| {
                                 vec![GuiAction::SendToServer(
@@ -151,7 +144,7 @@ impl GuiScreen {
                                     ),
                                 )]
                             },
-                            vec![GuiElem::new(Label::new(
+                            vec![Box::new(Label::new(
                                 GuiElemCfg::default(),
                                 "Clear Queue".to_string(),
                                 Color::WHITE,
@@ -216,8 +209,8 @@ impl GuiElemTrait for GuiScreen {
     fn config_mut(&mut self) -> &mut GuiElemCfg {
         &mut self.config
     }
-    fn children(&mut self) -> Box<dyn Iterator<Item = &mut GuiElem> + '_> {
-        Box::new(self.children.iter_mut())
+    fn children(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElemTrait> + '_> {
+        Box::new(self.children.iter_mut().map(|v| v.as_mut()))
     }
     fn any(&self) -> &dyn std::any::Any {
         self
@@ -225,8 +218,11 @@ impl GuiElemTrait for GuiScreen {
     fn any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }
-    fn clone_gui(&self) -> Box<dyn GuiElemTrait> {
-        Box::new(self.clone())
+    fn elem(&self) -> &dyn GuiElemTrait {
+        self
+    }
+    fn elem_mut(&mut self) -> &mut dyn GuiElemTrait {
+        self
     }
     fn key_watch(
         &mut self,
@@ -271,21 +267,20 @@ impl GuiElemTrait for GuiScreen {
                 if let Some(h) = &info.helper {
                     h.set_cursor_visible(!self.idle.0);
                     if self.settings.0 {
-                        self.children[2].inner.config_mut().enabled = !self.idle.0;
+                        self.children[2].config_mut().enabled = !self.idle.0;
                     }
                     if self.edit_panel.0 {
                         if let Some(c) = self.children.get_mut(4) {
-                            c.inner.config_mut().enabled = !self.idle.0;
+                            c.config_mut().enabled = !self.idle.0;
                         }
                     }
-                    self.children[3].inner.config_mut().enabled = !self.idle.0;
+                    self.children[3].config_mut().enabled = !self.idle.0;
                 }
             }
             let p = transition(p1);
-            self.children[1].inner.config_mut().pos =
+            self.children[1].config_mut().pos =
                 Rectangle::from_tuples((0.0, 0.9 - 0.9 * p), (1.0, 1.0));
             self.children[1]
-                .inner
                 .any_mut()
                 .downcast_mut::<StatusBar>()
                 .unwrap()
@@ -295,7 +290,7 @@ impl GuiElemTrait for GuiScreen {
         if self.settings.1.is_some() {
             let p1 = Self::get_prog(&mut self.settings, 0.3);
             let p = transition(p1);
-            let cfg = self.children[2].inner.config_mut();
+            let cfg = self.children[2].config_mut();
             cfg.enabled = p > 0.0;
             cfg.pos = Rectangle::from_tuples((0.0, 0.9 - 0.9 * p), (1.0, 0.9));
         }
@@ -304,22 +299,20 @@ impl GuiElemTrait for GuiScreen {
             let p1 = Self::get_prog(&mut self.edit_panel, 0.3);
             let p = transition(p1);
             if let Some(c) = self.children.get_mut(4) {
-                c.inner.config_mut().enabled = p > 0.0;
-                c.inner.config_mut().pos =
-                    Rectangle::from_tuples((-0.5 + 0.5 * p, 0.0), (0.5 * p, 0.9));
+                c.config_mut().enabled = p > 0.0;
+                c.config_mut().pos = Rectangle::from_tuples((-0.5 + 0.5 * p, 0.0), (0.5 * p, 0.9));
             }
             if !self.edit_panel.0 && p == 0.0 {
                 while self.children.len() > 4 {
                     self.children.pop();
                 }
             }
-            self.children[3].inner.config_mut().pos =
+            self.children[3].config_mut().pos =
                 Rectangle::from_tuples((0.5 * p, 0.0), (1.0 + 0.5 * p, 0.9));
         }
         // set idle timeout (only when settings are open)
         if self.settings.0 || self.settings.1.is_some() {
             self.idle_timeout = self.children[2]
-                .inner
                 .any()
                 .downcast_ref::<Settings>()
                 .unwrap()
@@ -352,10 +345,9 @@ impl GuiElemTrait for GuiScreen {
     }
 }
 
-#[derive(Clone)]
 pub struct StatusBar {
     config: GuiElemCfg,
-    children: Vec<GuiElem>,
+    children: Vec<Box<dyn GuiElemTrait>>,
     idle_mode: f32,
     idle_prev: f32,
     pos_current_song_s: Rectangle,
@@ -372,12 +364,12 @@ impl StatusBar {
         Self {
             config,
             children: vec![
-                GuiElem::new(CurrentSong::new(GuiElemCfg::at(pos_current_song_s.clone()))),
-                GuiElem::new(PlayPauseToggle::new(
+                Box::new(CurrentSong::new(GuiElemCfg::at(pos_current_song_s.clone()))),
+                Box::new(PlayPauseToggle::new(
                     GuiElemCfg::at(pos_play_pause_s.clone()),
                     playing,
                 )),
-                GuiElem::new(Panel::new(GuiElemCfg::default(), vec![])),
+                Box::new(Panel::new(GuiElemCfg::default(), vec![])),
             ],
             idle_mode: 0.0,
             idle_prev: 0.0,
@@ -398,7 +390,6 @@ impl StatusBar {
     }
     pub fn set_background(&mut self, bg: Option<Color>) {
         self.children[Self::index_bgpanel()]
-            .inner
             .any_mut()
             .downcast_mut::<Panel>()
             .unwrap()
@@ -412,8 +403,8 @@ impl GuiElemTrait for StatusBar {
     fn config_mut(&mut self) -> &mut GuiElemCfg {
         &mut self.config
     }
-    fn children(&mut self) -> Box<dyn Iterator<Item = &mut GuiElem> + '_> {
-        Box::new(self.children.iter_mut())
+    fn children(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElemTrait> + '_> {
+        Box::new(self.children.iter_mut().map(|v| v.as_mut()))
     }
     fn any(&self) -> &dyn std::any::Any {
         self
@@ -421,8 +412,11 @@ impl GuiElemTrait for StatusBar {
     fn any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }
-    fn clone_gui(&self) -> Box<dyn GuiElemTrait> {
-        Box::new(self.clone())
+    fn elem(&self) -> &dyn GuiElemTrait {
+        self
+    }
+    fn elem_mut(&mut self) -> &mut dyn GuiElemTrait {
+        self
     }
     fn draw(&mut self, info: &mut DrawInfo, g: &mut Graphics2D) {
         // the line that separates this section from the rest of the ui.
@@ -446,7 +440,6 @@ impl GuiElemTrait for StatusBar {
             // position the text
             let l = self.idle_mode;
             let current_song = self.children[Self::index_current_song()]
-                .inner
                 .any_mut()
                 .downcast_mut::<CurrentSong>()
                 .unwrap();
@@ -454,7 +447,6 @@ impl GuiElemTrait for StatusBar {
             current_song.config_mut().pos =
                 morph_rect(&self.pos_current_song_s, &self.pos_current_song_l, l);
             let play_pause = self.children[Self::index_play_pause_toggle()]
-                .inner
                 .any_mut()
                 .downcast_mut::<PlayPauseToggle>()
                 .unwrap();

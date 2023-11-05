@@ -5,21 +5,21 @@ use std::{
 
 use speedy2d::{color::Color, dimen::Vector2, shape::Rectangle};
 
-use crate::gui::{GuiElem, GuiElemCfg, GuiElemTrait};
+use crate::gui::{GuiElemCfg, GuiElemTrait};
 
 /// This should be added on top of overything else and set to fullscreen.
 /// It will respond to notification events.
 pub struct NotifOverlay {
     config: GuiElemCfg,
-    notifs: Vec<(GuiElem, NotifInfo)>,
+    notifs: Vec<(Box<dyn GuiElemTrait>, NotifInfo)>,
     light: Option<(Instant, Color)>,
-    receiver: mpsc::Receiver<Box<dyn FnOnce(&Self) -> (GuiElem, NotifInfo) + Send>>,
+    receiver: mpsc::Receiver<Box<dyn FnOnce(&Self) -> (Box<dyn GuiElemTrait>, NotifInfo) + Send>>,
 }
 
 impl NotifOverlay {
     pub fn new() -> (
         Self,
-        mpsc::Sender<Box<dyn FnOnce(&Self) -> (GuiElem, NotifInfo) + Send>>,
+        mpsc::Sender<Box<dyn FnOnce(&Self) -> (Box<dyn GuiElemTrait>, NotifInfo) + Send>>,
     ) {
         let (sender, receiver) = mpsc::channel();
         (
@@ -46,7 +46,7 @@ impl NotifOverlay {
                             self.light = Some((now, color));
                         }
                         adjust_heights = true;
-                        gui.inner.config_mut().enabled = true;
+                        gui.config_mut().enabled = true;
                     }
                 }
                 NotifInfoTime::FadingIn(since) => {
@@ -108,8 +108,7 @@ impl NotifOverlay {
                 y
             };
             y += height;
-            gui.inner.config_mut().pos =
-                Rectangle::from_tuples((left, pos_y), (right, pos_y + height));
+            gui.config_mut().pos = Rectangle::from_tuples((left, pos_y), (right, pos_y + height));
         }
     }
 }
@@ -157,7 +156,7 @@ impl GuiElemTrait for NotifOverlay {
     fn draw(&mut self, info: &mut crate::gui::DrawInfo, g: &mut speedy2d::Graphics2D) {
         if let Ok(notif) = self.receiver.try_recv() {
             let mut n = notif(self);
-            n.0.inner.config_mut().enabled = false;
+            n.0.config_mut().enabled = false;
             self.notifs.push(n);
         }
         self.check_notifs();
@@ -194,8 +193,11 @@ impl GuiElemTrait for NotifOverlay {
     fn config_mut(&mut self) -> &mut GuiElemCfg {
         &mut self.config
     }
-    fn children(&mut self) -> Box<dyn Iterator<Item = &mut GuiElem> + '_> {
-        Box::new(self.notifs.iter_mut().map(|(v, _)| v))
+    // fn children(&mut self) -> Box<dyn Iterator<Item = &mut GuiElem> + '_> {
+    //     Box::new(self.notifs.iter_mut().map(|(v, _)| v))
+    // }
+    fn children(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElemTrait> + '_> {
+        Box::new(self.notifs.iter_mut().map(|(v, _)| v.as_mut()))
     }
     fn any(&self) -> &dyn std::any::Any {
         self
@@ -203,7 +205,10 @@ impl GuiElemTrait for NotifOverlay {
     fn any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }
-    fn clone_gui(&self) -> Box<dyn GuiElemTrait> {
-        Box::new(self.clone())
+    fn elem(&self) -> &dyn GuiElemTrait {
+        self
+    }
+    fn elem_mut(&mut self) -> &mut dyn GuiElemTrait {
+        self
     }
 }

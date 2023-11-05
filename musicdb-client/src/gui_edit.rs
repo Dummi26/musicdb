@@ -1,6 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
-    sync::{atomic::AtomicBool, mpsc, Arc, Mutex},
+    sync::mpsc,
 };
 
 use musicdb_lib::{
@@ -13,14 +13,14 @@ use musicdb_lib::{
 use speedy2d::{color::Color, dimen::Vec2, shape::Rectangle};
 
 use crate::{
-    gui::{Dragging, DrawInfo, GuiAction, GuiElem, GuiElemCfg, GuiElemTrait},
+    gui::{Dragging, DrawInfo, GuiAction, GuiElemCfg, GuiElemTrait},
     gui_base::{Button, Panel, ScrollBox},
     gui_text::{Label, TextField},
 };
 
 pub struct GuiEdit {
     config: GuiElemCfg,
-    children: Vec<GuiElem>,
+    children: Vec<Box<dyn GuiElemTrait>>,
     editable: Editable,
     editing: Editing,
     reload: bool,
@@ -78,20 +78,20 @@ impl GuiEdit {
             apply_change,
             change_recv,
             children: vec![
-                GuiElem::new(ScrollBox::new(
+                Box::new(ScrollBox::new(
                     GuiElemCfg::at(Rectangle::from_tuples((0.0, 0.0), (1.0, 0.6))),
                     crate::gui_base::ScrollBoxSizeUnit::Pixels,
                     vec![],
                 )),
-                GuiElem::new(ScrollBox::new(
+                Box::new(ScrollBox::new(
                     GuiElemCfg::at(Rectangle::from_tuples((0.0, 0.6), (1.0, 0.9))),
                     crate::gui_base::ScrollBoxSizeUnit::Pixels,
                     vec![],
                 )),
-                GuiElem::new(Button::new(
+                Box::new(Button::new(
                     GuiElemCfg::at(Rectangle::from_tuples((0.0, 0.95), (0.33, 1.0))),
                     |_| vec![GuiAction::CloseEditPanel],
-                    vec![GuiElem::new(Label::new(
+                    vec![Box::new(Label::new(
                         GuiElemCfg::default(),
                         "Back".to_string(),
                         Color::WHITE,
@@ -99,13 +99,13 @@ impl GuiEdit {
                         Vec2::new(0.5, 0.5),
                     ))],
                 )),
-                GuiElem::new(Button::new(
+                Box::new(Button::new(
                     GuiElemCfg::at(Rectangle::from_tuples((0.33, 0.95), (0.67, 1.0))),
                     move |_| {
                         _ = ac1.send(Box::new(|s| s.reload = true));
                         vec![]
                     },
-                    vec![GuiElem::new(Label::new(
+                    vec![Box::new(Label::new(
                         GuiElemCfg::default(),
                         "Reload".to_string(),
                         Color::WHITE,
@@ -113,13 +113,13 @@ impl GuiEdit {
                         Vec2::new(0.5, 0.5),
                     ))],
                 )),
-                GuiElem::new(Button::new(
+                Box::new(Button::new(
                     GuiElemCfg::at(Rectangle::from_tuples((0.67, 0.95), (1.0, 1.0))),
                     move |_| {
                         _ = ac2.send(Box::new(|s| s.send = true));
                         vec![]
                     },
-                    vec![GuiElem::new(Label::new(
+                    vec![Box::new(Label::new(
                         GuiElemCfg::default(),
                         "Send".to_string(),
                         Color::WHITE,
@@ -138,8 +138,8 @@ impl GuiElemTrait for GuiEdit {
     fn config_mut(&mut self) -> &mut GuiElemCfg {
         &mut self.config
     }
-    fn children(&mut self) -> Box<dyn Iterator<Item = &mut GuiElem> + '_> {
-        Box::new(self.children.iter_mut())
+    fn children(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElemTrait> + '_> {
+        Box::new(self.children.iter_mut().map(|v| v.as_mut()))
     }
     fn any(&self) -> &dyn std::any::Any {
         self
@@ -147,8 +147,11 @@ impl GuiElemTrait for GuiEdit {
     fn any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }
-    fn clone_gui(&self) -> Box<dyn GuiElemTrait> {
-        Box::new(self.clone())
+    fn elem(&self) -> &dyn GuiElemTrait {
+        self
+    }
+    fn elem_mut(&mut self) -> &mut dyn GuiElemTrait {
+        self
     }
     fn draw(&mut self, info: &mut crate::gui::DrawInfo, g: &mut speedy2d::Graphics2D) {
         loop {
@@ -300,14 +303,13 @@ impl GuiElemTrait for GuiEdit {
             self.rebuild_main = true;
             self.rebuild_changes = true;
         }
-        if let Some(sb) = self.children[0].inner.any_mut().downcast_mut::<ScrollBox>() {
+        if let Some(sb) = self.children[0].any_mut().downcast_mut::<ScrollBox>() {
             for (c, _) in sb.children.iter() {
                 if let Some(p) = c
-                    .inner
                     .any()
                     .downcast_ref::<Panel>()
                     .and_then(|p| p.children.get(0))
-                    .and_then(|e| e.inner.any().downcast_ref::<TextField>())
+                    .and_then(|e| e.any().downcast_ref::<TextField>())
                 {
                     if p.label_input().content.will_redraw() {
                         if let Some((key, _)) = p.label_hint().content.get_text().split_once(':') {
@@ -364,7 +366,7 @@ impl GuiElemTrait for GuiEdit {
         }
         if self.config.redraw {
             self.config.redraw = false;
-            if let Some(sb) = self.children[0].inner.any_mut().downcast_mut::<ScrollBox>() {
+            if let Some(sb) = self.children[0].any_mut().downcast_mut::<ScrollBox>() {
                 for c in sb.children.iter_mut() {
                     c.1 = info.line_height;
                 }
@@ -406,7 +408,7 @@ impl GuiElemTrait for GuiEdit {
 }
 impl GuiEdit {
     fn rebuild_main(&mut self, info: &mut DrawInfo) {
-        if let Some(sb) = self.children[0].inner.any_mut().downcast_mut::<ScrollBox>() {
+        if let Some(sb) = self.children[0].any_mut().downcast_mut::<ScrollBox>() {
             sb.children.clear();
             sb.config_mut().redraw = true;
             match &self.editing {
@@ -431,9 +433,9 @@ impl GuiEdit {
                         name
                     };
                     sb.children.push((
-                        GuiElem::new(Panel::new(
+                        Box::new(Panel::new(
                             GuiElemCfg::default(),
-                            vec![GuiElem::new(TextField::new(
+                            vec![Box::new(TextField::new(
                                 GuiElemCfg::default(),
                                 name,
                                 Color::LIGHT_GRAY,
@@ -455,9 +457,9 @@ impl GuiEdit {
                         cover
                     };
                     sb.children.push((
-                        GuiElem::new(Panel::new(
+                        Box::new(Panel::new(
                             GuiElemCfg::default(),
-                            vec![GuiElem::new(TextField::new(
+                            vec![Box::new(TextField::new(
                                 GuiElemCfg::default(),
                                 cover,
                                 Color::LIGHT_GRAY,
@@ -480,21 +482,18 @@ impl GuiEdit {
                     {
                         fn get_id(s: &mut GuiEdit) -> Option<AlbumId> {
                             s.children[0]
-                                .inner
                                 .children()
                                 .collect::<Vec<_>>()
                                 .into_iter()
                                 .rev()
                                 .nth(2)
                                 .unwrap()
-                                .inner
                                 .any_mut()
                                 .downcast_mut::<Panel>()
                                 .unwrap()
                                 .children()
                                 .next()
                                 .unwrap()
-                                .inner
                                 .any_mut()
                                 .downcast_mut::<TextField>()
                                 .unwrap()
@@ -506,7 +505,7 @@ impl GuiEdit {
                         }
                         let add_button = {
                             let apply_change = self.apply_change.clone();
-                            GuiElem::new(Button::new(
+                            Box::new(Button::new(
                                 GuiElemCfg::at(Rectangle::from_tuples((0.9, 0.0), (1.0, 1.0))),
                                 move |_| {
                                     _ = apply_change.send(Box::new(move |s| {
@@ -524,7 +523,7 @@ impl GuiEdit {
                                     }));
                                     vec![]
                                 },
-                                vec![GuiElem::new(Label::new(
+                                vec![Box::new(Label::new(
                                     GuiElemCfg::default(),
                                     format!("add"),
                                     Color::GREEN,
@@ -533,28 +532,28 @@ impl GuiEdit {
                                 ))],
                             ))
                         };
-                        let name = GuiElem::new(TextField::new(
+                        let name = Box::new(TextField::new(
                             GuiElemCfg::at(Rectangle::from_tuples((0.0, 0.0), (0.9, 1.0))),
                             "add album by id".to_string(),
                             Color::LIGHT_GRAY,
                             Color::WHITE,
                         ));
                         sb.children.push((
-                            GuiElem::new(Panel::new(GuiElemCfg::default(), vec![name, add_button])),
+                            Box::new(Panel::new(GuiElemCfg::default(), vec![name, add_button])),
                             info.line_height * 2.0,
                         ));
                     }
                     for (album_id, count) in albums {
                         let album = info.database.albums().get(&album_id);
-                        let name = GuiElem::new(Button::new(
+                        let name = Box::new(Button::new(
                             GuiElemCfg::at(Rectangle::from_tuples((0.0, 0.0), (1.0, 1.0))),
                             move |_| {
-                                vec![GuiAction::OpenEditPanel(GuiElem::new(GuiEdit::new(
+                                vec![GuiAction::OpenEditPanel(Box::new(GuiEdit::new(
                                     GuiElemCfg::default(),
                                     Editable::Album(vec![album_id]),
                                 )))]
                             },
-                            vec![GuiElem::new(Label::new(
+                            vec![Box::new(Label::new(
                                 GuiElemCfg::default(),
                                 if let Some(a) = album {
                                     a.name.clone()
@@ -567,7 +566,7 @@ impl GuiEdit {
                             ))],
                         ));
                         sb.children.push((
-                            GuiElem::new(Panel::new(GuiElemCfg::default(), vec![name])),
+                            Box::new(Panel::new(GuiElemCfg::default(), vec![name])),
                             info.line_height,
                         ));
                     }
@@ -578,7 +577,7 @@ impl GuiEdit {
         }
     }
     fn rebuild_changes(&mut self, info: &mut DrawInfo) {
-        if let Some(sb) = self.children[1].inner.any_mut().downcast_mut::<ScrollBox>() {
+        if let Some(sb) = self.children[1].any_mut().downcast_mut::<ScrollBox>() {
             sb.children.clear();
             sb.config_mut().redraw = true;
             match &self.editing {
@@ -598,7 +597,7 @@ impl GuiEdit {
                         };
                         let s = self.apply_change.clone();
                         sb.children.push((
-                            GuiElem::new(Button::new(
+                            Box::new(Button::new(
                                 GuiElemCfg::default(),
                                 move |_| {
                                     _ = s.send(Box::new(move |s| {
@@ -613,7 +612,7 @@ impl GuiEdit {
                                     }));
                                     vec![]
                                 },
-                                vec![GuiElem::new(Label::new(
+                                vec![Box::new(Label::new(
                                     GuiElemCfg::default(),
                                     text,
                                     Color::WHITE,
