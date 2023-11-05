@@ -8,6 +8,7 @@ use std::{
 };
 
 use clap::{Parser, Subcommand};
+#[cfg(feature = "speedy2d")]
 use gui::GuiEvent;
 use musicdb_lib::{
     data::{
@@ -40,6 +41,7 @@ mod gui_settings;
 mod gui_text;
 #[cfg(feature = "speedy2d")]
 mod gui_wrappers;
+#[cfg(feature = "speedy2d")]
 mod textcfg;
 
 #[derive(Parser, Debug)]
@@ -91,7 +93,7 @@ fn main() {
         thread::spawn(move || {
             let mut player =
                 if matches!(mode, Mode::SyncplayerLocal { .. } | Mode::SyncplayerNetwork) {
-                    Some(Player::new().unwrap())
+                    Some(Player::new().unwrap().without_sending_commands())
                 } else {
                     None
                 };

@@ -24,6 +24,7 @@ pub struct Player {
     manager: Manager,
     current_song_id: SongOpt,
     cached: HashSet<SongId>,
+    allow_sending_commands: bool,
 }
 
 pub enum SongOpt {
@@ -42,7 +43,12 @@ impl Player {
             source: None,
             current_song_id: SongOpt::None,
             cached: HashSet::new(),
+            allow_sending_commands: true,
         })
+    }
+    pub fn without_sending_commands(mut self) -> Self {
+        self.allow_sending_commands = false;
+        self
     }
     pub fn handle_command(&mut self, command: &Command) {
         match command {
@@ -76,18 +82,25 @@ impl Player {
         }
     }
     pub fn update(&mut self, db: &mut Database) {
+        macro_rules! apply_command {
+            ($cmd:expr) => {
+                if self.allow_sending_commands {
+                    db.apply_command($cmd);
+                }
+            };
+        }
         if db.playing && self.source.is_none() {
             if let Some(song) = db.queue.get_current_song() {
                 // db playing, but no source - initialize a source (via SongOpt::New)
                 self.current_song_id = SongOpt::New(Some(*song));
             } else {
                 // db.playing, but no song in queue...
-                db.apply_command(Command::Stop);
+                apply_command!(Command::Stop);
             }
         } else if let Some((_source, notif)) = &mut self.source {
             if let Ok(()) = notif.try_recv() {
                 // song has finished playing
-                db.apply_command(Command::NextSong);
+                apply_command!(Command::NextSong);
                 self.current_song_id = SongOpt::New(db.queue.get_current_song().cloned());
             }
         }
@@ -136,7 +149,7 @@ impl Player {
                                 }
                                 Err(e) => {
                                     eprintln!("[player] Can't play, skipping! {e}");
-                                    db.apply_command(Command::NextSong);
+                                    apply_command!(Command::NextSong);
                                 }
                             }
                         } else {
@@ -145,7 +158,7 @@ impl Player {
                                 "NoSongData".to_owned(),
                                 format!("Couldn't load song #{}\n({})", song.id, song.title),
                             ));
-                            db.apply_command(Command::NextSong);
+                            apply_command!(Command::NextSong);
                         }
                     } else {
                         self.source = None;
