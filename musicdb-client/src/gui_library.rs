@@ -936,16 +936,7 @@ impl GuiElem for ListArtist {
                     let selected = self.selected.clone();
                     info.actions.push(GuiAction::Do(Box::new(move |gui| {
                         let q = selected.as_queue(
-                            gui.gui
-                                .children()
-                                .nth(3)
-                                .unwrap()
-                                .children()
-                                .nth(2)
-                                .unwrap()
-                                .any()
-                                .downcast_ref()
-                                .unwrap(),
+                            &gui.gui.c_main_view.children.2,
                             &gui.database.lock().unwrap(),
                         );
                         gui.exec_gui_action(GuiAction::SetDragging(Some((
@@ -1083,16 +1074,7 @@ impl GuiElem for ListAlbum {
                     let selected = self.selected.clone();
                     info.actions.push(GuiAction::Do(Box::new(move |gui| {
                         let q = selected.as_queue(
-                            gui.gui
-                                .children()
-                                .nth(3)
-                                .unwrap()
-                                .children()
-                                .nth(2)
-                                .unwrap()
-                                .any()
-                                .downcast_ref()
-                                .unwrap(),
+                            &gui.gui.c_main_view.children.2,
                             &gui.database.lock().unwrap(),
                         );
                         gui.exec_gui_action(GuiAction::SetDragging(Some((
@@ -1226,16 +1208,7 @@ impl GuiElem for ListSong {
                     let selected = self.selected.clone();
                     info.actions.push(GuiAction::Do(Box::new(move |gui| {
                         let q = selected.as_queue(
-                            gui.gui
-                                .children()
-                                .nth(3)
-                                .unwrap()
-                                .children()
-                                .nth(2)
-                                .unwrap()
-                                .any()
-                                .downcast_ref()
-                                .unwrap(),
+                            &gui.gui.c_main_view.children.2,
                             &gui.database.lock().unwrap(),
                         );
                         gui.exec_gui_action(GuiAction::SetDragging(Some((

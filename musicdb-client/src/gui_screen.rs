@@ -41,7 +41,7 @@ pub struct GuiScreen {
     c_idle_display: IdleDisplay,
     c_status_bar: StatusBar,
     c_settings: Settings,
-    c_main_view: Panel<(
+    pub c_main_view: Panel<(
         Button<[Label; 1]>,
         Button<[Label; 1]>,
         LibraryBrowser,
