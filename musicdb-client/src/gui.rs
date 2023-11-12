@@ -1,13 +1,11 @@
 use std::{
     any::Any,
     collections::HashMap,
-    eprintln,
     io::Cursor,
     net::TcpStream,
-    sync::{Arc, Mutex},
+    sync::{mpsc::Sender, Arc, Mutex},
     thread::JoinHandle,
     time::{Duration, Instant},
-    usize,
 };
 
 use musicdb_lib::{
@@ -33,7 +31,6 @@ use crate::{
     gui_notif::{NotifInfo, NotifOverlay},
     gui_screen::GuiScreen,
     gui_text::Label,
-    gui_wrappers::WithFocusHotkey,
     textcfg,
 };
 
@@ -87,6 +84,9 @@ pub fn main(
     let mut scroll_lines_multiplier = 3.0;
     let mut scroll_pages_multiplier = 0.75;
     let status_bar_text;
+    let idle_top_text;
+    let idle_side1_text;
+    let idle_side2_text;
     match std::fs::read_to_string(&config_file) {
         Ok(cfg) => {
             if let Ok(table) = cfg.parse::<toml::Table>() {
@@ -133,6 +133,42 @@ pub fn main(
                         }
                     } else {
                         eprintln!("[toml] missing the required `text.status_bar` string value.");
+                        std::process::exit(30);
+                    }
+                    if let Some(v) = t.get("idle_top").and_then(|v| v.as_str()) {
+                        match v.parse() {
+                            Ok(v) => idle_top_text = v,
+                            Err(e) => {
+                                eprintln!("[toml] `text.idle_top couldn't be parsed: {e}`");
+                                std::process::exit(30);
+                            }
+                        }
+                    } else {
+                        eprintln!("[toml] missing the required `text.idle_top` string value.");
+                        std::process::exit(30);
+                    }
+                    if let Some(v) = t.get("idle_side1").and_then(|v| v.as_str()) {
+                        match v.parse() {
+                            Ok(v) => idle_side1_text = v,
+                            Err(e) => {
+                                eprintln!("[toml] `text.idle_side1 couldn't be parsed: {e}`");
+                                std::process::exit(30);
+                            }
+                        }
+                    } else {
+                        eprintln!("[toml] missing the required `text.idle_side1` string value.");
+                        std::process::exit(30);
+                    }
+                    if let Some(v) = t.get("idle_side2").and_then(|v| v.as_str()) {
+                        match v.parse() {
+                            Ok(v) => idle_side2_text = v,
+                            Err(e) => {
+                                eprintln!("[toml] `text.idle_side2 couldn't be parsed: {e}`");
+                                std::process::exit(30);
+                            }
+                        }
+                    } else {
+                        eprintln!("[toml] missing the required `text.idle_side2` string value.");
                         std::process::exit(30);
                     }
                 } else {
@@ -183,12 +219,53 @@ pub fn main(
         scroll_pixels_multiplier,
         scroll_lines_multiplier,
         scroll_pages_multiplier,
-        GuiConfig { status_bar_text },
+        GuiConfig {
+            status_bar_text,
+            idle_top_text,
+            idle_side1_text,
+            idle_side2_text,
+            filter_presets_song: vec![
+                (
+                    "Fav".to_owned(),
+                    crate::gui_library::FilterType::TagEq("Fav".to_owned()),
+                ),
+                (
+                    "Year".to_owned(),
+                    crate::gui_library::FilterType::TagWithValueInt("Year".to_owned(), 1990, 2000),
+                ),
+            ],
+            filter_presets_album: vec![
+                (
+                    "Fav".to_owned(),
+                    crate::gui_library::FilterType::TagEq("Fav".to_owned()),
+                ),
+                (
+                    "Year".to_owned(),
+                    crate::gui_library::FilterType::TagWithValueInt("Year".to_owned(), 1990, 2000),
+                ),
+            ],
+            filter_presets_artist: vec![
+                (
+                    "Fav".to_owned(),
+                    crate::gui_library::FilterType::TagEq("Fav".to_owned()),
+                ),
+                (
+                    "Year".to_owned(),
+                    crate::gui_library::FilterType::TagWithValueInt("Year".to_owned(), 1990, 2000),
+                ),
+            ],
+        },
     ));
 }
 
 pub struct GuiConfig {
     pub status_bar_text: textcfg::TextBuilder,
+    pub idle_top_text: textcfg::TextBuilder,
+    pub idle_side1_text: textcfg::TextBuilder,
+    pub idle_side2_text: textcfg::TextBuilder,
+    pub filter_presets_song: Vec<(String, crate::gui_library::FilterType)>,
+    pub filter_presets_album: Vec<(String, crate::gui_library::FilterType)>,
+    pub filter_presets_artist: Vec<(String, crate::gui_library::FilterType)>,
 }
 
 pub struct Gui {
@@ -196,17 +273,21 @@ pub struct Gui {
     pub database: Arc<Mutex<Database>>,
     pub connection: TcpStream,
     pub get_con: Arc<Mutex<get::Client<TcpStream>>>,
-    pub gui: WithFocusHotkey<GuiScreen>,
+    pub gui: GuiScreen,
+    pub notif_sender:
+        Sender<Box<dyn FnOnce(&NotifOverlay) -> (Box<dyn GuiElem>, NotifInfo) + Send>>,
     pub size: UVec2,
     pub mouse_pos: Vec2,
     pub font: Font,
-    pub covers: Option<HashMap<CoverId, GuiCover>>,
+    pub covers: Option<HashMap<CoverId, GuiServerImage>>,
+    pub custom_images: Option<HashMap<String, GuiServerImage>>,
     pub last_draw: Instant,
     pub modifiers: ModifiersState,
     pub dragging: Option<(
         Dragging,
         Option<Box<dyn FnMut(&mut DrawInfo, &mut Graphics2D)>>,
     )>,
+    pub no_animations: bool,
     pub line_height: f32,
     pub last_height: f32,
     pub scroll_pixels_multiplier: f64,
@@ -229,6 +310,7 @@ impl Gui {
         gui_config: GuiConfig,
     ) -> Self {
         let (notif_overlay, notif_sender) = NotifOverlay::new();
+        let notif_sender_two = notif_sender.clone();
         database.lock().unwrap().update_endpoints.push(
             musicdb_lib::data::database::UpdateEndpoint::Custom(Box::new(move |cmd| match cmd {
                 Command::Resume
@@ -265,12 +347,12 @@ impl Gui {
                 }
                 Command::ErrorInfo(t, d) => {
                     let (t, d) = (t.clone(), d.clone());
-                    notif_sender
+                    notif_sender_two
                         .send(Box::new(move |_| {
                             (
                                 Box::new(Panel::with_background(
                                     GuiElemCfg::default(),
-                                    vec![Box::new(Label::new(
+                                    [Label::new(
                                         GuiElemCfg::default(),
                                         if t.is_empty() {
                                             format!("Server message\n{d}")
@@ -280,7 +362,7 @@ impl Gui {
                                         Color::WHITE,
                                         None,
                                         Vec2::new(0.5, 0.5),
-                                    ))],
+                                    )],
                                     Color::from_rgba(0.0, 0.0, 0.0, 0.8),
                                 )),
                                 if t.is_empty() {
@@ -295,30 +377,32 @@ impl Gui {
                 }
             })),
         );
+        let no_animations = false;
         Gui {
             event_sender,
             database,
             connection,
             get_con,
-            gui: WithFocusHotkey::new_noshift(
-                VirtualKeyCode::Escape,
-                GuiScreen::new(
-                    GuiElemCfg::default(),
-                    notif_overlay,
-                    line_height,
-                    scroll_pixels_multiplier,
-                    scroll_lines_multiplier,
-                    scroll_pages_multiplier,
-                ),
+            gui: GuiScreen::new(
+                GuiElemCfg::default(),
+                notif_overlay,
+                no_animations,
+                line_height,
+                scroll_pixels_multiplier,
+                scroll_lines_multiplier,
+                scroll_pages_multiplier,
             ),
+            notif_sender,
             size: UVec2::ZERO,
             mouse_pos: Vec2::ZERO,
             font,
             covers: Some(HashMap::new()),
+            custom_images: Some(HashMap::new()),
             // font: Font::new(include_bytes!("/usr/share/fonts/TTF/FiraSans-Regular.ttf")).unwrap(),
             last_draw: Instant::now(),
             modifiers: ModifiersState::default(),
             dragging: None,
+            no_animations,
             line_height,
             last_height: 720.0,
             scroll_pixels_multiplier,
@@ -332,20 +416,20 @@ impl Gui {
 /// the trait implemented by all Gui elements.
 /// feel free to override the methods you wish to use.
 #[allow(unused)]
-pub trait GuiElemTrait: 'static {
+pub trait GuiElem {
     fn config(&self) -> &GuiElemCfg;
     fn config_mut(&mut self) -> &mut GuiElemCfg;
     /// note: drawing happens from the last to the first element, while priority is from first to last.
     /// if you wish to add a "high priority" child to a Vec<GuiElem> using push, .rev() the iterator in this method and change draw_rev to false.
-    fn children(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElemTrait> + '_>;
+    fn children(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElem> + '_>;
     /// defaults to true.
     fn draw_rev(&self) -> bool {
         true
     }
     fn any(&self) -> &dyn Any;
     fn any_mut(&mut self) -> &mut dyn Any;
-    fn elem(&self) -> &dyn GuiElemTrait;
-    fn elem_mut(&mut self) -> &mut dyn GuiElemTrait;
+    fn elem(&self) -> &dyn GuiElem;
+    fn elem_mut(&mut self) -> &mut dyn GuiElem;
     /// handles drawing.
     fn draw(&mut self, info: &mut DrawInfo, g: &mut Graphics2D) {}
     /// an event that is invoked whenever a mouse button is pressed on the element.
@@ -393,7 +477,9 @@ pub trait GuiElemTrait: 'static {
     }
     fn updated_library(&mut self) {}
     fn updated_queue(&mut self) {}
-
+}
+impl<T: GuiElem + ?Sized> GuiElemInternal for T {}
+pub(crate) trait GuiElemInternal: GuiElem {
     fn _draw(&mut self, info: &mut DrawInfo, g: &mut Graphics2D) {
         if !self.config_mut().enabled {
             return;
@@ -436,7 +522,7 @@ pub trait GuiElemTrait: 'static {
         self.config_mut().pixel_pos = std::mem::replace(&mut info.pos, ppos);
     }
     /// recursively applies the function to all gui elements below and including this one
-    fn _recursive_all(&mut self, f: &mut dyn FnMut(&mut dyn GuiElemTrait)) {
+    fn _recursive_all(&mut self, f: &mut dyn FnMut(&mut dyn GuiElem)) {
         f(self.elem_mut());
         for c in self.children() {
             c._recursive_all(f);
@@ -444,7 +530,7 @@ pub trait GuiElemTrait: 'static {
     }
     fn _mouse_event(
         &mut self,
-        condition: &mut dyn FnMut(&mut dyn GuiElemTrait) -> Option<Vec<GuiAction>>,
+        condition: &mut dyn FnMut(&mut dyn GuiElem) -> Option<Vec<GuiAction>>,
         pos: Vec2,
     ) -> Option<Vec<GuiAction>> {
         for c in &mut self.children() {
@@ -483,7 +569,7 @@ pub trait GuiElemTrait: 'static {
     ) -> Option<Vec<GuiAction>> {
         if down {
             self._mouse_event(
-                &mut |v: &mut dyn GuiElemTrait| {
+                &mut |v: &mut dyn GuiElem| {
                     if v.config().mouse_events {
                         match button {
                             MouseButton::Left => v.config_mut().mouse_down.0 = true,
@@ -501,7 +587,7 @@ pub trait GuiElemTrait: 'static {
         } else {
             let mut vec = vec![];
             if let Some(a) = self._mouse_event(
-                &mut |v: &mut dyn GuiElemTrait| {
+                &mut |v: &mut dyn GuiElem| {
                     let down = v.config().mouse_down;
                     if v.config().mouse_events
                         && ((button == MouseButton::Left && down.0)
@@ -545,8 +631,8 @@ pub trait GuiElemTrait: 'static {
     }
     fn _keyboard_event(
         &mut self,
-        f_focus: &mut dyn FnMut(&mut dyn GuiElemTrait, &mut Vec<GuiAction>),
-        f_watch: &mut dyn FnMut(&mut dyn GuiElemTrait, &mut Vec<GuiAction>),
+        f_focus: &mut dyn FnMut(&mut dyn GuiElem, &mut Vec<GuiAction>),
+        f_watch: &mut dyn FnMut(&mut dyn GuiElem, &mut Vec<GuiAction>),
     ) -> Vec<GuiAction> {
         let mut o = vec![];
         self._keyboard_event_inner(&mut Some(f_focus), f_watch, &mut o, true);
@@ -554,8 +640,8 @@ pub trait GuiElemTrait: 'static {
     }
     fn _keyboard_event_inner(
         &mut self,
-        f_focus: &mut Option<&mut dyn FnMut(&mut dyn GuiElemTrait, &mut Vec<GuiAction>)>,
-        f_watch: &mut dyn FnMut(&mut dyn GuiElemTrait, &mut Vec<GuiAction>),
+        f_focus: &mut Option<&mut dyn FnMut(&mut dyn GuiElem, &mut Vec<GuiAction>)>,
+        f_watch: &mut dyn FnMut(&mut dyn GuiElem, &mut Vec<GuiAction>),
         events: &mut Vec<GuiAction>,
         focus: bool,
     ) {
@@ -620,28 +706,149 @@ pub trait GuiElemTrait: 'static {
         index != usize::MAX || wants
     }
 }
-pub trait GuiElemChildren {
-    fn iter(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElemTrait> + '_>;
+
+pub trait GuiElemWrapper {
+    fn as_elem(&self) -> &dyn GuiElem;
+    fn as_elem_mut(&mut self) -> &mut dyn GuiElem;
 }
-impl<T: GuiElemTrait> GuiElemChildren for T {
-    fn iter(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElemTrait> + '_> {
-        Box::new([self.elem_mut()].into_iter())
+impl<T: GuiElem> GuiElemWrapper for Box<T> {
+    fn as_elem(&self) -> &dyn GuiElem {
+        self.as_ref()
+    }
+    fn as_elem_mut(&mut self) -> &mut dyn GuiElem {
+        self.as_mut()
     }
 }
-impl<A: GuiElemTrait, B: GuiElemTrait> GuiElemChildren for (A, B) {
-    fn iter(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElemTrait> + '_> {
+impl GuiElemWrapper for Box<dyn GuiElem> {
+    fn as_elem(&self) -> &dyn GuiElem {
+        self.as_ref()
+    }
+    fn as_elem_mut(&mut self) -> &mut dyn GuiElem {
+        self.as_mut()
+    }
+}
+
+impl<T: GuiElemWrapper> GuiElem for T {
+    fn config(&self) -> &GuiElemCfg {
+        self.as_elem().config()
+    }
+    fn config_mut(&mut self) -> &mut GuiElemCfg {
+        self.as_elem_mut().config_mut()
+    }
+    fn children(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElem> + '_> {
+        self.as_elem_mut().children()
+    }
+    fn draw_rev(&self) -> bool {
+        self.as_elem().draw_rev()
+    }
+    fn any(&self) -> &dyn Any {
+        self.as_elem().any()
+    }
+    fn any_mut(&mut self) -> &mut dyn Any {
+        self.as_elem_mut().any_mut()
+    }
+    fn elem(&self) -> &dyn GuiElem {
+        self.as_elem().elem()
+    }
+    fn elem_mut(&mut self) -> &mut dyn GuiElem {
+        self.as_elem_mut().elem_mut()
+    }
+    fn draw(&mut self, info: &mut DrawInfo, g: &mut Graphics2D) {
+        self.as_elem_mut().draw(info, g)
+    }
+    fn mouse_down(&mut self, button: MouseButton) -> Vec<GuiAction> {
+        self.as_elem_mut().mouse_down(button)
+    }
+    fn mouse_up(&mut self, button: MouseButton) -> Vec<GuiAction> {
+        self.as_elem_mut().mouse_up(button)
+    }
+    fn mouse_pressed(&mut self, button: MouseButton) -> Vec<GuiAction> {
+        self.as_elem_mut().mouse_pressed(button)
+    }
+    fn mouse_wheel(&mut self, diff: f32) -> Vec<GuiAction> {
+        self.as_elem_mut().mouse_wheel(diff)
+    }
+    fn char_watch(&mut self, modifiers: ModifiersState, key: char) -> Vec<GuiAction> {
+        self.as_elem_mut().char_watch(modifiers, key)
+    }
+    fn char_focus(&mut self, modifiers: ModifiersState, key: char) -> Vec<GuiAction> {
+        self.as_elem_mut().char_focus(modifiers, key)
+    }
+    fn key_watch(
+        &mut self,
+        modifiers: ModifiersState,
+        down: bool,
+        key: Option<VirtualKeyCode>,
+        scan: KeyScancode,
+    ) -> Vec<GuiAction> {
+        self.as_elem_mut().key_watch(modifiers, down, key, scan)
+    }
+    fn key_focus(
+        &mut self,
+        modifiers: ModifiersState,
+        down: bool,
+        key: Option<VirtualKeyCode>,
+        scan: KeyScancode,
+    ) -> Vec<GuiAction> {
+        self.as_elem_mut().key_focus(modifiers, down, key, scan)
+    }
+    fn dragged(&mut self, dragged: Dragging) -> Vec<GuiAction> {
+        self.as_elem_mut().dragged(dragged)
+    }
+    fn updated_library(&mut self) {
+        self.as_elem_mut().updated_library()
+    }
+    fn updated_queue(&mut self) {
+        self.as_elem_mut().updated_queue()
+    }
+}
+
+pub trait GuiElemChildren {
+    fn iter(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElem> + '_>;
+    fn len(&self) -> usize;
+}
+impl GuiElemChildren for () {
+    fn iter(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElem> + '_> {
+        Box::new([].into_iter())
+    }
+    fn len(&self) -> usize {
+        0
+    }
+}
+impl<const N: usize, T: GuiElem> GuiElemChildren for [T; N] {
+    fn iter(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElem> + '_> {
+        Box::new(self.iter_mut().map(|v| v.elem_mut()))
+    }
+    fn len(&self) -> usize {
+        N
+    }
+}
+impl<T: GuiElem> GuiElemChildren for Vec<T> {
+    fn iter(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElem> + '_> {
+        Box::new(self.iter_mut().map(|v| v.elem_mut()))
+    }
+    fn len(&self) -> usize {
+        self.len()
+    }
+}
+impl<A: GuiElem, B: GuiElem> GuiElemChildren for (A, B) {
+    fn iter(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElem> + '_> {
         Box::new([self.0.elem_mut(), self.1.elem_mut()].into_iter())
     }
-}
-impl<A: GuiElemTrait, B: GuiElemTrait, C: GuiElemTrait> GuiElemChildren for (A, B, C) {
-    fn iter(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElemTrait> + '_> {
-        Box::new([self.0.elem_mut(), self.1.elem_mut(), self.2.elem_mut()].into_iter())
+    fn len(&self) -> usize {
+        2
     }
 }
-impl<A: GuiElemTrait, B: GuiElemTrait, C: GuiElemTrait, D: GuiElemTrait> GuiElemChildren
-    for (A, B, C, D)
-{
-    fn iter(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElemTrait> + '_> {
+impl<A: GuiElem, B: GuiElem, C: GuiElem> GuiElemChildren for (A, B, C) {
+    fn iter(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElem> + '_> {
+        Box::new([self.0.elem_mut(), self.1.elem_mut(), self.2.elem_mut()].into_iter())
+    }
+    fn len(&self) -> usize {
+        3
+    }
+}
+impl<A: GuiElem, B: GuiElem, C: GuiElem, D: GuiElem> GuiElemChildren for (A, B, C, D) {
+    fn iter(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElem> + '_> {
         Box::new(
             [
                 self.0.elem_mut(),
@@ -652,11 +859,14 @@ impl<A: GuiElemTrait, B: GuiElemTrait, C: GuiElemTrait, D: GuiElemTrait> GuiElem
             .into_iter(),
         )
     }
+    fn len(&self) -> usize {
+        4
+    }
 }
-impl<A: GuiElemTrait, B: GuiElemTrait, C: GuiElemTrait, D: GuiElemTrait, E: GuiElemTrait>
-    GuiElemChildren for (A, B, C, D, E)
+impl<A: GuiElem, B: GuiElem, C: GuiElem, D: GuiElem, E: GuiElem> GuiElemChildren
+    for (A, B, C, D, E)
 {
-    fn iter(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElemTrait> + '_> {
+    fn iter(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElem> + '_> {
         Box::new(
             [
                 self.0.elem_mut(),
@@ -667,6 +877,9 @@ impl<A: GuiElemTrait, B: GuiElemTrait, C: GuiElemTrait, D: GuiElemTrait, E: GuiE
             ]
             .into_iter(),
         )
+    }
+    fn len(&self) -> usize {
+        5
     }
 }
 
@@ -703,6 +916,7 @@ pub struct GuiElemCfg {
     /// if this is true, things can be dragged into this element via drag-n-drop
     pub drag_target: bool,
 }
+#[allow(unused)]
 impl GuiElemCfg {
     pub fn at(pos: Rectangle) -> Self {
         Self {
@@ -757,15 +971,17 @@ impl Default for GuiElemCfg {
         }
     }
 }
+#[allow(unused)]
 pub enum GuiAction {
     OpenMain,
     SetIdle(bool),
+    SetAnimationsDisabled(bool),
     OpenSettings(bool),
-    OpenEditPanel(Box<dyn GuiElemTrait>),
-    CloseEditPanel,
+    ShowNotification(Box<dyn FnOnce(&NotifOverlay) -> (Box<dyn GuiElem>, NotifInfo) + Send>),
     /// Build the GuiAction(s) later, when we have access to the Database (can turn an AlbumId into a QueueContent::Folder, etc)
     Build(Box<dyn FnOnce(&mut Database) -> Vec<Self>>),
     SendToServer(Command),
+    ContextMenu(Option<Box<dyn GuiElem>>),
     /// unfocuses all gui elements, then assigns keyboard focus to one with config().request_keyboard_focus == true if there is one.
     ResetKeyboardFocus,
     SetDragging(
@@ -791,6 +1007,7 @@ pub enum Dragging {
 /// GuiElems have access to this within draw.
 /// Except for `actions`, they should not change any of these values - GuiElem::draw will handle everything automatically.
 pub struct DrawInfo<'a> {
+    pub time: Instant,
     pub actions: Vec<GuiAction>,
     pub pos: Rectangle,
     pub database: &'a mut Database,
@@ -800,7 +1017,8 @@ pub struct DrawInfo<'a> {
     pub mouse_pos: Vec2,
     pub helper: Option<&'a mut WindowHelper<GuiEvent>>,
     pub get_con: Arc<Mutex<get::Client<TcpStream>>>,
-    pub covers: &'a mut HashMap<CoverId, GuiCover>,
+    pub covers: &'a mut HashMap<CoverId, GuiServerImage>,
+    pub custom_images: &'a mut HashMap<String, GuiServerImage>,
     pub has_keyboard_focus: bool,
     pub child_has_keyboard_focus: bool,
     /// the height of one line of text (in pixels)
@@ -809,7 +1027,9 @@ pub struct DrawInfo<'a> {
         Dragging,
         Option<Box<dyn FnMut(&mut DrawInfo, &mut Graphics2D)>>,
     )>,
-    pub gui_config: &'a GuiConfig,
+    pub context_menu: Option<Box<dyn GuiElem>>,
+    pub gui_config: &'a mut GuiConfig,
+    pub no_animations: bool,
 }
 
 pub fn adjust_area(outer: &Rectangle, rel_area: &Rectangle) -> Rectangle {
@@ -839,8 +1059,11 @@ impl Gui {
                     eprintln!("Error sending command to server: {e}");
                 }
             }
+            GuiAction::ShowNotification(func) => _ = self.notif_sender.send(func),
             GuiAction::ResetKeyboardFocus => _ = self.gui._keyboard_reset_focus(),
             GuiAction::SetDragging(d) => self.dragging = d,
+            GuiAction::SetAnimationsDisabled(d) => self.no_animations = d,
+            GuiAction::ContextMenu(m) => self.gui.c_context_menu = m,
             GuiAction::SetLineHeight(h) => {
                 self.line_height = h;
                 self.gui
@@ -850,77 +1073,25 @@ impl Gui {
                 self.covers
                     .as_mut()
                     .unwrap()
-                    .insert(id, GuiCover::new(id, Arc::clone(&self.get_con)));
+                    .insert(id, GuiServerImage::new_cover(id, Arc::clone(&self.get_con)));
             }
             GuiAction::Do(mut f) => f(self),
             GuiAction::Exit => _ = self.event_sender.send_event(GuiEvent::Exit),
             GuiAction::SetIdle(v) => {
-                if let Some(gui) = self
-                    .gui
-                    .any_mut()
-                    .downcast_mut::<WithFocusHotkey<GuiScreen>>()
-                {
-                    if gui.inner.idle.0 != v {
-                        gui.inner.idle = (v, Some(Instant::now()));
-                    }
-                }
+                self.gui.idle.target = if v { 1.0 } else { 0.0 };
             }
             GuiAction::OpenSettings(v) => {
-                if let Some(gui) = self
-                    .gui
-                    .any_mut()
-                    .downcast_mut::<WithFocusHotkey<GuiScreen>>()
-                {
-                    if gui.inner.idle.0 {
-                        gui.inner.idle = (false, Some(Instant::now()));
-                    }
-                    if gui.inner.settings.0 != v {
-                        gui.inner.settings = (v, Some(Instant::now()));
-                    }
+                self.gui.idle.target = 0.0;
+                self.gui.last_interaction = Instant::now();
+                if self.gui.settings.0 != v {
+                    self.gui.settings = (v, Some(Instant::now()));
                 }
             }
             GuiAction::OpenMain => {
-                if let Some(gui) = self
-                    .gui
-                    .any_mut()
-                    .downcast_mut::<WithFocusHotkey<GuiScreen>>()
-                {
-                    if gui.inner.idle.0 {
-                        gui.inner.idle = (false, Some(Instant::now()));
-                    }
-                    if gui.inner.settings.0 {
-                        gui.inner.settings = (false, Some(Instant::now()));
-                    }
-                }
-            }
-            GuiAction::OpenEditPanel(p) => {
-                if let Some(gui) = self
-                    .gui
-                    .any_mut()
-                    .downcast_mut::<WithFocusHotkey<GuiScreen>>()
-                {
-                    if gui.inner.idle.0 {
-                        gui.inner.idle = (false, Some(Instant::now()));
-                    }
-                    if gui.inner.settings.0 {
-                        gui.inner.settings = (false, Some(Instant::now()));
-                    }
-                    gui.inner.open_edit(p);
-                }
-            }
-            GuiAction::CloseEditPanel => {
-                if let Some(gui) = self
-                    .gui
-                    .any_mut()
-                    .downcast_mut::<WithFocusHotkey<GuiScreen>>()
-                {
-                    if gui.inner.idle.0 {
-                        gui.inner.idle = (false, Some(Instant::now()));
-                    }
-                    if gui.inner.settings.0 {
-                        gui.inner.settings = (false, Some(Instant::now()));
-                    }
-                    gui.inner.close_edit();
+                self.gui.idle.target = 0.0;
+                self.gui.last_interaction = Instant::now();
+                if self.gui.settings.0 {
+                    self.gui.settings = (false, Some(Instant::now()));
                 }
             }
         }
@@ -935,8 +1106,10 @@ impl WindowHandler<GuiEvent> for Gui {
         );
         let mut dblock = self.database.lock().unwrap();
         let mut covers = self.covers.take().unwrap();
-        let cfg = self.gui_config.take().unwrap();
+        let mut custom_images = self.custom_images.take().unwrap();
+        let mut cfg = self.gui_config.take().unwrap();
         let mut info = DrawInfo {
+            time: Instant::now(),
             actions: Vec::with_capacity(0),
             pos: Rectangle::new(Vec2::ZERO, self.size.into_f32()),
             database: &mut *dblock,
@@ -944,15 +1117,19 @@ impl WindowHandler<GuiEvent> for Gui {
             mouse_pos: self.mouse_pos,
             get_con: Arc::clone(&self.get_con),
             covers: &mut covers,
+            custom_images: &mut custom_images,
             helper: Some(helper),
             has_keyboard_focus: false,
             child_has_keyboard_focus: true,
             line_height: self.line_height,
+            no_animations: self.no_animations,
             dragging: self.dragging.take(),
-            gui_config: &cfg,
+            context_menu: self.gui.c_context_menu.take(),
+            gui_config: &mut cfg,
         };
         self.gui._draw(&mut info, graphics);
         let actions = std::mem::replace(&mut info.actions, Vec::with_capacity(0));
+        self.gui.c_context_menu = info.context_menu.take();
         self.dragging = info.dragging.take();
         if let Some((d, f)) = &mut self.dragging {
             if let Some(f) = f {
@@ -991,6 +1168,7 @@ impl WindowHandler<GuiEvent> for Gui {
         drop(info);
         self.gui_config = Some(cfg);
         self.covers = Some(covers);
+        self.custom_images = Some(custom_images);
         drop(dblock);
         for a in actions {
             self.exec_gui_action(a);
@@ -1172,13 +1350,14 @@ impl WindowHandler<GuiEvent> for Gui {
     }
 }
 
-pub enum GuiCover {
+pub enum GuiServerImage {
     Loading(JoinHandle<Option<Vec<u8>>>),
     Loaded(ImageHandle),
     Error,
 }
-impl GuiCover {
-    pub fn new(id: CoverId, get_con: Arc<Mutex<get::Client<TcpStream>>>) -> Self {
+#[allow(unused)]
+impl GuiServerImage {
+    pub fn new_cover(id: CoverId, get_con: Arc<Mutex<get::Client<TcpStream>>>) -> Self {
         Self::Loading(std::thread::spawn(move || {
             get_con
                 .lock()
@@ -1188,11 +1367,24 @@ impl GuiCover {
                 .and_then(|v| v.ok())
         }))
     }
+    pub fn new_custom_file(file: String, get_con: Arc<Mutex<get::Client<TcpStream>>>) -> Self {
+        Self::Loading(std::thread::spawn(move || {
+            get_con
+                .lock()
+                .unwrap()
+                .custom_file(&file)
+                .ok()
+                .and_then(|v| v.ok())
+        }))
+    }
     pub fn get(&self) -> Option<ImageHandle> {
         match self {
             Self::Loaded(handle) => Some(handle.clone()),
             Self::Loading(_) | Self::Error => None,
         }
+    }
+    pub fn is_err(&self) -> bool {
+        matches!(self, Self::Error)
     }
     pub fn get_init(&mut self, g: &mut Graphics2D) -> Option<ImageHandle> {
         match self {

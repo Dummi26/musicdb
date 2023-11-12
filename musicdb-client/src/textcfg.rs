@@ -39,6 +39,7 @@ impl TextBuilder {
     pub fn gen(&self, db: &Database, current_song: Option<&Song>) -> Vec<Vec<(Content, f32, f32)>> {
         let mut out = vec![];
         let mut line = vec![];
+        let mut c = Color::WHITE;
         self.gen_to(
             db,
             current_song,
@@ -46,7 +47,7 @@ impl TextBuilder {
             &mut line,
             &mut 1.0,
             &mut 1.0,
-            &mut Color::WHITE,
+            &mut c,
         );
         if !line.is_empty() {
             out.push(line)

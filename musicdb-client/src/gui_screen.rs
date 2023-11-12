@@ -4,14 +4,17 @@ use musicdb_lib::{data::queue::QueueContent, server::Command};
 use speedy2d::{color::Color, dimen::Vec2, shape::Rectangle, window::VirtualKeyCode, Graphics2D};
 
 use crate::{
-    gui::{morph_rect, DrawInfo, GuiAction, GuiElemCfg, GuiElemTrait},
+    gui::{DrawInfo, GuiAction, GuiElem, GuiElemCfg},
+    gui_anim::AnimationController,
     gui_base::{Button, Panel},
+    gui_idle_display::IdleDisplay,
     gui_library::LibraryBrowser,
     gui_notif::NotifOverlay,
-    gui_playback::{CurrentSong, PlayPauseToggle},
     gui_queue::QueueViewer,
     gui_settings::Settings,
+    gui_statusbar::StatusBar,
     gui_text::Label,
+    gui_wrappers::Hotkey,
 };
 
 /*
@@ -34,48 +37,31 @@ pub fn transition(p: f32) -> f32 {
 
 pub struct GuiScreen {
     config: GuiElemCfg,
-    /// 0: Notifications
-    /// 1: StatusBar / Idle display
-    /// 2: Settings
-    /// 3: Panel for Main view
-    ///  0: settings button
-    ///  1: exit button
-    ///  2: library browser
-    ///  3: queue
-    ///  4: queue clear button
-    /// 4: Edit Panel
-    children: Vec<Box<dyn GuiElemTrait>>,
-    pub idle: (bool, Option<Instant>),
+    c_notif_overlay: NotifOverlay,
+    c_idle_display: IdleDisplay,
+    c_status_bar: StatusBar,
+    c_settings: Settings,
+    c_main_view: Panel<(
+        Button<[Label; 1]>,
+        Button<[Label; 1]>,
+        LibraryBrowser,
+        QueueViewer,
+        Button<[Label; 1]>,
+    )>,
+    pub c_context_menu: Option<Box<dyn GuiElem>>,
+    pub idle: AnimationController<f32>,
+    // pub settings: (bool, Option<Instant>),
     pub settings: (bool, Option<Instant>),
-    pub edit_panel: (bool, Option<Instant>),
     pub last_interaction: Instant,
     idle_timeout: Option<f64>,
     pub prev_mouse_pos: Vec2,
+    pub hotkey: Hotkey,
 }
 impl GuiScreen {
-    pub fn open_edit(&mut self, mut edit: Box<dyn GuiElemTrait>) {
-        if !self.edit_panel.0 {
-            self.edit_panel = (true, Some(Instant::now()));
-            edit.config_mut().pos = Rectangle::from_tuples((-0.5, 0.0), (0.0, 0.9));
-        } else {
-            edit.config_mut().pos = Rectangle::from_tuples((0.0, 0.0), (0.5, 0.9));
-        }
-        if let Some(prev) = self.children.get_mut(4) {
-            prev.config_mut().enabled = false;
-        }
-        self.children.insert(4, edit);
-    }
-    pub fn close_edit(&mut self) {
-        if self.children.len() > 5 {
-            self.children.remove(4);
-            self.children[4].config_mut().enabled = true;
-        } else if self.edit_panel.0 {
-            self.edit_panel = (false, Some(Instant::now()));
-        }
-    }
     pub fn new(
         config: GuiElemCfg,
-        notif_overlay: NotifOverlay,
+        c_notif_overlay: NotifOverlay,
+        no_animations: bool,
         line_height: f32,
         scroll_sensitivity_pixels: f64,
         scroll_sensitivity_lines: f64,
@@ -83,81 +69,82 @@ impl GuiScreen {
     ) -> Self {
         Self {
             config: config.w_keyboard_watch().w_mouse().w_keyboard_focus(),
-            children: vec![
-                Box::new(notif_overlay),
-                Box::new(StatusBar::new(
-                    GuiElemCfg::at(Rectangle::from_tuples((0.0, 0.9), (1.0, 1.0))),
-                    true,
-                )),
-                Box::new(Settings::new(
-                    GuiElemCfg::default().disabled(),
-                    line_height,
-                    scroll_sensitivity_pixels,
-                    scroll_sensitivity_lines,
-                    scroll_sensitivity_pages,
-                )),
-                Box::new(Panel::new(
-                    GuiElemCfg::at(Rectangle::from_tuples((0.0, 0.0), (1.0, 0.9))),
-                    vec![
-                        Box::new(Button::new(
-                            GuiElemCfg::at(Rectangle::from_tuples((0.75, 0.0), (0.875, 0.03))),
-                            |_| vec![GuiAction::OpenSettings(true)],
-                            vec![Box::new(Label::new(
-                                GuiElemCfg::default(),
-                                "Settings".to_string(),
-                                Color::WHITE,
-                                None,
-                                Vec2::new(0.5, 0.5),
-                            ))],
-                        )),
-                        Box::new(Button::new(
-                            GuiElemCfg::at(Rectangle::from_tuples((0.875, 0.0), (1.0, 0.03))),
-                            |_| vec![GuiAction::Exit],
-                            vec![Box::new(Label::new(
-                                GuiElemCfg::default(),
-                                "Exit".to_string(),
-                                Color::WHITE,
-                                None,
-                                Vec2::new(0.5, 0.5),
-                            ))],
-                        )),
-                        Box::new(LibraryBrowser::new(GuiElemCfg::at(Rectangle::from_tuples(
-                            (0.0, 0.0),
-                            (0.5, 1.0),
-                        )))),
-                        Box::new(QueueViewer::new(GuiElemCfg::at(Rectangle::from_tuples(
-                            (0.5, 0.03),
-                            (1.0, 1.0),
-                        )))),
-                        Box::new(Button::new(
-                            GuiElemCfg::at(Rectangle::from_tuples((0.5, 0.0), (0.75, 0.03))),
-                            |_| {
-                                vec![GuiAction::SendToServer(
-                                    musicdb_lib::server::Command::QueueUpdate(
+            c_notif_overlay,
+            c_status_bar: StatusBar::new(GuiElemCfg::at(Rectangle::from_tuples(
+                (0.0, 0.9),
+                (1.0, 1.0),
+            ))),
+            c_idle_display: IdleDisplay::new(GuiElemCfg::default().disabled()),
+            c_settings: Settings::new(
+                GuiElemCfg::default().disabled(),
+                no_animations,
+                line_height,
+                scroll_sensitivity_pixels,
+                scroll_sensitivity_lines,
+                scroll_sensitivity_pages,
+            ),
+            c_main_view: Panel::new(
+                GuiElemCfg::at(Rectangle::from_tuples((0.0, 0.0), (1.0, 0.9))),
+                (
+                    Button::new(
+                        GuiElemCfg::at(Rectangle::from_tuples((0.75, 0.0), (0.875, 0.03))),
+                        |_| vec![GuiAction::OpenSettings(true)],
+                        [Label::new(
+                            GuiElemCfg::default(),
+                            "Settings".to_string(),
+                            Color::WHITE,
+                            None,
+                            Vec2::new(0.5, 0.5),
+                        )],
+                    ),
+                    Button::new(
+                        GuiElemCfg::at(Rectangle::from_tuples((0.875, 0.0), (1.0, 0.03))),
+                        |_| vec![GuiAction::Exit],
+                        [Label::new(
+                            GuiElemCfg::default(),
+                            "Exit".to_string(),
+                            Color::WHITE,
+                            None,
+                            Vec2::new(0.5, 0.5),
+                        )],
+                    ),
+                    LibraryBrowser::new(GuiElemCfg::at(Rectangle::from_tuples(
+                        (0.0, 0.0),
+                        (0.5, 1.0),
+                    ))),
+                    QueueViewer::new(GuiElemCfg::at(Rectangle::from_tuples(
+                        (0.5, 0.03),
+                        (1.0, 1.0),
+                    ))),
+                    Button::new(
+                        GuiElemCfg::at(Rectangle::from_tuples((0.5, 0.0), (0.75, 0.03))),
+                        |_| {
+                            vec![GuiAction::SendToServer(
+                                musicdb_lib::server::Command::QueueUpdate(
+                                    vec![],
+                                    musicdb_lib::data::queue::QueueContent::Folder(
+                                        0,
                                         vec![],
-                                        musicdb_lib::data::queue::QueueContent::Folder(
-                                            0,
-                                            vec![],
-                                            String::new(),
-                                        )
-                                        .into(),
-                                    ),
-                                )]
-                            },
-                            vec![Box::new(Label::new(
-                                GuiElemCfg::default(),
-                                "Clear Queue".to_string(),
-                                Color::WHITE,
-                                None,
-                                Vec2::new(0.5, 0.5),
-                            ))],
-                        )),
-                    ],
-                )),
-            ],
-            idle: (false, None),
+                                        String::new(),
+                                    )
+                                    .into(),
+                                ),
+                            )]
+                        },
+                        [Label::new(
+                            GuiElemCfg::default(),
+                            "Clear Queue".to_string(),
+                            Color::WHITE,
+                            None,
+                            Vec2::new(0.5, 0.5),
+                        )],
+                    ),
+                ),
+            ),
+            c_context_menu: None,
+            hotkey: Hotkey::new_noshift(VirtualKeyCode::Escape),
+            idle: AnimationController::new(0.0, 0.0, 0.01, 1.0, 0.8, 0.6, Instant::now()),
             settings: (false, None),
-            edit_panel: (false, None),
             last_interaction: Instant::now(),
             idle_timeout: Some(60.0),
             prev_mouse_pos: Vec2::ZERO,
@@ -188,29 +175,37 @@ impl GuiScreen {
     }
     fn not_idle(&mut self) {
         self.last_interaction = Instant::now();
-        if self.idle.0 {
-            self.idle = (false, Some(Instant::now()));
-        }
+        self.idle.target = 0.0;
     }
     fn idle_check(&mut self) {
-        if !self.idle.0 {
+        if self.idle.target == 0.0 {
             if let Some(dur) = &self.idle_timeout {
                 if self.last_interaction.elapsed().as_secs_f64() > *dur {
-                    self.idle = (true, Some(Instant::now()));
+                    self.idle.target = 1.0;
                 }
             }
         }
     }
 }
-impl GuiElemTrait for GuiScreen {
+impl GuiElem for GuiScreen {
     fn config(&self) -> &GuiElemCfg {
         &self.config
     }
     fn config_mut(&mut self) -> &mut GuiElemCfg {
         &mut self.config
     }
-    fn children(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElemTrait> + '_> {
-        Box::new(self.children.iter_mut().map(|v| v.as_mut()))
+    fn children(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElem> + '_> {
+        Box::new(
+            [
+                self.c_notif_overlay.elem_mut(),
+                self.c_idle_display.elem_mut(),
+                self.c_status_bar.elem_mut(),
+                self.c_settings.elem_mut(),
+                self.c_main_view.elem_mut(),
+            ]
+            .into_iter()
+            .chain(self.c_context_menu.as_mut().map(|v| v.elem_mut())),
+        )
     }
     fn any(&self) -> &dyn std::any::Any {
         self
@@ -218,21 +213,26 @@ impl GuiElemTrait for GuiScreen {
     fn any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }
-    fn elem(&self) -> &dyn GuiElemTrait {
+    fn elem(&self) -> &dyn GuiElem {
         self
     }
-    fn elem_mut(&mut self) -> &mut dyn GuiElemTrait {
+    fn elem_mut(&mut self) -> &mut dyn GuiElem {
         self
     }
     fn key_watch(
         &mut self,
-        _modifiers: speedy2d::window::ModifiersState,
-        _down: bool,
-        _key: Option<speedy2d::window::VirtualKeyCode>,
+        modifiers: speedy2d::window::ModifiersState,
+        down: bool,
+        key: Option<speedy2d::window::VirtualKeyCode>,
         _scan: speedy2d::window::KeyScancode,
     ) -> Vec<GuiAction> {
         self.not_idle();
-        vec![]
+        if self.hotkey.triggered(modifiers, down, key) {
+            self.config.request_keyboard_focus = true;
+            vec![GuiAction::ResetKeyboardFocus]
+        } else {
+            vec![]
+        }
     }
     fn mouse_down(&mut self, _button: speedy2d::window::MouseButton) -> Vec<GuiAction> {
         self.not_idle();
@@ -243,7 +243,7 @@ impl GuiElemTrait for GuiScreen {
         if self.prev_mouse_pos != info.mouse_pos {
             self.prev_mouse_pos = info.mouse_pos;
             self.not_idle();
-        } else if !self.idle.0 && self.config.pixel_pos.size() != info.pos.size() {
+        } else if self.idle.target == 0.0 && self.config.pixel_pos.size() != info.pos.size() {
             // resizing prevents idle, but doesn't un-idle
             self.not_idle();
         }
@@ -254,77 +254,48 @@ impl GuiElemTrait for GuiScreen {
             self.idle_check();
         }
         // request_redraw for animations
-        if self.idle.1.is_some() || self.settings.1.is_some() || self.edit_panel.1.is_some() {
+        let idle_changed = self.idle.update(info.time, info.no_animations);
+        if idle_changed || self.settings.1.is_some() {
             if let Some(h) = &info.helper {
                 h.request_redraw()
             }
         }
         // animations: idle
-        if self.idle.1.is_some() {
-            let seconds = if self.idle.0 { 2.0 } else { 0.5 };
-            let p1 = Self::get_prog(&mut self.idle, seconds);
-            if !self.idle.0 || self.idle.1.is_none() {
-                if let Some(h) = &info.helper {
-                    h.set_cursor_visible(!self.idle.0);
-                    if self.settings.0 {
-                        self.children[2].config_mut().enabled = !self.idle.0;
-                    }
-                    if self.edit_panel.0 {
-                        if let Some(c) = self.children.get_mut(4) {
-                            c.config_mut().enabled = !self.idle.0;
-                        }
-                    }
-                    self.children[3].config_mut().enabled = !self.idle.0;
-                }
+        if idle_changed {
+            let enable_normal_ui = self.idle.value < 1.0;
+            self.c_main_view.config_mut().enabled = enable_normal_ui;
+            self.c_settings.config_mut().enabled = enable_normal_ui;
+            self.c_status_bar.config_mut().enabled = enable_normal_ui;
+            if let Some(h) = &info.helper {
+                h.set_cursor_visible(enable_normal_ui);
             }
-            let p = transition(p1);
-            self.children[1].config_mut().pos =
-                Rectangle::from_tuples((0.0, 0.9 - 0.9 * p), (1.0, 1.0));
-            self.children[1]
-                .any_mut()
-                .downcast_mut::<StatusBar>()
-                .unwrap()
-                .idle_mode = p;
+            let idcfg = self.c_idle_display.config_mut();
+            let top = 1.0 - self.idle.value;
+            let bottom = top + 1.0;
+            idcfg.pos = Rectangle::from_tuples((0.0, top), (1.0, bottom));
+            idcfg.enabled = self.idle.value > 0.0;
+            self.c_status_bar.idle_mode = self.idle.value;
+            self.c_idle_display.idle_mode = self.idle.value;
         }
         // animations: settings
         if self.settings.1.is_some() {
             let p1 = Self::get_prog(&mut self.settings, 0.3);
             let p = transition(p1);
-            let cfg = self.children[2].config_mut();
+            let cfg = self.c_settings.config_mut();
             cfg.enabled = p > 0.0;
             cfg.pos = Rectangle::from_tuples((0.0, 0.9 - 0.9 * p), (1.0, 0.9));
         }
-        // animations: edit_panel
-        if self.edit_panel.1.is_some() {
-            let p1 = Self::get_prog(&mut self.edit_panel, 0.3);
-            let p = transition(p1);
-            if let Some(c) = self.children.get_mut(4) {
-                c.config_mut().enabled = p > 0.0;
-                c.config_mut().pos = Rectangle::from_tuples((-0.5 + 0.5 * p, 0.0), (0.5 * p, 0.9));
-            }
-            if !self.edit_panel.0 && p == 0.0 {
-                while self.children.len() > 4 {
-                    self.children.pop();
-                }
-            }
-            self.children[3].config_mut().pos =
-                Rectangle::from_tuples((0.5 * p, 0.0), (1.0 + 0.5 * p, 0.9));
-        }
         // set idle timeout (only when settings are open)
         if self.settings.0 || self.settings.1.is_some() {
-            self.idle_timeout = self.children[2]
-                .any()
-                .downcast_ref::<Settings>()
-                .unwrap()
-                .get_timeout_val();
+            self.idle_timeout = self.c_settings.get_timeout_val();
         }
     }
     fn key_focus(
         &mut self,
-        modifiers: speedy2d::window::ModifiersState,
+        _modifiers: speedy2d::window::ModifiersState,
         down: bool,
         key: Option<speedy2d::window::VirtualKeyCode>,
-        scan: speedy2d::window::KeyScancode,
+        _scan: speedy2d::window::KeyScancode,
     ) -> Vec<GuiAction> {
         if down && matches!(key, Some(VirtualKeyCode::Space)) {
             vec![GuiAction::Build(Box::new(|db| {
@@ -341,119 +312,6 @@ impl GuiElemTrait for GuiScreen {
             ))]
         } else {
             vec![]
-        }
-    }
-}
-
-pub struct StatusBar {
-    config: GuiElemCfg,
-    children: Vec<Box<dyn GuiElemTrait>>,
-    idle_mode: f32,
-    idle_prev: f32,
-    pos_current_song_s: Rectangle,
-    pos_current_song_l: Rectangle,
-    pos_play_pause_s: Rectangle,
-    pos_play_pause_l: Rectangle,
-}
-impl StatusBar {
-    pub fn new(config: GuiElemCfg, playing: bool) -> Self {
-        let pos_current_song_s = Rectangle::new(Vec2::ZERO, Vec2::new(0.8, 1.0));
-        let pos_current_song_l = Rectangle::new(Vec2::ZERO, Vec2::new(1.0, 1.0));
-        let pos_play_pause_s = Rectangle::from_tuples((0.85, 0.0), (0.95, 1.0));
-        let pos_play_pause_l = Rectangle::from_tuples((0.85, 0.8), (0.95, 1.0));
-        Self {
-            config,
-            children: vec![
-                Box::new(CurrentSong::new(GuiElemCfg::at(pos_current_song_s.clone()))),
-                Box::new(PlayPauseToggle::new(
-                    GuiElemCfg::at(pos_play_pause_s.clone()),
-                    playing,
-                )),
-                Box::new(Panel::new(GuiElemCfg::default(), vec![])),
-            ],
-            idle_mode: 0.0,
-            idle_prev: 0.0,
-            pos_current_song_s,
-            pos_current_song_l,
-            pos_play_pause_s,
-            pos_play_pause_l,
-        }
-    }
-    const fn index_current_song() -> usize {
-        0
-    }
-    const fn index_play_pause_toggle() -> usize {
-        1
-    }
-    const fn index_bgpanel() -> usize {
-        2
-    }
-    pub fn set_background(&mut self, bg: Option<Color>) {
-        self.children[Self::index_bgpanel()]
-            .any_mut()
-            .downcast_mut::<Panel>()
-            .unwrap()
-            .background = bg;
-    }
-}
-impl GuiElemTrait for StatusBar {
-    fn config(&self) -> &GuiElemCfg {
-        &self.config
-    }
-    fn config_mut(&mut self) -> &mut GuiElemCfg {
-        &mut self.config
-    }
-    fn children(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElemTrait> + '_> {
-        Box::new(self.children.iter_mut().map(|v| v.as_mut()))
-    }
-    fn any(&self) -> &dyn std::any::Any {
-        self
-    }
-    fn any_mut(&mut self) -> &mut dyn std::any::Any {
-        self
-    }
-    fn elem(&self) -> &dyn GuiElemTrait {
-        self
-    }
-    fn elem_mut(&mut self) -> &mut dyn GuiElemTrait {
-        self
-    }
-    fn draw(&mut self, info: &mut DrawInfo, g: &mut Graphics2D) {
-        // the line that separates this section from the rest of the ui.
-        // fades away when idle_mode approaches 1.0
-        if self.idle_mode < 1.0 {
-            g.draw_line(
-                info.pos.top_left(),
-                info.pos.top_right(),
-                2.0,
-                Color::from_rgba(1.0, 1.0, 1.0, 1.0 - self.idle_mode),
-            );
-        }
-        if self.idle_mode != self.idle_prev {
-            // if exiting the moving stage, set background to transparent.
-            // if entering the moving stage, set background to black.
-            if self.idle_mode == 1.0 || self.idle_mode == 0.0 {
-                self.set_background(None);
-            } else if self.idle_prev == 1.0 || self.idle_prev == 0.0 {
-                self.set_background(Some(Color::BLACK));
-            }
-            // position the text
-            let l = self.idle_mode;
-            let current_song = self.children[Self::index_current_song()]
-                .any_mut()
-                .downcast_mut::<CurrentSong>()
-                .unwrap();
-            current_song.set_idle_mode(self.idle_mode);
-            current_song.config_mut().pos =
-                morph_rect(&self.pos_current_song_s, &self.pos_current_song_l, l);
-            let play_pause = self.children[Self::index_play_pause_toggle()]
-                .any_mut()
-                .downcast_mut::<PlayPauseToggle>()
-                .unwrap();
-            play_pause.config_mut().pos =
-                morph_rect(&self.pos_play_pause_s, &self.pos_play_pause_l, l);
-            // - - - - -
-            self.idle_prev = self.idle_mode;
         }
     }
 }

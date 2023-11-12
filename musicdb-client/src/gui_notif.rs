@@ -5,21 +5,21 @@ use std::{
 
 use speedy2d::{color::Color, dimen::Vector2, shape::Rectangle};
 
-use crate::gui::{GuiElemCfg, GuiElemTrait};
+use crate::gui::{GuiElem, GuiElemCfg};
 
 /// This should be added on top of overything else and set to fullscreen.
 /// It will respond to notification events.
 pub struct NotifOverlay {
     config: GuiElemCfg,
-    notifs: Vec<(Box<dyn GuiElemTrait>, NotifInfo)>,
+    notifs: Vec<(Box<dyn GuiElem>, NotifInfo)>,
     light: Option<(Instant, Color)>,
-    receiver: mpsc::Receiver<Box<dyn FnOnce(&Self) -> (Box<dyn GuiElemTrait>, NotifInfo) + Send>>,
+    receiver: mpsc::Receiver<Box<dyn FnOnce(&Self) -> (Box<dyn GuiElem>, NotifInfo) + Send>>,
 }
 
 impl NotifOverlay {
     pub fn new() -> (
         Self,
-        mpsc::Sender<Box<dyn FnOnce(&Self) -> (Box<dyn GuiElemTrait>, NotifInfo) + Send>>,
+        mpsc::Sender<Box<dyn FnOnce(&Self) -> (Box<dyn GuiElem>, NotifInfo) + Send>>,
     ) {
         let (sender, receiver) = mpsc::channel();
         (
@@ -152,7 +152,7 @@ impl Clone for NotifOverlay {
     }
 }
 
-impl GuiElemTrait for NotifOverlay {
+impl GuiElem for NotifOverlay {
     fn draw(&mut self, info: &mut crate::gui::DrawInfo, g: &mut speedy2d::Graphics2D) {
         if let Ok(notif) = self.receiver.try_recv() {
             let mut n = notif(self);
@@ -196,8 +196,8 @@ impl GuiElemTrait for NotifOverlay {
     // fn children(&mut self) -> Box<dyn Iterator<Item = &mut GuiElem> + '_> {
     //     Box::new(self.notifs.iter_mut().map(|(v, _)| v))
     // }
-    fn children(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElemTrait> + '_> {
-        Box::new(self.notifs.iter_mut().map(|(v, _)| v.as_mut()))
+    fn children(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElem> + '_> {
+        Box::new(self.notifs.iter_mut().map(|(v, _)| v.elem_mut()))
     }
     fn any(&self) -> &dyn std::any::Any {
         self
@@ -205,10 +205,10 @@ impl GuiElemTrait for NotifOverlay {
     fn any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }
-    fn elem(&self) -> &dyn GuiElemTrait {
+    fn elem(&self) -> &dyn GuiElem {
         self
     }
-    fn elem_mut(&mut self) -> &mut dyn GuiElemTrait {
+    fn elem_mut(&mut self) -> &mut dyn GuiElem {
         self
     }
 }

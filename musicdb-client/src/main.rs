@@ -22,9 +22,11 @@ use musicdb_lib::{
 #[cfg(feature = "speedy2d")]
 mod gui;
 #[cfg(feature = "speedy2d")]
+mod gui_anim;
+#[cfg(feature = "speedy2d")]
 mod gui_base;
 #[cfg(feature = "speedy2d")]
-mod gui_edit;
+mod gui_idle_display;
 #[cfg(feature = "speedy2d")]
 mod gui_library;
 #[cfg(feature = "speedy2d")]
@@ -37,6 +39,8 @@ mod gui_queue;
 mod gui_screen;
 #[cfg(feature = "speedy2d")]
 mod gui_settings;
+#[cfg(feature = "speedy2d")]
+mod gui_statusbar;
 #[cfg(feature = "speedy2d")]
 mod gui_text;
 #[cfg(feature = "speedy2d")]

@@ -3,7 +3,7 @@ use std::{sync::Arc, time::Instant};
 use speedy2d::{color::Color, dimen::Vec2, shape::Rectangle, window::MouseButton};
 
 use crate::{
-    gui::{DrawInfo, GuiAction, GuiElemCfg, GuiElemTrait},
+    gui::{DrawInfo, GuiAction, GuiElem, GuiElemCfg, GuiElemChildren},
     gui_text::Label,
 };
 
@@ -15,24 +15,20 @@ Mostly containers for other GuiElems.
 */
 
 /// A simple container for zero, one, or multiple child GuiElems. Can optionally fill the background with a color.
-pub struct Panel {
+pub struct Panel<C: GuiElemChildren> {
     config: GuiElemCfg,
-    pub children: Vec<Box<dyn GuiElemTrait>>,
+    pub children: C,
     pub background: Option<Color>,
 }
-impl Panel {
-    pub fn new(config: GuiElemCfg, children: Vec<Box<dyn GuiElemTrait>>) -> Self {
+impl<C: GuiElemChildren> Panel<C> {
+    pub fn new(config: GuiElemCfg, children: C) -> Self {
         Self {
             config,
             children,
             background: None,
         }
     }
-    pub fn with_background(
-        config: GuiElemCfg,
-        children: Vec<Box<dyn GuiElemTrait>>,
-        background: Color,
-    ) -> Self {
+    pub fn with_background(config: GuiElemCfg, children: C, background: Color) -> Self {
         Self {
             config,
             children,
@@ -40,15 +36,15 @@ impl Panel {
         }
     }
 }
-impl GuiElemTrait for Panel {
+impl<C: GuiElemChildren + 'static> GuiElem for Panel<C> {
     fn config(&self) -> &GuiElemCfg {
         &self.config
     }
     fn config_mut(&mut self) -> &mut GuiElemCfg {
         &mut self.config
     }
-    fn children(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElemTrait> + '_> {
-        Box::new(self.children.iter_mut().map(|v| v.as_mut()))
+    fn children(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElem> + '_> {
+        self.children.iter()
     }
     fn any(&self) -> &dyn std::any::Any {
         self
@@ -56,10 +52,10 @@ impl GuiElemTrait for Panel {
     fn any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }
-    fn elem(&self) -> &dyn GuiElemTrait {
+    fn elem(&self) -> &dyn GuiElem {
         self
     }
-    fn elem_mut(&mut self) -> &mut dyn GuiElemTrait {
+    fn elem_mut(&mut self) -> &mut dyn GuiElem {
         self
     }
     fn draw(&mut self, info: &mut DrawInfo, g: &mut speedy2d::Graphics2D) {
@@ -70,24 +66,25 @@ impl GuiElemTrait for Panel {
 }
 
 #[derive(Clone)]
-pub struct Square<T: GuiElemTrait> {
+pub struct Square<T: GuiElem> {
     config: GuiElemCfg,
     pub inner: T,
 }
-impl<T: GuiElemTrait> Square<T> {
+#[allow(unused)]
+impl<T: GuiElem> Square<T> {
     pub fn new(mut config: GuiElemCfg, inner: T) -> Self {
         config.redraw = true;
         Self { config, inner }
     }
 }
-impl<T: GuiElemTrait> GuiElemTrait for Square<T> {
+impl<T: GuiElem + 'static> GuiElem for Square<T> {
     fn config(&self) -> &GuiElemCfg {
         &self.config
     }
     fn config_mut(&mut self) -> &mut GuiElemCfg {
         &mut self.config
     }
-    fn children(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElemTrait> + '_> {
+    fn children(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElem> + '_> {
         Box::new([self.inner.elem_mut()].into_iter())
     }
     fn any(&self) -> &dyn std::any::Any {
@@ -96,10 +93,10 @@ impl<T: GuiElemTrait> GuiElemTrait for Square<T> {
     fn any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }
-    fn elem(&self) -> &dyn GuiElemTrait {
+    fn elem(&self) -> &dyn GuiElem {
         self
     }
-    fn elem_mut(&mut self) -> &mut dyn GuiElemTrait {
+    fn elem_mut(&mut self) -> &mut dyn GuiElem {
         self
     }
     fn draw(&mut self, info: &mut DrawInfo, _g: &mut speedy2d::Graphics2D) {
@@ -121,9 +118,10 @@ impl<T: GuiElemTrait> GuiElemTrait for Square<T> {
     }
 }
 
-pub struct ScrollBox {
+pub struct ScrollBox<C: GuiElemChildren> {
     config: GuiElemCfg,
-    pub children: Vec<(Box<dyn GuiElemTrait>, f32)>,
+    pub children: C,
+    pub children_heights: Vec<f32>,
     pub size_unit: ScrollBoxSizeUnit,
     pub scroll_target: f32,
     pub scroll_display: f32,
@@ -136,20 +134,22 @@ pub struct ScrollBox {
     mouse_scroll_margin_right: f32,
 }
 #[derive(Clone)]
+#[allow(unused)]
 pub enum ScrollBoxSizeUnit {
     Relative,
     Pixels,
 }
-impl ScrollBox {
+impl<C: GuiElemChildren> ScrollBox<C> {
     pub fn new(
         config: GuiElemCfg,
         size_unit: ScrollBoxSizeUnit,
-        children: Vec<(Box<dyn GuiElemTrait>, f32)>,
+        children: C,
+        children_heights: Vec<f32>,
     ) -> Self {
-        // config.redraw = true;
         Self {
             config: config.w_scroll().w_mouse(),
             children,
+            children_heights,
             size_unit,
             scroll_target: 0.0,
             scroll_display: 0.0,
@@ -163,21 +163,15 @@ impl ScrollBox {
         }
     }
 }
-impl GuiElemTrait for ScrollBox {
+impl<C: GuiElemChildren + 'static> GuiElem for ScrollBox<C> {
     fn config(&self) -> &GuiElemCfg {
         &self.config
     }
     fn config_mut(&mut self) -> &mut GuiElemCfg {
         &mut self.config
     }
-    fn children(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElemTrait> + '_> {
-        Box::new(
-            self.children
-                .iter_mut()
-                .map(|(v, _)| v.as_mut())
-                .skip_while(|v| v.config().pos.bottom_right().y < 0.0)
-                .take_while(|v| v.config().pos.top_left().y <= 1.0),
-        )
+    fn children(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElem> + '_> {
+        self.children.iter()
     }
     fn draw_rev(&self) -> bool {
         false
@@ -188,10 +182,10 @@ impl GuiElemTrait for ScrollBox {
     fn any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }
-    fn elem(&self) -> &dyn GuiElemTrait {
+    fn elem(&self) -> &dyn GuiElem {
         self
     }
-    fn elem_mut(&mut self) -> &mut dyn GuiElemTrait {
+    fn elem_mut(&mut self) -> &mut dyn GuiElem {
         self
     }
     fn draw(&mut self, info: &mut DrawInfo, g: &mut speedy2d::Graphics2D) {
@@ -204,22 +198,37 @@ impl GuiElemTrait for ScrollBox {
         } else if self.scroll_target < 0.0 {
             self.scroll_target = 0.0;
         }
-        self.scroll_display = 0.2 * self.scroll_target + 0.8 * self.scroll_display;
-        if self.scroll_display != self.scroll_target {
+        if self.scroll_target != self.scroll_display {
             self.config.redraw = true;
-            if (self.scroll_display - self.scroll_target).abs() < 1.0 / info.pos.height() {
+            if info.no_animations {
                 self.scroll_display = self.scroll_target;
-            } else if let Some(h) = &info.helper {
-                h.request_redraw();
+            } else {
+                self.scroll_display = 0.2 * self.scroll_target + 0.8 * self.scroll_display;
+                if (self.scroll_display - self.scroll_target).abs() < 1.0 / info.pos.height() {
+                    self.scroll_display = self.scroll_target;
+                } else if let Some(h) = &info.helper {
+                    h.request_redraw();
+                }
             }
         }
         // recalculate positions
         if self.config.redraw {
+            // adjust height vector length if necessary
+            if self.children_heights.len() != self.children.len() {
+                let target = self.children.len();
+                while self.children_heights.len() < target {
+                    self.children_heights.push(0.0);
+                }
+                while self.children_heights.len() > target {
+                    self.children_heights.pop();
+                }
+            }
+            //
             self.mouse_scroll_margin_right = info.line_height * 0.2;
             let max_x = 1.0 - self.mouse_scroll_margin_right / info.pos.width();
             self.config.redraw = false;
             let mut y_pos = -self.scroll_display;
-            for (e, h) in self.children.iter_mut() {
+            for (e, h) in self.children.iter().zip(self.children_heights.iter()) {
                 let h_rel = self.size_unit.to_rel(*h, info.pos.height());
                 let y_rel = self.size_unit.to_rel(y_pos, info.pos.height());
                 if y_rel + h_rel >= 0.0 && y_rel <= 1.0 {
@@ -315,17 +324,17 @@ impl ScrollBoxSizeUnit {
     }
 }
 
-pub struct Button {
+pub struct Button<C: GuiElemChildren> {
     config: GuiElemCfg,
-    pub children: Vec<Box<dyn GuiElemTrait>>,
+    pub children: C,
     action: Arc<dyn Fn(&mut Self) -> Vec<GuiAction> + 'static>,
 }
-impl Button {
+impl<C: GuiElemChildren> Button<C> {
     /// automatically adds w_mouse to config
     pub fn new<F: Fn(&mut Self) -> Vec<GuiAction> + 'static>(
         config: GuiElemCfg,
         action: F,
-        children: Vec<Box<dyn GuiElemTrait>>,
+        children: C,
     ) -> Self {
         Self {
             config: config.w_mouse(),
@@ -334,15 +343,15 @@ impl Button {
         }
     }
 }
-impl GuiElemTrait for Button {
+impl<C: GuiElemChildren + 'static> GuiElem for Button<C> {
     fn config(&self) -> &GuiElemCfg {
         &self.config
     }
     fn config_mut(&mut self) -> &mut GuiElemCfg {
         &mut self.config
     }
-    fn children(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElemTrait> + '_> {
-        Box::new(self.children.iter_mut().map(|v| v.as_mut()))
+    fn children(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElem> + '_> {
+        self.children.iter()
     }
     fn any(&self) -> &dyn std::any::Any {
         self
@@ -350,10 +359,10 @@ impl GuiElemTrait for Button {
     fn any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }
-    fn elem(&self) -> &dyn GuiElemTrait {
+    fn elem(&self) -> &dyn GuiElem {
         self
     }
-    fn elem_mut(&mut self) -> &mut dyn GuiElemTrait {
+    fn elem_mut(&mut self) -> &mut dyn GuiElem {
         self
     }
     fn mouse_pressed(&mut self, button: MouseButton) -> Vec<GuiAction> {
@@ -381,7 +390,7 @@ impl GuiElemTrait for Button {
 
 pub struct Slider {
     pub config: GuiElemCfg,
-    pub children: Vec<Box<dyn GuiElemTrait>>,
+    pub children: Vec<Box<dyn GuiElem>>,
     pub slider_pos: Rectangle,
     pub min: f64,
     pub max: f64,
@@ -395,6 +404,7 @@ pub struct Slider {
     pub display_since: Option<Instant>,
     pub on_update: Arc<dyn Fn(&mut Self, &mut DrawInfo)>,
 }
+#[allow(unused)]
 impl Slider {
     /// returns true if the value of the slider has changed since the last time this function was called.
     /// this is usually used by the closure responsible for directly handling updates. if you wish to check for changes
@@ -418,7 +428,7 @@ impl Slider {
         min: f64,
         max: f64,
         val: f64,
-        children: Vec<Box<dyn GuiElemTrait>>,
+        children: Vec<Box<dyn GuiElem>>,
         on_update: F,
     ) -> Self {
         Self {
@@ -507,15 +517,15 @@ impl Slider {
         )
     }
 }
-impl GuiElemTrait for Slider {
+impl GuiElem for Slider {
     fn config(&self) -> &GuiElemCfg {
         &self.config
     }
     fn config_mut(&mut self) -> &mut GuiElemCfg {
         &mut self.config
     }
-    fn children(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElemTrait> + '_> {
-        Box::new(self.children.iter_mut().map(|v| v.as_mut()))
+    fn children(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElem> + '_> {
+        Box::new(self.children.iter_mut().map(|v| v.elem_mut()))
     }
     fn any(&self) -> &dyn std::any::Any {
         self
@@ -523,10 +533,10 @@ impl GuiElemTrait for Slider {
     fn any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }
-    fn elem(&self) -> &dyn GuiElemTrait {
+    fn elem(&self) -> &dyn GuiElem {
         self
     }
-    fn elem_mut(&mut self) -> &mut dyn GuiElemTrait {
+    fn elem_mut(&mut self) -> &mut dyn GuiElem {
         self
     }
     fn draw(&mut self, info: &mut DrawInfo, g: &mut speedy2d::Graphics2D) {

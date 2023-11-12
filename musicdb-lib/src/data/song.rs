@@ -156,7 +156,7 @@ impl Song {
                 match dlcon
                     .lock()
                     .unwrap()
-                    .song_file(id, true)
+                    .song_file(id)
                     .expect("problem with downloader connection...")
                 {
                     Ok(data) => Some(data),

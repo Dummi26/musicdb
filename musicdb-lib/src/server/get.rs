@@ -35,18 +35,32 @@ impl<T: Write + Read> Client<T> {
             Ok(Err(response))
         }
     }
-    pub fn song_file(
-        &mut self,
-        id: SongId,
-        blocking: bool,
-    ) -> Result<Result<Vec<u8>, String>, std::io::Error> {
+    pub fn song_file(&mut self, id: SongId) -> Result<Result<Vec<u8>, String>, std::io::Error> {
         writeln!(
             self.0.get_mut(),
             "{}",
-            con_get_encode_string(&format!(
-                "song-file{}\n{id}",
-                if blocking { "-blocking" } else { "" }
-            ))
+            con_get_encode_string(&format!("song-file\n{id}",))
+        )?;
+        let mut response = String::new();
+        self.0.read_line(&mut response)?;
+        let response = con_get_decode_line(&response);
+        if response.starts_with("len: ") {
+            if let Ok(len) = response[4..].trim().parse() {
+                let mut bytes = vec![0; len];
+                self.0.read_exact(&mut bytes)?;
+                Ok(Ok(bytes))
+            } else {
+                Ok(Err(response))
+            }
+        } else {
+            Ok(Err(response))
+        }
+    }
+    pub fn custom_file(&mut self, path: &str) -> Result<Result<Vec<u8>, String>, std::io::Error> {
+        writeln!(
+            self.0.get_mut(),
+            "{}",
+            con_get_encode_string(&format!("custom-file\n{path}",))
         )?;
         let mut response = String::new();
         self.0.read_line(&mut response)?;
@@ -128,7 +142,7 @@ pub fn handle_one_connection_as_get(
                                 Some(None) => Some(db.lib_directory.clone()),
                                 Some(Some(p)) => Some(p.clone()),
                             };
-                            // check for malicious paths
+                            // check for malicious paths [TODO: Improve]
                             if Path::new(path).is_absolute() {
                                 parent = None;
                             }

@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs,
     io::Write,
     path::{Path, PathBuf},
@@ -21,21 +21,44 @@ fn main() {
     let lib_dir = if let Some(arg) = args.next() {
         arg
     } else {
-        eprintln!("usage: musicdb-filldb <library root> [--skip-duration]");
+        eprintln!("usage: musicdb-filldb <library root> [--help] [--skip-duration] [--custom-files <path>] [... (see --help)]");
         std::process::exit(1);
     };
-    let mut unknown_arg = false;
+    let mut bad_arg = false;
     let mut skip_duration = false;
-    for arg in args {
-        match arg.as_str() {
-            "--skip-duration" => skip_duration = true,
-            _ => {
-                unknown_arg = true;
-                eprintln!("Unknown argument: {arg}");
-            }
+    let mut custom_files = None;
+    let mut artist_txt = false;
+    let mut artist_img = false;
+    loop {
+        match args.next() {
+            None => break,
+            Some(arg) => match arg.as_str() {
+                "--help" => {
+                    eprintln!("--skip-duration: Don't try to figure out the songs duration from file contents. This means mp3 files with the Duration field unset will have a duration of 0.");
+                    eprintln!("--custom-files <path>: server will use <path> as its custom-files directory.");
+                    eprintln!("--cf-artist-txt: For each artist, check for an <artist>.txt file. If it exists, add each line as a tag to that artist.");
+                    eprintln!("--cf-artist-img: For each artist, check for an <artist>.{{jpg,png,...}} file. If it exists, add ImageExt=<extension> tag to the artist, so the image can be loaded by clients later.");
+                    return;
+                }
+                "--skip-duration" => skip_duration = true,
+                "--custom-files" => {
+                    if let Some(path) = args.next() {
+                        custom_files = Some(PathBuf::from(path));
+                    } else {
+                        bad_arg = true;
+                        eprintln!("--custom-files <path> :: missing <path>!");
+                    }
+                }
+                "--cf-artist-txt" => artist_txt = true,
+                "--cf-artist-img" => artist_img = true,
+                arg => {
+                    bad_arg = true;
+                    eprintln!("Unknown argument: {arg}");
+                }
+            },
         }
     }
-    if unknown_arg {
+    if bad_arg {
         return;
     }
     eprintln!("Library: {lib_dir}. press enter to start. result will be saved in 'dbfile'.");
@@ -252,6 +275,61 @@ fn main() {
             database.artists_mut().remove(&unknown_artist);
         } else {
             eprintln!("Added the <unknown> artist as a fallback!");
+        }
+    }
+    if let Some(custom_files) = custom_files {
+        if artist_txt {
+            eprintln!("[info] Searching for <artist>.txt files in custom-files dir...");
+            let l = database.artists().len();
+            let mut c = 0;
+            for (i, artist) in database.artists_mut().values_mut().enumerate() {
+                if let Ok(info) =
+                    fs::read_to_string(custom_files.join(format!("{}.txt", artist.name)))
+                {
+                    c += 1;
+                    for line in info.lines() {
+                        artist.general.tags.push(line.to_owned());
+                    }
+                }
+                eprint!(" {}/{l} ({c})\r", i + 1);
+            }
+            eprintln!();
+        }
+        if artist_img {
+            eprintln!("[info] Searching for <artist>.{{png,jpg,...}} files in custom-files dir...");
+            match fs::read_dir(&custom_files) {
+                Err(e) => {
+                    eprintln!("Can't read custom-files dir {custom_files:?}: {e}");
+                }
+                Ok(ls) => {
+                    let mut files = HashMap::new();
+                    for entry in ls {
+                        if let Ok(entry) = entry {
+                            let p = entry.path();
+                            if let Some(base) = p.file_stem().and_then(|v| v.to_str()) {
+                                if let Some(ext) = entry
+                                    .path()
+                                    .extension()
+                                    .and_then(|v| v.to_str())
+                                    .filter(|v| {
+                                        matches!(v.to_lowercase().as_str(), "png" | "jpg" | "jpeg")
+                                    })
+                                {
+                                    if let Some(old) = files.insert(base.to_owned(), ext.to_owned())
+                                    {
+                                        eprintln!("[warn] Not using file {base}.{old}, because {base}.{ext} was found.");
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    for artist in database.artists_mut().values_mut() {
+                        if let Some(ext) = files.get(&artist.name) {
+                            artist.general.tags.push(format!("ImageExt={ext}"));
+                        }
+                    }
+                }
+            }
         }
     }
     eprintln!("saving dbfile...");

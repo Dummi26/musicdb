@@ -8,7 +8,7 @@ use speedy2d::{
     window::{ModifiersState, MouseButton},
 };
 
-use crate::gui::{GuiAction, GuiElemCfg, GuiElemTrait};
+use crate::gui::{GuiAction, GuiElem, GuiElemCfg};
 
 /*
 
@@ -17,9 +17,9 @@ except they are all text-related.
 
 */
 
+#[derive(Clone)]
 pub struct Label {
     config: GuiElemCfg,
-    children: Vec<Box<dyn GuiElemTrait>>,
     pub content: Content,
     pub pos: Vec2,
 }
@@ -30,6 +30,7 @@ pub struct Content {
     background: Option<Color>,
     formatted: Option<Rc<FormattedTextBlock>>,
 }
+#[allow(unused)]
 impl Content {
     pub fn new(text: String, color: Color) -> Self {
         Self {
@@ -72,7 +73,6 @@ impl Label {
     ) -> Self {
         Self {
             config,
-            children: vec![],
             content: Content {
                 text,
                 color,
@@ -83,15 +83,15 @@ impl Label {
         }
     }
 }
-impl GuiElemTrait for Label {
+impl GuiElem for Label {
     fn config(&self) -> &GuiElemCfg {
         &self.config
     }
     fn config_mut(&mut self) -> &mut GuiElemCfg {
         &mut self.config
     }
-    fn children(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElemTrait> + '_> {
-        Box::new(self.children.iter_mut().map(|v| v.as_mut()))
+    fn children(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElem> + '_> {
+        Box::new([].into_iter())
     }
     fn any(&self) -> &dyn std::any::Any {
         self
@@ -99,10 +99,10 @@ impl GuiElemTrait for Label {
     fn any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }
-    fn elem(&self) -> &dyn GuiElemTrait {
+    fn elem(&self) -> &dyn GuiElem {
         self
     }
-    fn elem_mut(&mut self) -> &mut dyn GuiElemTrait {
+    fn elem_mut(&mut self) -> &mut dyn GuiElem {
         self
     }
     fn draw(&mut self, info: &mut crate::gui::DrawInfo, g: &mut speedy2d::Graphics2D) {
@@ -146,7 +146,8 @@ impl GuiElemTrait for Label {
 /// a single-line text field for users to type text into.
 pub struct TextField {
     config: GuiElemCfg,
-    pub children: Vec<Box<dyn GuiElemTrait>>,
+    pub c_input: Label,
+    pub c_hint: Label,
     pub on_changed: Option<Box<dyn FnMut(&str)>>,
     pub on_changed_mut: Option<Box<dyn FnMut(&mut Self, String)>>,
 }
@@ -164,52 +165,38 @@ impl TextField {
         let text_is_empty = text.is_empty();
         Self {
             config: config.w_mouse().w_keyboard_focus(),
-            children: vec![
-                Box::new(Label::new(
-                    GuiElemCfg::default(),
-                    text,
-                    color_input,
-                    None,
-                    Vec2::new(0.0, 0.5),
-                )),
-                Box::new(Label::new(
-                    if text_is_empty {
-                        GuiElemCfg::default()
-                    } else {
-                        GuiElemCfg::default().disabled()
-                    },
-                    hint,
-                    color_hint,
-                    None,
-                    Vec2::new(0.0, 0.5),
-                )),
-            ],
+            c_input: Label::new(
+                GuiElemCfg::default(),
+                text,
+                color_input,
+                None,
+                Vec2::new(0.0, 0.5),
+            ),
+            c_hint: Label::new(
+                if text_is_empty {
+                    GuiElemCfg::default()
+                } else {
+                    GuiElemCfg::default().disabled()
+                },
+                hint,
+                color_hint,
+                None,
+                Vec2::new(0.0, 0.5),
+            ),
             on_changed: None,
             on_changed_mut: None,
         }
     }
-    pub fn label_input(&self) -> &Label {
-        self.children[0].any().downcast_ref().unwrap()
-    }
-    pub fn label_input_mut(&mut self) -> &mut Label {
-        self.children[0].any_mut().downcast_mut().unwrap()
-    }
-    pub fn label_hint(&self) -> &Label {
-        self.children[1].any().downcast_ref().unwrap()
-    }
-    pub fn label_hint_mut(&mut self) -> &mut Label {
-        self.children[1].any_mut().downcast_mut().unwrap()
-    }
 }
-impl GuiElemTrait for TextField {
+impl GuiElem for TextField {
     fn config(&self) -> &GuiElemCfg {
         &self.config
     }
     fn config_mut(&mut self) -> &mut GuiElemCfg {
         &mut self.config
     }
-    fn children(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElemTrait> + '_> {
-        Box::new(self.children.iter_mut().map(|v| v.as_mut()))
+    fn children(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElem> + '_> {
+        Box::new([self.c_input.elem_mut(), self.c_hint.elem_mut()].into_iter())
     }
     fn any(&self) -> &dyn std::any::Any {
         self
@@ -217,10 +204,10 @@ impl GuiElemTrait for TextField {
     fn any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }
-    fn elem(&self) -> &dyn GuiElemTrait {
+    fn elem(&self) -> &dyn GuiElem {
         self
     }
-    fn elem_mut(&mut self) -> &mut dyn GuiElemTrait {
+    fn elem_mut(&mut self) -> &mut dyn GuiElem {
         self
     }
     fn draw(&mut self, info: &mut crate::gui::DrawInfo, g: &mut speedy2d::Graphics2D) {
@@ -240,11 +227,7 @@ impl GuiElemTrait for TextField {
     }
     fn char_focus(&mut self, modifiers: ModifiersState, key: char) -> Vec<GuiAction> {
         if !(modifiers.ctrl() || modifiers.alt() || modifiers.logo()) && !key.is_control() {
-            let content = &mut self.children[0]
-                .any_mut()
-                .downcast_mut::<Label>()
-                .unwrap()
-                .content;
+            let content = &mut self.c_input.content;
             let was_empty = content.get_text().is_empty();
             content.text().push(key);
             if let Some(f) = &mut self.on_changed {
@@ -256,7 +239,7 @@ impl GuiElemTrait for TextField {
                 self.on_changed_mut = Some(f);
             }
             if was_empty {
-                self.children[1].config_mut().enabled = false;
+                self.c_hint.config_mut().enabled = false;
             }
         }
         vec![]
@@ -272,11 +255,7 @@ impl GuiElemTrait for TextField {
             && !(modifiers.alt() || modifiers.logo())
             && key == Some(speedy2d::window::VirtualKeyCode::Backspace)
         {
-            let content = &mut self.children[0]
-                .any_mut()
-                .downcast_mut::<Label>()
-                .unwrap()
-                .content;
+            let content = &mut self.c_input.content;
             if !content.get_text().is_empty() {
                 if modifiers.ctrl() {
                     for s in [true, false, true] {
@@ -299,7 +278,7 @@ impl GuiElemTrait for TextField {
                     self.on_changed_mut = Some(f);
                 }
                 if is_now_empty {
-                    self.children[1].config_mut().enabled = true;
+                    self.c_hint.config_mut().enabled = true;
                 }
             }
         }
@@ -311,7 +290,7 @@ impl GuiElemTrait for TextField {
 /// Allows stringing together multiple `Content`s in one line.
 pub struct AdvancedLabel {
     config: GuiElemCfg,
-    children: Vec<Box<dyn GuiElemTrait>>,
+    children: Vec<Box<dyn GuiElem>>,
     /// 0.0 => align to top/left
     /// 0.5 => center
     /// 1.0 => align to bottom/right
@@ -334,15 +313,15 @@ impl AdvancedLabel {
         }
     }
 }
-impl GuiElemTrait for AdvancedLabel {
+impl GuiElem for AdvancedLabel {
     fn config(&self) -> &GuiElemCfg {
         &self.config
     }
     fn config_mut(&mut self) -> &mut GuiElemCfg {
         &mut self.config
     }
-    fn children(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElemTrait> + '_> {
-        Box::new(self.children.iter_mut().map(|v| v.as_mut()))
+    fn children(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElem> + '_> {
+        Box::new(self.children.iter_mut().map(|v| v.elem_mut()))
     }
     fn any(&self) -> &dyn std::any::Any {
         self
@@ -350,10 +329,10 @@ impl GuiElemTrait for AdvancedLabel {
     fn any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }
-    fn elem(&self) -> &dyn GuiElemTrait {
+    fn elem(&self) -> &dyn GuiElem {
         self
     }
-    fn elem_mut(&mut self) -> &mut dyn GuiElemTrait {
+    fn elem_mut(&mut self) -> &mut dyn GuiElem {
         self
     }
     fn draw(&mut self, info: &mut crate::gui::DrawInfo, g: &mut speedy2d::Graphics2D) {
