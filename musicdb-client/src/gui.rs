@@ -1198,7 +1198,7 @@ impl WindowHandler<GuiEvent> for Gui {
                 .content
                 .text() = "On due to\nbad performance".to_string();
         }
-        // #[cfg(debug_assertions)]
+        #[cfg(debug_assertions)]
         {
             self.frames_drawn += 1;
             if draw_start_time
