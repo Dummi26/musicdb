@@ -4,10 +4,11 @@ use musicdb_lib::data::ArtistId;
 use speedy2d::{color::Color, dimen::Vec2, image::ImageHandle, shape::Rectangle};
 
 use crate::{
-    gui::{DrawInfo, GuiElem, GuiElemCfg, GuiServerImage},
+    gui::{DrawInfo, GuiAction, GuiElem, GuiElemCfg, GuiServerImage},
     gui_anim::AnimationController,
+    gui_base::Button,
     gui_playback::{get_right_x, image_display, CurrentInfo},
-    gui_text::AdvancedLabel,
+    gui_text::{AdvancedLabel, Label},
 };
 
 pub struct IdleDisplay {
@@ -15,6 +16,7 @@ pub struct IdleDisplay {
     pub idle_mode: f32,
     current_info: CurrentInfo,
     current_artist_image: Option<(ArtistId, Option<(String, Option<Option<ImageHandle>>)>)>,
+    pub c_idle_exit_hint: Button<[Label; 1]>,
     c_top_label: AdvancedLabel,
     c_side1_label: AdvancedLabel,
     c_side2_label: AdvancedLabel,
@@ -36,6 +38,17 @@ impl IdleDisplay {
             idle_mode: 0.0,
             current_info: CurrentInfo::new(),
             current_artist_image: None,
+            c_idle_exit_hint: Button::new(
+                GuiElemCfg::default().disabled(),
+                |_| vec![GuiAction::EndIdle(true)],
+                [Label::new(
+                    GuiElemCfg::default(),
+                    "Back".to_owned(),
+                    Color::GRAY,
+                    None,
+                    Vec2::new(0.5, 0.5),
+                )],
+            ),
             c_top_label: AdvancedLabel::new(
                 GuiElemCfg::at(Rectangle::from_tuples((0.05, 0.02), (0.95, 0.18))),
                 Vec2::new(0.5, 0.5),
@@ -74,6 +87,7 @@ impl GuiElem for IdleDisplay {
     fn children(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElem> + '_> {
         Box::new(
             [
+                self.c_idle_exit_hint.elem_mut(),
                 self.c_top_label.elem_mut(),
                 self.c_side1_label.elem_mut(),
                 self.c_side2_label.elem_mut(),
@@ -215,10 +229,10 @@ impl GuiElem for IdleDisplay {
         // move children to make space for cover
         let ar_updated = self
             .cover_aspect_ratio
-            .update(info.time.clone(), info.no_animations)
+            .update(info.time.clone(), info.high_performance)
             | self
                 .artist_image_aspect_ratio
-                .update(info.time.clone(), info.no_animations);
+                .update(info.time.clone(), info.high_performance);
         if ar_updated || info.pos.size() != self.config.pixel_pos.size() {
             if let Some(h) = &info.helper {
                 h.request_redraw();

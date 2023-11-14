@@ -380,7 +380,7 @@ impl GuiElem for LibraryBrowser {
             .filter_target_state
             .load(std::sync::atomic::Ordering::Relaxed);
         self.filter_state.target = if filter_target_state { 1.0 } else { 0.0 };
-        if self.filter_state.update(info.time, info.no_animations) {
+        if self.filter_state.update(info.time, info.high_performance) {
             if let Some(h) = &info.helper {
                 h.request_redraw();
             }

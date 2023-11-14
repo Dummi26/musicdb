@@ -66,7 +66,7 @@ impl GuiElem for StatusBar {
         // move children to make space for cover
         let ar_updated = self
             .cover_aspect_ratio
-            .update(info.time.clone(), info.no_animations);
+            .update(info.time.clone(), info.high_performance);
         if ar_updated || info.pos.size() != self.config.pixel_pos.size() {
             if let Some(h) = &info.helper {
                 h.request_redraw();

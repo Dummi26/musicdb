@@ -8,7 +8,7 @@ use crate::{
 
 pub struct Settings {
     pub config: GuiElemCfg,
-    c_scroll_box: ScrollBox<SettingsContent>,
+    pub c_scroll_box: ScrollBox<SettingsContent>,
     c_background: Panel<()>,
 }
 impl Settings {
@@ -47,13 +47,13 @@ impl Settings {
         }
     }
 }
-struct SettingsContent {
-    back_button: Button<[Label; 1]>,
-    opacity: Panel<(Label, Slider)>,
-    animations_toggle: Panel<(Label, Button<[Label; 1]>)>,
-    line_height: Panel<(Label, Slider)>,
-    scroll_sensitivity: Panel<(Label, Slider)>,
-    idle_time: Panel<(Label, Slider)>,
+pub struct SettingsContent {
+    pub back_button: Button<[Label; 1]>,
+    pub opacity: Panel<(Label, Slider)>,
+    pub performance_toggle: Panel<(Label, Button<[Label; 1]>)>,
+    pub line_height: Panel<(Label, Slider)>,
+    pub scroll_sensitivity: Panel<(Label, Slider)>,
+    pub idle_time: Panel<(Label, Slider)>,
 }
 impl GuiElemChildren for SettingsContent {
     fn iter(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElem> + '_> {
@@ -61,7 +61,7 @@ impl GuiElemChildren for SettingsContent {
             [
                 self.back_button.elem_mut(),
                 self.opacity.elem_mut(),
-                self.animations_toggle.elem_mut(),
+                self.performance_toggle.elem_mut(),
                 self.line_height.elem_mut(),
                 self.scroll_sensitivity.elem_mut(),
                 self.idle_time.elem_mut(),
@@ -75,7 +75,7 @@ impl GuiElemChildren for SettingsContent {
 }
 impl SettingsContent {
     pub fn new(
-        no_animations: bool,
+        high_performance: bool,
         line_height: f32,
         _scroll_sensitivity_pixels: f64,
         scroll_sensitivity_lines: f64,
@@ -120,12 +120,12 @@ impl SettingsContent {
                     },
                 ),
             ),
-            animations_toggle: Panel::new(
+            performance_toggle: Panel::new(
                 GuiElemCfg::default(),
                 (
                     Label::new(
                         GuiElemCfg::at(Rectangle::from_tuples((0.0, 0.0), (0.33, 1.0))),
-                        "Animations".to_string(),
+                        "Power Saver".to_string(),
                         Color::WHITE,
                         None,
                         Vec2::new(1.0, 0.5),
@@ -134,18 +134,18 @@ impl SettingsContent {
                         GuiElemCfg::at(Rectangle::from_tuples((0.75, 0.0), (1.0, 1.0))),
                         |b| {
                             let text = b.children[0].content.text();
-                            let ad = if text == "On" {
+                            let ad = if text.starts_with("On") {
                                 *text = "Off".to_string();
-                                true
+                                false
                             } else {
                                 *text = "On".to_string();
-                                false
+                                true
                             };
-                            vec![GuiAction::SetAnimationsDisabled(ad)]
+                            vec![GuiAction::SetHighPerformance(ad)]
                         },
                         [Label::new(
                             GuiElemCfg::default(),
-                            if no_animations { "Off" } else { "On" }.to_string(),
+                            if high_performance { "On" } else { "Off" }.to_string(),
                             Color::WHITE,
                             None,
                             Vec2::new(0.5, 0.5),

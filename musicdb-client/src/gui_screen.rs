@@ -40,7 +40,7 @@ pub struct GuiScreen {
     c_notif_overlay: NotifOverlay,
     c_idle_display: IdleDisplay,
     c_status_bar: StatusBar,
-    c_settings: Settings,
+    pub c_settings: Settings,
     pub c_main_view: Panel<(
         Button<[Label; 1]>,
         Button<[Label; 1]>,
@@ -173,8 +173,19 @@ impl GuiScreen {
             0.0
         }
     }
-    fn not_idle(&mut self) {
+    pub fn not_idle(&mut self) {
         self.last_interaction = Instant::now();
+        if self.idle.target > 0.0 {
+            if self.idle.value < 1.0 {
+                self.idle.target = 0.0;
+            } else {
+                self.c_idle_display.c_idle_exit_hint.config_mut().enabled = true;
+            }
+        }
+    }
+    pub fn unidle(&mut self) {
+        self.not_idle();
+        self.c_idle_display.c_idle_exit_hint.config_mut().enabled = false;
         self.idle.target = 0.0;
     }
     fn idle_check(&mut self) {
@@ -253,9 +264,36 @@ impl GuiElem for GuiScreen {
             // skip idle_check if paused or queue is empty
             self.idle_check();
         }
+        // show/hide idle_exit_hint
+        let idle_exit_anim = if self.c_idle_display.c_idle_exit_hint.config().enabled {
+            let hide = info
+                .time
+                .duration_since(self.last_interaction)
+                .as_secs_f32()
+                / 3.0;
+            let cv = if hide >= 1.0 {
+                self.c_idle_display.c_idle_exit_hint.config_mut().enabled = false;
+                false
+            } else {
+                let v = hide * hide;
+                let w = 0.15;
+                let h = 0.05;
+                let dx = w * v;
+                let dy = h * v;
+                self.c_idle_display.c_idle_exit_hint.config_mut().pos =
+                    Rectangle::from_tuples((-dx, -dy), (w - dx, h - dy));
+                true
+            };
+            if let Some(h) = &info.helper {
+                h.set_cursor_visible(cv);
+            }
+            cv
+        } else {
+            false
+        };
         // request_redraw for animations
-        let idle_changed = self.idle.update(info.time, info.no_animations);
-        if idle_changed || self.settings.1.is_some() {
+        let idle_changed = self.idle.update(info.time, info.high_performance);
+        if idle_changed || idle_exit_anim || self.settings.1.is_some() {
             if let Some(h) = &info.helper {
                 h.request_redraw()
             }
@@ -264,7 +302,7 @@ impl GuiElem for GuiScreen {
         if idle_changed {
             let enable_normal_ui = self.idle.value < 1.0;
             self.c_main_view.config_mut().enabled = enable_normal_ui;
-            self.c_settings.config_mut().enabled = enable_normal_ui;
+            // self.c_settings.config_mut().enabled = enable_normal_ui;
             self.c_status_bar.config_mut().enabled = enable_normal_ui;
             if let Some(h) = &info.helper {
                 h.set_cursor_visible(enable_normal_ui);

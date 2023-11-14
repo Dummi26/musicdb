@@ -200,7 +200,7 @@ impl<C: GuiElemChildren + 'static> GuiElem for ScrollBox<C> {
         }
         if self.scroll_target != self.scroll_display {
             self.config.redraw = true;
-            if info.no_animations {
+            if info.high_performance {
                 self.scroll_display = self.scroll_target;
             } else {
                 self.scroll_display = 0.2 * self.scroll_target + 0.8 * self.scroll_display;
@@ -233,7 +233,11 @@ impl<C: GuiElemChildren + 'static> GuiElem for ScrollBox<C> {
                 let y_rel = self.size_unit.to_rel(y_pos, info.pos.height());
                 if y_rel + h_rel >= 0.0 && y_rel <= 1.0 {
                     let cfg = e.config_mut();
-                    cfg.enabled = true;
+                    cfg.enabled = if info.high_performance {
+                        y_rel >= 0.0 && y_rel + h_rel <= 1.0
+                    } else {
+                        true
+                    };
                     cfg.pos = Rectangle::new(
                         Vec2::new(cfg.pos.top_left().x, 0.0f32.max(y_rel)),
                         Vec2::new(

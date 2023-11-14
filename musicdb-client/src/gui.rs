@@ -281,19 +281,21 @@ pub struct Gui {
     pub font: Font,
     pub covers: Option<HashMap<CoverId, GuiServerImage>>,
     pub custom_images: Option<HashMap<String, GuiServerImage>>,
-    pub last_draw: Instant,
     pub modifiers: ModifiersState,
     pub dragging: Option<(
         Dragging,
         Option<Box<dyn FnMut(&mut DrawInfo, &mut Graphics2D)>>,
     )>,
-    pub no_animations: bool,
+    pub high_performance: bool,
     pub line_height: f32,
     pub last_height: f32,
     pub scroll_pixels_multiplier: f64,
     pub scroll_lines_multiplier: f64,
     pub scroll_pages_multiplier: f64,
     pub gui_config: Option<GuiConfig>,
+    last_performance_check: Instant,
+    average_frame_time_ms: u32,
+    frames_drawn: u32,
 }
 impl Gui {
     fn new(
@@ -399,16 +401,18 @@ impl Gui {
             covers: Some(HashMap::new()),
             custom_images: Some(HashMap::new()),
             // font: Font::new(include_bytes!("/usr/share/fonts/TTF/FiraSans-Regular.ttf")).unwrap(),
-            last_draw: Instant::now(),
             modifiers: ModifiersState::default(),
             dragging: None,
-            no_animations,
+            high_performance: no_animations,
             line_height,
             last_height: 720.0,
             scroll_pixels_multiplier,
             scroll_lines_multiplier,
             scroll_pages_multiplier,
             gui_config: Some(gui_config),
+            last_performance_check: Instant::now(),
+            average_frame_time_ms: 0,
+            frames_drawn: 0,
         }
     }
 }
@@ -974,8 +978,9 @@ impl Default for GuiElemCfg {
 #[allow(unused)]
 pub enum GuiAction {
     OpenMain,
-    SetIdle(bool),
-    SetAnimationsDisabled(bool),
+    /// false -> prevent idling, true -> end idling even if already idle
+    EndIdle(bool),
+    SetHighPerformance(bool),
     OpenSettings(bool),
     ShowNotification(Box<dyn FnOnce(&NotifOverlay) -> (Box<dyn GuiElem>, NotifInfo) + Send>),
     /// Build the GuiAction(s) later, when we have access to the Database (can turn an AlbumId into a QueueContent::Folder, etc)
@@ -1029,7 +1034,7 @@ pub struct DrawInfo<'a> {
     )>,
     pub context_menu: Option<Box<dyn GuiElem>>,
     pub gui_config: &'a mut GuiConfig,
-    pub no_animations: bool,
+    pub high_performance: bool,
 }
 
 pub fn adjust_area(outer: &Rectangle, rel_area: &Rectangle) -> Rectangle {
@@ -1062,7 +1067,7 @@ impl Gui {
             GuiAction::ShowNotification(func) => _ = self.notif_sender.send(func),
             GuiAction::ResetKeyboardFocus => _ = self.gui._keyboard_reset_focus(),
             GuiAction::SetDragging(d) => self.dragging = d,
-            GuiAction::SetAnimationsDisabled(d) => self.no_animations = d,
+            GuiAction::SetHighPerformance(d) => self.high_performance = d,
             GuiAction::ContextMenu(m) => self.gui.c_context_menu = m,
             GuiAction::SetLineHeight(h) => {
                 self.line_height = h;
@@ -1077,8 +1082,12 @@ impl Gui {
             }
             GuiAction::Do(mut f) => f(self),
             GuiAction::Exit => _ = self.event_sender.send_event(GuiEvent::Exit),
-            GuiAction::SetIdle(v) => {
-                self.gui.idle.target = if v { 1.0 } else { 0.0 };
+            GuiAction::EndIdle(v) => {
+                if v {
+                    self.gui.unidle();
+                } else {
+                    self.gui.not_idle();
+                }
             }
             GuiAction::OpenSettings(v) => {
                 self.gui.idle.target = 0.0;
@@ -1099,7 +1108,7 @@ impl Gui {
 }
 impl WindowHandler<GuiEvent> for Gui {
     fn on_draw(&mut self, helper: &mut WindowHelper<GuiEvent>, graphics: &mut Graphics2D) {
-        let start = Instant::now();
+        let draw_start_time = Instant::now();
         graphics.draw_rectangle(
             Rectangle::new(Vec2::ZERO, self.size.into_f32()),
             Color::BLACK,
@@ -1109,7 +1118,7 @@ impl WindowHandler<GuiEvent> for Gui {
         let mut custom_images = self.custom_images.take().unwrap();
         let mut cfg = self.gui_config.take().unwrap();
         let mut info = DrawInfo {
-            time: Instant::now(),
+            time: draw_start_time,
             actions: Vec::with_capacity(0),
             pos: Rectangle::new(Vec2::ZERO, self.size.into_f32()),
             database: &mut *dblock,
@@ -1122,7 +1131,7 @@ impl WindowHandler<GuiEvent> for Gui {
             has_keyboard_focus: false,
             child_has_keyboard_focus: true,
             line_height: self.line_height,
-            no_animations: self.no_animations,
+            high_performance: self.high_performance,
             dragging: self.dragging.take(),
             context_menu: self.gui.c_context_menu.take(),
             gui_config: &mut cfg,
@@ -1173,11 +1182,38 @@ impl WindowHandler<GuiEvent> for Gui {
         for a in actions {
             self.exec_gui_action(a);
         }
-        // eprintln!(
-        //     "fps <= {}",
-        //     1000 / self.last_draw.elapsed().as_millis().max(1)
-        // );
-        self.last_draw = start;
+        let ft = draw_start_time.elapsed().as_millis() as u32;
+        self.average_frame_time_ms = (self.average_frame_time_ms * 7 + ft) / 8;
+        if !self.high_performance && self.average_frame_time_ms > 50 {
+            self.high_performance = true;
+            *self
+                .gui
+                .c_settings
+                .c_scroll_box
+                .children
+                .performance_toggle
+                .children
+                .1
+                .children[0]
+                .content
+                .text() = "On due to\nbad performance".to_string();
+        }
+        // #[cfg(debug_assertions)]
+        {
+            self.frames_drawn += 1;
+            if draw_start_time
+                .duration_since(self.last_performance_check)
+                .as_secs()
+                >= 1
+            {
+                self.last_performance_check = draw_start_time;
+                eprintln!(
+                    "[performance] {} fps | {}ms",
+                    self.frames_drawn, self.average_frame_time_ms
+                );
+                self.frames_drawn = 0;
+            }
+        }
     }
     fn on_mouse_button_down(&mut self, helper: &mut WindowHelper<GuiEvent>, button: MouseButton) {
         if let Some(a) = self.gui._mouse_button(button, true, self.mouse_pos.clone()) {
