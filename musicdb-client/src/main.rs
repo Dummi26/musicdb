@@ -34,6 +34,8 @@ mod gui_notif;
 #[cfg(feature = "speedy2d")]
 mod gui_playback;
 #[cfg(feature = "speedy2d")]
+mod gui_playpause;
+#[cfg(feature = "speedy2d")]
 mod gui_queue;
 #[cfg(feature = "speedy2d")]
 mod gui_screen;

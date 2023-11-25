@@ -5,7 +5,9 @@ use speedy2d::{color::Color, dimen::Vec2, shape::Rectangle};
 use crate::{
     gui::{DrawInfo, GuiElem, GuiElemCfg},
     gui_anim::AnimationController,
+    gui_base::Panel,
     gui_playback::{image_display, CurrentInfo},
+    gui_playpause::PlayPause,
     gui_text::AdvancedLabel,
 };
 
@@ -15,6 +17,7 @@ pub struct StatusBar {
     current_info: CurrentInfo,
     cover_aspect_ratio: AnimationController<f32>,
     c_song_label: AdvancedLabel,
+    c_buttons: PlayPause,
 }
 
 impl StatusBar {
@@ -33,13 +36,14 @@ impl StatusBar {
                 Instant::now(),
             ),
             c_song_label: AdvancedLabel::new(GuiElemCfg::default(), Vec2::new(0.0, 0.5), vec![]),
+            c_buttons: PlayPause::new(GuiElemCfg::default()),
         }
     }
 }
 
 impl GuiElem for StatusBar {
     fn children(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElem> + '_> {
-        Box::new([self.c_song_label.elem_mut()].into_iter())
+        Box::new([self.c_song_label.elem_mut(), self.c_buttons.elem_mut()].into_iter())
     }
     fn draw(&mut self, info: &mut DrawInfo, g: &mut speedy2d::Graphics2D) {
         self.current_info.update(info, g);
@@ -71,12 +75,20 @@ impl GuiElem for StatusBar {
             if let Some(h) = &info.helper {
                 h.request_redraw();
             }
+            // limit width of c_buttons
+            let buttons_right_pos = 0.99;
+            let buttons_width_max = info.pos.height() * 0.7 / 0.3 / info.pos.width();
+            let buttons_width = buttons_width_max.min(0.2);
+            self.c_buttons.config_mut().pos = Rectangle::from_tuples(
+                (buttons_right_pos - buttons_width, 0.15),
+                (buttons_right_pos, 0.85),
+            );
             self.c_song_label.config_mut().pos = Rectangle::from_tuples(
                 (
                     self.cover_aspect_ratio.value * info.pos.height() / info.pos.width(),
                     0.0,
                 ),
-                (1.0, 1.0),
+                (buttons_right_pos - buttons_width, 1.0),
             );
         }
         // draw cover

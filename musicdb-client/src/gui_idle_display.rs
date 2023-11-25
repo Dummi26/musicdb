@@ -8,6 +8,7 @@ use crate::{
     gui_anim::AnimationController,
     gui_base::Button,
     gui_playback::{get_right_x, image_display, CurrentInfo},
+    gui_playpause::PlayPause,
     gui_text::{AdvancedLabel, Label},
 };
 
@@ -20,6 +21,7 @@ pub struct IdleDisplay {
     c_top_label: AdvancedLabel,
     c_side1_label: AdvancedLabel,
     c_side2_label: AdvancedLabel,
+    c_buttons: PlayPause,
     cover_aspect_ratio: AnimationController<f32>,
     artist_image_aspect_ratio: AnimationController<f32>,
     cover_left: f32,
@@ -33,6 +35,7 @@ pub struct IdleDisplay {
 
 impl IdleDisplay {
     pub fn new(config: GuiElemCfg) -> Self {
+        let cover_bottom = 0.79;
         Self {
             config,
             idle_mode: 0.0,
@@ -56,6 +59,7 @@ impl IdleDisplay {
             ),
             c_side1_label: AdvancedLabel::new(GuiElemCfg::default(), Vec2::new(0.0, 0.5), vec![]),
             c_side2_label: AdvancedLabel::new(GuiElemCfg::default(), Vec2::new(0.0, 0.5), vec![]),
+            c_buttons: PlayPause::new(GuiElemCfg::default()),
             cover_aspect_ratio: AnimationController::new(
                 1.0,
                 1.0,
@@ -76,7 +80,7 @@ impl IdleDisplay {
             ),
             cover_left: 0.01,
             cover_top: 0.21,
-            cover_bottom: 0.79,
+            cover_bottom,
             artist_image_top: 0.5,
             artist_image_to_cover_margin: 0.01,
         }
@@ -91,6 +95,7 @@ impl GuiElem for IdleDisplay {
                 self.c_top_label.elem_mut(),
                 self.c_side1_label.elem_mut(),
                 self.c_side2_label.elem_mut(),
+                self.c_buttons.elem_mut(),
             ]
             .into_iter(),
         )
@@ -256,6 +261,14 @@ impl GuiElem for IdleDisplay {
             );
             self.c_side2_label.config_mut().pos =
                 Rectangle::from_tuples((left, ai_top), (max_right, bottom));
+            // limit width of c_buttons
+            let buttons_right_pos = 0.99;
+            let buttons_width_max = info.pos.height() * 0.08 / 0.3 / info.pos.width();
+            let buttons_width = buttons_width_max.min(0.2);
+            self.c_buttons.config_mut().pos = Rectangle::from_tuples(
+                (buttons_right_pos - buttons_width, 0.86),
+                (buttons_right_pos, 0.94),
+            );
         }
     }
     fn config(&self) -> &GuiElemCfg {
