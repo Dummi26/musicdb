@@ -791,7 +791,7 @@ impl LibraryBrowser {
                 v.name.to_owned(),
                 if duration >= 60 * 60 {
                     format!(
-                        "  {}:{}:{:0>2}",
+                        "  {}:{:0>2}:{:0>2}",
                         duration / (60 * 60),
                         (duration / 60) % 60,
                         duration % 60
