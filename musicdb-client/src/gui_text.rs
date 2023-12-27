@@ -1,14 +1,16 @@
-use std::rc::Rc;
+use std::{fmt::Display, rc::Rc, sync::Arc};
 
+use musicdb_lib::data::CoverId;
 use speedy2d::{
     color::Color,
     dimen::Vec2,
     font::{FormattedTextBlock, TextLayout, TextOptions},
+    image::ImageHandle,
     shape::Rectangle,
     window::{ModifiersState, MouseButton},
 };
 
-use crate::gui::{GuiAction, GuiElem, GuiElemCfg};
+use crate::gui::{GuiAction, GuiElem, GuiElemCfg, GuiServerImage};
 
 /*
 
@@ -30,6 +32,7 @@ pub struct Content {
     background: Option<Color>,
     formatted: Option<Rc<FormattedTextBlock>>,
 }
+
 #[allow(unused)]
 impl Content {
     pub fn new(text: String, color: Color) -> Self {
@@ -286,6 +289,36 @@ impl GuiElem for TextField {
     }
 }
 
+#[derive(Clone)]
+pub enum AdvancedContent {
+    Text(Content),
+    Image {
+        source: ImageSource,
+        handle: Option<Option<ImageHandle>>,
+    },
+}
+#[derive(Clone)]
+pub enum ImageSource {
+    Cover(CoverId),
+    CustomFile(String),
+}
+impl AdvancedContent {
+    pub fn will_redraw(&self) -> bool {
+        match self {
+            Self::Text(c) => c.will_redraw(),
+            Self::Image { source: _, handle } => handle.is_none(),
+        }
+    }
+}
+impl Display for AdvancedContent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Text(c) => write!(f, "{}", c.text),
+            Self::Image { .. } => Ok(()),
+        }
+    }
+}
+
 /// More advanced version of `Label`.
 /// Allows stringing together multiple `Content`s in one line.
 pub struct AdvancedLabel {
@@ -297,13 +330,17 @@ pub struct AdvancedLabel {
     pub align: Vec2,
     /// (Content, Size-Scale, Height)
     /// Size-Scale and Height should default to 1.0.
-    pub content: Vec<Vec<(Content, f32, f32)>>,
+    pub content: Vec<Vec<(AdvancedContent, f32, f32)>>,
     /// the position from where content drawing starts.
     /// recalculated when layouting is performed.
     content_pos: Vec2,
 }
 impl AdvancedLabel {
-    pub fn new(config: GuiElemCfg, align: Vec2, content: Vec<Vec<(Content, f32, f32)>>) -> Self {
+    pub fn new(
+        config: GuiElemCfg,
+        align: Vec2,
+        content: Vec<Vec<(AdvancedContent, f32, f32)>>,
+    ) -> Self {
         Self {
             config,
             children: vec![],
@@ -350,13 +387,29 @@ impl GuiElem for AdvancedLabel {
                 let mut len = 0.0;
                 let mut height = 0.0;
                 for (c, scale, _) in line {
-                    let size = info
-                        .font
-                        .layout_text(&c.text, 1.0, TextOptions::new())
-                        .size();
-                    len += size.x * scale;
-                    if size.y * scale > height {
-                        height = size.y * scale;
+                    match c {
+                        AdvancedContent::Text(c) => {
+                            let size = info
+                                .font
+                                .layout_text(&c.text, 1.0, TextOptions::new())
+                                .size();
+                            len += size.x * scale;
+                            if size.y * scale > height {
+                                height = size.y * scale;
+                            }
+                        }
+                        AdvancedContent::Image { source, handle } => {}
+                    }
+                }
+                for (c, scale, _) in line {
+                    match c {
+                        AdvancedContent::Text(_) => {}
+                        AdvancedContent::Image { source, handle } => {
+                            if let Some(Some(handle)) = handle {
+                                let size = handle.size().into_f32();
+                                len += height * size.x / size.y;
+                            }
+                        }
                     }
                 }
                 if len > max_len {
@@ -382,11 +435,67 @@ impl GuiElem for AdvancedLabel {
                 };
                 for line in &mut self.content {
                     for (c, s, _) in line {
-                        c.formatted = Some(info.font.layout_text(
-                            &c.text,
-                            scale * (*s),
-                            TextOptions::new(),
-                        ));
+                        match c {
+                            AdvancedContent::Text(c) => {
+                                c.formatted = Some(info.font.layout_text(
+                                    &c.text,
+                                    scale * (*s),
+                                    TextOptions::new(),
+                                ));
+                            }
+                            AdvancedContent::Image { source, handle } => {
+                                if handle.is_none() {
+                                    match source {
+                                        ImageSource::Cover(id) => {
+                                            if let Some(img) = info.covers.get_mut(&id) {
+                                                if let Some(img) = img.get_init(g) {
+                                                    *handle = Some(Some(img));
+                                                } else {
+                                                    match img {
+                                                        GuiServerImage::Loading(_) => {}
+                                                        GuiServerImage::Loaded(_) => {}
+                                                        GuiServerImage::Error => {
+                                                            *handle = Some(None)
+                                                        }
+                                                    }
+                                                }
+                                            } else {
+                                                info.covers.insert(
+                                                    *id,
+                                                    GuiServerImage::new_cover(
+                                                        *id,
+                                                        Arc::clone(&info.get_con),
+                                                    ),
+                                                );
+                                            }
+                                        }
+                                        ImageSource::CustomFile(path) => {
+                                            if let Some(img) = info.custom_images.get_mut(path) {
+                                                if let Some(img) = img.get_init(g) {
+                                                    *handle = Some(Some(img));
+                                                } else {
+                                                    match img {
+                                                        GuiServerImage::Loading(_) => {}
+                                                        GuiServerImage::Loaded(_) => {}
+                                                        GuiServerImage::Error => {
+                                                            *handle = Some(None)
+                                                        }
+                                                    }
+                                                }
+                                            } else {
+                                                info.custom_images.insert(
+                                                    path.clone(),
+                                                    GuiServerImage::new_custom_file(
+                                                        path.clone(),
+                                                        Arc::clone(&info.get_con),
+                                                    ),
+                                                );
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -395,20 +504,51 @@ impl GuiElem for AdvancedLabel {
         let mut pos_y = info.pos.top_left().y + self.content_pos.y;
         for line in &self.content {
             let mut pos_x = pos_x_start;
-            let height = line
+            let height_div_by = line
                 .iter()
-                .filter_map(|v| v.0.formatted.as_ref())
+                .map(|(_, scale, _)| *scale)
+                .reduce(f32::max)
+                .unwrap_or(1.0);
+            let line_height = line
+                .iter()
+                .filter_map(|(v, _, _)| {
+                    if let AdvancedContent::Text(c) = v {
+                        Some(c)
+                    } else {
+                        None
+                    }
+                })
+                .filter_map(|v| v.formatted.as_ref())
                 .map(|f| f.height())
                 .reduce(f32::max)
                 .unwrap_or(0.0);
-            for (c, _, h) in line {
-                if let Some(f) = &c.formatted {
-                    let y = pos_y + (height - f.height()) * h;
-                    g.draw_text(Vec2::new(pos_x, y), c.color, f);
-                    pos_x += f.width();
+            for (c, scale, placement_height) in line {
+                // not super accurate, but pretty good
+                let rel_scale = f32::min(1.0, scale / height_div_by);
+                match c {
+                    AdvancedContent::Text(c) => {
+                        if let Some(f) = &c.formatted {
+                            let y = pos_y + (line_height - f.height()) * placement_height;
+                            g.draw_text(Vec2::new(pos_x, y), c.color, f);
+                            pos_x += f.width();
+                        }
+                    }
+                    AdvancedContent::Image { source: _, handle } => {
+                        if let Some(Some(handle)) = handle {
+                            let size = handle.size().into_f32();
+                            let h = line_height * rel_scale;
+                            let w = h * size.x / size.y;
+                            let y = pos_y + (line_height - h) * placement_height;
+                            g.draw_rectangle_image(
+                                Rectangle::from_tuples((pos_x, y), (pos_x + w, y + h)),
+                                handle,
+                            );
+                            pos_x += w;
+                        }
+                    }
                 }
             }
-            pos_y += height;
+            pos_y += line_height;
         }
     }
 }

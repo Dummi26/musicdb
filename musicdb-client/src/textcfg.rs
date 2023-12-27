@@ -3,10 +3,10 @@ use std::{
     str::{Chars, FromStr},
 };
 
-use musicdb_lib::data::{database::Database, song::Song, GeneralData};
+use musicdb_lib::data::{database::Database, song::Song, CoverId, GeneralData};
 use speedy2d::color::Color;
 
-use crate::gui_text::Content;
+use crate::gui_text::{AdvancedContent, Content, ImageSource};
 
 #[derive(Debug)]
 pub struct TextBuilder(pub Vec<TextPart>);
@@ -34,9 +34,15 @@ pub enum TextPart {
     /// If `1` is something, uses `2`.
     /// If `1` is nothing, uses `3`.
     If(TextBuilder, TextBuilder, TextBuilder),
+    ImgCover(CoverId),
+    ImgCustom(TextBuilder),
 }
 impl TextBuilder {
-    pub fn gen(&self, db: &Database, current_song: Option<&Song>) -> Vec<Vec<(Content, f32, f32)>> {
+    pub fn gen(
+        &self,
+        db: &Database,
+        current_song: Option<&Song>,
+    ) -> Vec<Vec<(AdvancedContent, f32, f32)>> {
         let mut out = vec![];
         let mut line = vec![];
         let mut c = Color::WHITE;
@@ -58,15 +64,31 @@ impl TextBuilder {
         &self,
         db: &Database,
         current_song: Option<&Song>,
-        out: &mut Vec<Vec<(Content, f32, f32)>>,
-        line: &mut Vec<(Content, f32, f32)>,
+        out: &mut Vec<Vec<(AdvancedContent, f32, f32)>>,
+        line: &mut Vec<(AdvancedContent, f32, f32)>,
         scale: &mut f32,
         align: &mut f32,
         color: &mut Color,
     ) {
         macro_rules! push {
             ($e:expr) => {
-                line.push((Content::new($e, *color), *scale, *align))
+                line.push((
+                    AdvancedContent::Text(Content::new($e, *color)),
+                    *scale,
+                    *align,
+                ))
+            };
+        }
+        macro_rules! push_img {
+            ($e:expr) => {
+                line.push((
+                    AdvancedContent::Image {
+                        source: $e,
+                        handle: None,
+                    },
+                    *scale,
+                    *align,
+                ))
             };
         }
         fn all_general<'a>(
@@ -167,6 +189,17 @@ impl TextBuilder {
                     } else {
                         no.gen_to(db, current_song, out, line, scale, align, color);
                     }
+                }
+                TextPart::ImgCover(id) => {
+                    push_img!(ImageSource::Cover(*id));
+                }
+                TextPart::ImgCustom(path) => {
+                    push_img!(ImageSource::CustomFile(
+                        path.gen(db, current_song)
+                            .into_iter()
+                            .flat_map(|v| v.into_iter().map(|(v, _, _)| v.to_string()))
+                            .collect()
+                    ));
                 }
             }
         }
@@ -285,6 +318,41 @@ impl TextBuilder {
                                 }
                             }));
                         }
+                        Some('i') => {
+                            done!();
+                            let mut src = String::new();
+                            loop {
+                                match chars.next() {
+                                    None => {
+                                        return Err(TextBuilderParseError::InvalidImageSourceName(
+                                            src,
+                                        ))
+                                    }
+                                    Some(':') => break,
+                                    Some(c) => src.push(c),
+                                }
+                            }
+                            vec.push(match src.as_str() {
+                                "Cover" => {
+                                    let mut id = String::new();
+                                    loop {
+                                        match chars.next() {
+                                            None | Some(';') => break,
+                                            Some(c) => id.push(c),
+                                        }
+                                    }
+                                    if let Ok(id) = id.parse() {
+                                        TextPart::ImgCover(id)
+                                    } else {
+                                        return Err(TextBuilderParseError::InvalidImageCoverId(id));
+                                    }
+                                }
+                                "CustomFile" => TextPart::ImgCustom(Self::from_chars(chars)?),
+                                _ => {
+                                    return Err(TextBuilderParseError::InvalidImageSourceName(src))
+                                }
+                            });
+                        }
                         Some(ch) => current.push(ch),
                     },
                     '%' => {
@@ -337,6 +405,8 @@ pub enum TextBuilderParseError {
     TooFewCharsForColor,
     ColorNotHex,
     CouldntParse(String, String),
+    InvalidImageSourceName(String),
+    InvalidImageCoverId(String),
 }
 impl Display for TextBuilderParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -351,6 +421,8 @@ impl Display for TextBuilderParseError {
             Self::TooFewCharsForColor => write!(f, "Too few chars for color: Syntax is \\cRRGGBB."),
             Self::ColorNotHex => write!(f, "Color value wasn't a hex number! Syntax is \\cRRGGBB, where R, G, and B are values from 0-9 and A-F (hex 0-F)."),
             Self::CouldntParse(v, t) => write!(f, "Couldn't parse value '{v}' to type '{t}'."),
+            Self::InvalidImageSourceName(name) => write!(f, "Invalid image source name: '{name}'."),
+            Self::InvalidImageCoverId(id) => write!(f, "Invalid image cover id: '{id}'."),
         }
     }
 }

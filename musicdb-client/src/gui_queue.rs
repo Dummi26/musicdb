@@ -181,12 +181,18 @@ impl GuiElem for QueueViewer {
             let dr = fmt_dur(info.database.queue.duration_remaining(&info.database));
             label.content = vec![
                 vec![(
-                    gui_text::Content::new(format!("Total: {dt}"), Color::GRAY),
+                    gui_text::AdvancedContent::Text(gui_text::Content::new(
+                        format!("Total: {dt}"),
+                        Color::GRAY,
+                    )),
                     1.0,
                     1.0,
                 )],
                 vec![(
-                    gui_text::Content::new(format!("Remaining: {dr}"), Color::GRAY),
+                    gui_text::AdvancedContent::Text(gui_text::Content::new(
+                        format!("Remaining: {dr}"),
+                        Color::GRAY,
+                    )),
                     1.0,
                     1.0,
                 )],
@@ -454,19 +460,19 @@ impl QueueSong {
                     Vec2::new(0.0, 0.5),
                     vec![vec![
                         (
-                            gui_text::Content::new(
+                            gui_text::AdvancedContent::Text(gui_text::Content::new(
                                 song.title.clone(),
                                 if current {
                                     Color::from_int_rgb(194, 76, 178)
                                 } else {
                                     Color::from_int_rgb(120, 76, 194)
                                 },
-                            ),
+                            )),
                             1.0,
                             1.0,
                         ),
                         (
-                            gui_text::Content::new(
+                            gui_text::AdvancedContent::Text(gui_text::Content::new(
                                 {
                                     let duration = song.duration_millis / 1000;
                                     format!("  {}:{:0>2}", duration / 60, duration % 60)
@@ -476,7 +482,7 @@ impl QueueSong {
                                 } else {
                                     Color::DARK_GRAY
                                 },
-                            ),
+                            )),
                             0.6,
                             1.0,
                         ),

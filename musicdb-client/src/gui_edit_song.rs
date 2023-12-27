@@ -1,7 +1,4 @@
-use std::{
-    sync::{atomic::AtomicU8, Arc},
-    time::Instant,
-};
+use std::time::Instant;
 
 use musicdb_lib::data::{song::Song, ArtistId};
 use speedy2d::{color::Color, dimen::Vec2, shape::Rectangle};

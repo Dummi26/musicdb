@@ -1004,12 +1004,18 @@ impl ListAlbum {
             Vec2::new(0.0, 0.5),
             vec![vec![
                 (
-                    gui_text::Content::new(name, Color::from_int_rgb(8, 61, 47)),
+                    gui_text::AdvancedContent::Text(gui_text::Content::new(
+                        name,
+                        Color::from_int_rgb(8, 61, 47),
+                    )),
                     1.0,
                     1.0,
                 ),
                 (
-                    gui_text::Content::new(half_sized_info, Color::GRAY),
+                    gui_text::AdvancedContent::Text(gui_text::Content::new(
+                        half_sized_info,
+                        Color::GRAY,
+                    )),
                     0.5,
                     1.0,
                 ),
@@ -1142,11 +1148,18 @@ impl ListSong {
             Vec2::new(0.0, 0.5),
             vec![vec![
                 (
-                    gui_text::Content::new(name, Color::from_int_rgb(175, 175, 175)),
+                    gui_text::AdvancedContent::Text(gui_text::Content::new(
+                        name,
+                        Color::from_int_rgb(175, 175, 175),
+                    )),
                     1.0,
                     1.0,
                 ),
-                (gui_text::Content::new(duration, Color::GRAY), 0.6, 1.0),
+                (
+                    gui_text::AdvancedContent::Text(gui_text::Content::new(duration, Color::GRAY)),
+                    0.6,
+                    1.0,
+                ),
             ]],
         );
         config.redraw = true;

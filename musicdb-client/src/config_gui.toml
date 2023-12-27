@@ -10,6 +10,10 @@ font = ''
 # \h1.0;: set the height-alignment (to the default: 1.0 / align text to be on one baseline)
 # \cRRGGBB: set color to this hex value.
 # \cFFFFFF: default color (white)
+# \iCover:<id>;: show cover with this ID (ID >= 0)
+#    \iCover:0;
+# \iCustomFile:<path>:: show cover stored in custom files at the given path (path terminated by #, is another textcfg)
+#    \iCustomFile:my_image.jpg#
 # \<char>: <char> (\\ => \, \# => #, \% => %, ...)
 # custom properties:
 # %<mode><search text>%
@@ -31,8 +35,19 @@ font = ''
 status_bar = '''\t
 \s0.5;?\A#\c505050by \c593D6E\A##?\a#?\A# ##\c505050on \c264524\a##\c808080?%>Year=%# (%>Year=%)## | \d'''
 
-idle_top = '''\t \s0.5;\c505050(\d?%>Genre=%#, %>Genre=%##)
-?\A#\c505050by \c593D6E\A##?\a#?\A# ##\c505050on \c264524\a##\c808080?%>Year=%# (%>Year=%)##'''
+# Two lines
+# 1:
+# - Title (Size 1.0, White)
+# - Duration (and, if set, Genre) in brackets (Size 0.5, Gray)
+# - (\h0.5; = set height-align to 0.5, only affects flag image in second line)
+# 2:
+# - if there is an Artist:
+#   - "by <Artist>" (purple)
+#   - if there is a "Flag: <name>" tag, show the image saved as "<name>.png"
+# - "on <Album>", if there is an Album (green)
+# - "(<year>)", if there is a Year=<year> tag (gray)
+idle_top = '''\t \s0.5;\c505050(\d?%>Genre=%#, %>Genre=%##)\h0.5;
+?\A#\c505050by \c593D6E\A?%>Flag: %# \s0.25;\iCustomFile:%>Flag: %.png#\s0.5;####?\a#?\A# ##\c505050on \c264524\a##\c808080?%>Year=%# (%>Year=%)##'''
 
 idle_side1 = ''
 idle_side2 = ''
