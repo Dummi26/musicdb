@@ -122,9 +122,11 @@ pub struct ScrollBox<C: GuiElemChildren> {
     config: GuiElemCfg,
     pub children: C,
     pub children_heights: Vec<f32>,
+    pub default_size: f32,
     pub size_unit: ScrollBoxSizeUnit,
     pub scroll_target: f32,
     pub scroll_display: f32,
+    /// the y-position of the bottom edge of the last element (i.e. the total height)
     height_bottom: f32,
     /// 0.max(height_bottom - 1)
     max_scroll: f32,
@@ -145,15 +147,16 @@ impl<C: GuiElemChildren> ScrollBox<C> {
         size_unit: ScrollBoxSizeUnit,
         children: C,
         children_heights: Vec<f32>,
+        default_size: f32,
     ) -> Self {
         Self {
             config: config.w_scroll().w_mouse(),
             children,
             children_heights,
+            default_size,
             size_unit,
             scroll_target: 0.0,
             scroll_display: 0.0,
-            /// the y-position of the bottom edge of the last element (i.e. the total height)
             height_bottom: 0.0,
             max_scroll: 0.0,
             last_height_px: 0.0,
@@ -217,7 +220,7 @@ impl<C: GuiElemChildren + 'static> GuiElem for ScrollBox<C> {
             if self.children_heights.len() != self.children.len() {
                 let target = self.children.len();
                 while self.children_heights.len() < target {
-                    self.children_heights.push(0.0);
+                    self.children_heights.push(self.default_size);
                 }
                 while self.children_heights.len() > target {
                     self.children_heights.pop();
@@ -341,7 +344,7 @@ impl<C: GuiElemChildren> Button<C> {
         children: C,
     ) -> Self {
         Self {
-            config: config.w_mouse(),
+            config: config.w_mouse().w_keyboard_focus(),
             children,
             action: Arc::new(action),
         }
@@ -376,6 +379,27 @@ impl<C: GuiElemChildren + 'static> GuiElem for Button<C> {
             vec![]
         }
     }
+    fn key_focus(
+        &mut self,
+        _modifiers: speedy2d::window::ModifiersState,
+        down: bool,
+        key: Option<speedy2d::window::VirtualKeyCode>,
+        _scan: speedy2d::window::KeyScancode,
+    ) -> Vec<GuiAction> {
+        if !down
+            && matches!(
+                key,
+                Some(
+                    speedy2d::window::VirtualKeyCode::Return
+                        | speedy2d::window::VirtualKeyCode::NumpadEnter,
+                )
+            )
+        {
+            (self.action.clone())(self)
+        } else {
+            vec![]
+        }
+    }
     fn draw(&mut self, info: &mut crate::gui::DrawInfo, g: &mut speedy2d::Graphics2D) {
         let mouse_down = self.config.mouse_down.0;
         let contains = info.pos.contains(info.mouse_pos);
@@ -389,6 +413,32 @@ impl<C: GuiElemChildren + 'static> GuiElem for Button<C> {
                 Color::from_rgb(0.1, 0.1, 0.1)
             },
         );
+        if info.has_keyboard_focus {
+            g.draw_line(
+                *info.pos.top_left(),
+                info.pos.top_right(),
+                2.0,
+                Color::WHITE,
+            );
+            g.draw_line(
+                *info.pos.top_left(),
+                info.pos.bottom_left(),
+                2.0,
+                Color::WHITE,
+            );
+            g.draw_line(
+                info.pos.top_right(),
+                *info.pos.bottom_right(),
+                2.0,
+                Color::WHITE,
+            );
+            g.draw_line(
+                info.pos.bottom_left(),
+                *info.pos.bottom_right(),
+                2.0,
+                Color::WHITE,
+            );
+        }
     }
 }
 

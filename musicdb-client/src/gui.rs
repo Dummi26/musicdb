@@ -9,7 +9,7 @@ use std::{
 };
 
 use musicdb_lib::{
-    data::{database::Database, queue::Queue, AlbumId, ArtistId, CoverId, SongId},
+    data::{database::Database, queue::Queue, song::Song, AlbumId, ArtistId, CoverId, SongId},
     load::ToFromBytes,
     server::{get, Command},
 };
@@ -26,8 +26,11 @@ use speedy2d::{
     Graphics2D,
 };
 
+#[cfg(feature = "merscfg")]
+use crate::merscfg::MersCfg;
 use crate::{
-    gui_base::Panel,
+    gui_base::{Panel, ScrollBox},
+    gui_edit_song::EditorForSongs,
     gui_notif::{NotifInfo, NotifOverlay},
     gui_screen::GuiScreen,
     gui_text::Label,
@@ -76,8 +79,8 @@ pub fn main(
     get_con: get::Client<TcpStream>,
     event_sender_arc: Arc<Mutex<Option<UserEventSender<GuiEvent>>>>,
 ) {
-    let mut config_file = super::get_config_file_path();
-    config_file.push("config_gui.toml");
+    let config_dir = super::get_config_file_path();
+    let config_file = config_dir.join("config_gui.toml");
     let mut font = None;
     let mut line_height = 32.0;
     let mut scroll_pixels_multiplier = 1.0;
@@ -214,7 +217,7 @@ pub fn main(
         connection,
         Arc::new(Mutex::new(get_con)),
         event_sender_arc,
-        sender,
+        Arc::new(sender),
         line_height,
         scroll_pixels_multiplier,
         scroll_lines_multiplier,
@@ -254,6 +257,8 @@ pub fn main(
                     crate::gui_library::FilterType::TagWithValueInt("Year".to_owned(), 1990, 2000),
                 ),
             ],
+            #[cfg(feature = "merscfg")]
+            merscfg: crate::merscfg::MersCfg::new(config_dir.join("dynamic_config.mers")),
         },
     ));
 }
@@ -266,10 +271,12 @@ pub struct GuiConfig {
     pub filter_presets_song: Vec<(String, crate::gui_library::FilterType)>,
     pub filter_presets_album: Vec<(String, crate::gui_library::FilterType)>,
     pub filter_presets_artist: Vec<(String, crate::gui_library::FilterType)>,
+    #[cfg(feature = "merscfg")]
+    pub merscfg: crate::merscfg::MersCfg,
 }
 
 pub struct Gui {
-    pub event_sender: UserEventSender<GuiEvent>,
+    pub event_sender: Arc<UserEventSender<GuiEvent>>,
     pub database: Arc<Mutex<Database>>,
     pub connection: TcpStream,
     pub get_con: Arc<Mutex<get::Client<TcpStream>>>,
@@ -304,7 +311,7 @@ impl Gui {
         connection: TcpStream,
         get_con: Arc<Mutex<get::Client<TcpStream>>>,
         event_sender_arc: Arc<Mutex<Option<UserEventSender<GuiEvent>>>>,
-        event_sender: UserEventSender<GuiEvent>,
+        event_sender: Arc<UserEventSender<GuiEvent>>,
         line_height: f32,
         scroll_pixels_multiplier: f64,
         scroll_lines_multiplier: f64,
@@ -313,6 +320,28 @@ impl Gui {
     ) -> Self {
         let (notif_overlay, notif_sender) = NotifOverlay::new();
         let notif_sender_two = notif_sender.clone();
+        #[cfg(feature = "merscfg")]
+        match gui_config
+            .merscfg
+            .load(Arc::clone(&event_sender), notif_sender.clone())
+        {
+            Err(e) => {
+                if !matches!(e.kind(), std::io::ErrorKind::NotFound) {
+                    eprintln!("Couldn't load merscfg: {e}")
+                }
+            }
+            Ok(Err(e)) => {
+                eprintln!("Error loading merscfg:\n{e}");
+            }
+            Ok(Ok(Err((m, e)))) => {
+                if let Some(e) = e {
+                    eprintln!("Error loading merscfg:\n{m}\n{e}");
+                } else {
+                    eprintln!("Error loading merscfg:\n{m}");
+                }
+            }
+            Ok(Ok(Ok(()))) => eprintln!("Info: using merscfg"),
+        }
         database.lock().unwrap().update_endpoints.push(
             musicdb_lib::data::database::UpdateEndpoint::Custom(Box::new(move |cmd| match cmd {
                 Command::Resume
@@ -662,6 +691,9 @@ pub(crate) trait GuiElemInternal: GuiElem {
         }
     }
     fn _keyboard_move_focus(&mut self, decrement: bool, refocus: bool) -> bool {
+        if self.config().enabled == false {
+            return false;
+        }
         let mut focus_index = if refocus {
             usize::MAX
         } else {
@@ -986,7 +1018,7 @@ pub enum GuiAction {
     /// Build the GuiAction(s) later, when we have access to the Database (can turn an AlbumId into a QueueContent::Folder, etc)
     Build(Box<dyn FnOnce(&mut Database) -> Vec<Self>>),
     SendToServer(Command),
-    ContextMenu(Option<Box<dyn GuiElem>>),
+    ContextMenu(Option<(Vec<Box<dyn GuiElem>>)>),
     /// unfocuses all gui elements, then assigns keyboard focus to one with config().request_keyboard_focus == true if there is one.
     ResetKeyboardFocus,
     SetDragging(
@@ -998,8 +1030,11 @@ pub enum GuiAction {
     SetLineHeight(f32),
     LoadCover(CoverId),
     /// Run a custom closure with mutable access to the Gui struct
-    Do(Box<dyn FnMut(&mut Gui)>),
+    Do(Box<dyn FnOnce(&mut Gui)>),
     Exit,
+    EditSongs(Vec<Song>),
+    // EditAlbums(Vec<Album>),
+    // EditArtists(Vec<Artist>),
 }
 pub enum Dragging {
     Artist(ArtistId),
@@ -1032,7 +1067,6 @@ pub struct DrawInfo<'a> {
         Dragging,
         Option<Box<dyn FnMut(&mut DrawInfo, &mut Graphics2D)>>,
     )>,
-    pub context_menu: Option<Box<dyn GuiElem>>,
     pub gui_config: &'a mut GuiConfig,
     pub high_performance: bool,
 }
@@ -1068,7 +1102,40 @@ impl Gui {
             GuiAction::ResetKeyboardFocus => _ = self.gui._keyboard_reset_focus(),
             GuiAction::SetDragging(d) => self.dragging = d,
             GuiAction::SetHighPerformance(d) => self.high_performance = d,
-            GuiAction::ContextMenu(m) => self.gui.c_context_menu = m,
+            GuiAction::ContextMenu(elems) => {
+                self.gui.c_context_menu = if let Some(elems) = elems {
+                    let elem_height = 32.0;
+                    let w = elem_height * 6.0;
+                    let h = elem_height * elems.len() as f32;
+                    let mut ax = self.mouse_pos.x / self.size.x.max(1) as f32;
+                    let mut ay = self.mouse_pos.y / self.size.y.max(1) as f32;
+                    let mut bx = (self.mouse_pos.x + w) / self.size.x.max(1) as f32;
+                    let mut by = (self.mouse_pos.y + h) / self.size.y.max(1) as f32;
+                    if bx > 1.0 {
+                        ax -= bx - 1.0;
+                        bx = 1.0;
+                    }
+                    if by > 1.0 {
+                        ay -= by - 1.0;
+                        by = 1.0;
+                    }
+                    if ax < 0.0 {
+                        ax = 0.0;
+                    }
+                    if ay < 0.0 {
+                        ay = 0.0;
+                    }
+                    Some(Box::new(ScrollBox::new(
+                        GuiElemCfg::at(Rectangle::from_tuples((ax, ay), (bx, by))),
+                        crate::gui_base::ScrollBoxSizeUnit::Pixels,
+                        elems,
+                        vec![],
+                        elem_height,
+                    )))
+                } else {
+                    None
+                };
+            }
             GuiAction::SetLineHeight(h) => {
                 self.line_height = h;
                 self.gui
@@ -1080,7 +1147,7 @@ impl Gui {
                     .unwrap()
                     .insert(id, GuiServerImage::new_cover(id, Arc::clone(&self.get_con)));
             }
-            GuiAction::Do(mut f) => f(self),
+            GuiAction::Do(f) => f(self),
             GuiAction::Exit => _ = self.event_sender.send_event(GuiEvent::Exit),
             GuiAction::EndIdle(v) => {
                 if v {
@@ -1090,18 +1157,19 @@ impl Gui {
                 }
             }
             GuiAction::OpenSettings(v) => {
-                self.gui.idle.target = 0.0;
-                self.gui.last_interaction = Instant::now();
+                self.gui.unidle();
                 if self.gui.settings.0 != v {
                     self.gui.settings = (v, Some(Instant::now()));
                 }
             }
             GuiAction::OpenMain => {
-                self.gui.idle.target = 0.0;
-                self.gui.last_interaction = Instant::now();
+                self.gui.unidle();
                 if self.gui.settings.0 {
                     self.gui.settings = (false, Some(Instant::now()));
                 }
+            }
+            GuiAction::EditSongs(songs) => {
+                self.gui.c_editing_songs = Some(EditorForSongs::new(songs));
             }
         }
     }
@@ -1113,10 +1181,13 @@ impl WindowHandler<GuiEvent> for Gui {
             Rectangle::new(Vec2::ZERO, self.size.into_f32()),
             Color::BLACK,
         );
-        let mut dblock = self.database.lock().unwrap();
+        let dblock = Arc::clone(&self.database);
+        let mut dblock = dblock.lock().unwrap();
         let mut covers = self.covers.take().unwrap();
         let mut custom_images = self.custom_images.take().unwrap();
         let mut cfg = self.gui_config.take().unwrap();
+        #[cfg(feature = "merscfg")]
+        MersCfg::run(&mut cfg, self, Some(&mut dblock), |m| &m.func_before_draw);
         let mut info = DrawInfo {
             time: draw_start_time,
             actions: Vec::with_capacity(0),
@@ -1133,12 +1204,10 @@ impl WindowHandler<GuiEvent> for Gui {
             line_height: self.line_height,
             high_performance: self.high_performance,
             dragging: self.dragging.take(),
-            context_menu: self.gui.c_context_menu.take(),
             gui_config: &mut cfg,
         };
         self.gui._draw(&mut info, graphics);
         let actions = std::mem::replace(&mut info.actions, Vec::with_capacity(0));
-        self.gui.c_context_menu = info.context_menu.take();
         self.dragging = info.dragging.take();
         if let Some((d, f)) = &mut self.dragging {
             if let Some(f) = f {
@@ -1241,6 +1310,9 @@ impl WindowHandler<GuiEvent> for Gui {
             for a in a {
                 self.exec_gui_action(a)
             }
+        }
+        if button != MouseButton::Right {
+            self.gui.c_context_menu = None;
         }
         helper.request_redraw();
     }
@@ -1365,10 +1437,34 @@ impl WindowHandler<GuiEvent> for Gui {
         match user_event {
             GuiEvent::Refresh => helper.request_redraw(),
             GuiEvent::UpdatedLibrary => {
+                #[cfg(feature = "merscfg")]
+                if let Some(mut gc) = self.gui_config.take() {
+                    MersCfg::run(
+                        &mut gc,
+                        self,
+                        self.database.clone().lock().ok().as_mut().map(|v| &mut **v),
+                        |m| &m.func_library_updated,
+                    );
+                    self.gui_config = Some(gc);
+                } else {
+                    eprintln!("WARN: Skipping call to merscfg's library_updated because gui_config is not available");
+                }
                 self.gui._recursive_all(&mut |e| e.updated_library());
                 helper.request_redraw();
             }
             GuiEvent::UpdatedQueue => {
+                #[cfg(feature = "merscfg")]
+                if let Some(mut gc) = self.gui_config.take() {
+                    MersCfg::run(
+                        &mut gc,
+                        self,
+                        self.database.clone().lock().ok().as_mut().map(|v| &mut **v),
+                        |m| &m.func_queue_updated,
+                    );
+                    self.gui_config = Some(gc);
+                } else {
+                    eprintln!("WARN: Skipping call to merscfg's queue_updated because gui_config is not available");
+                }
                 self.gui._recursive_all(&mut |e| e.updated_queue());
                 helper.request_redraw();
             }
@@ -1469,6 +1565,18 @@ pub fn morph_rect(a: &Rectangle, b: &Rectangle, p: f32) -> Rectangle {
         (
             a.bottom_right().x * q + b.bottom_right().x * p,
             a.bottom_right().y * q + b.bottom_right().y * p,
+        ),
+    )
+}
+pub fn rect_from_rel(v: &Rectangle, outer: &Rectangle) -> Rectangle {
+    Rectangle::from_tuples(
+        (
+            outer.top_left().x + v.top_left().x * outer.width(),
+            outer.top_left().y + v.top_left().y * outer.height(),
+        ),
+        (
+            outer.top_left().x + v.bottom_right().x * outer.width(),
+            outer.top_left().y + v.bottom_right().y * outer.height(),
         ),
     )
 }

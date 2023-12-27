@@ -4,7 +4,7 @@ use musicdb_lib::data::ArtistId;
 use speedy2d::{color::Color, dimen::Vec2, image::ImageHandle, shape::Rectangle};
 
 use crate::{
-    gui::{DrawInfo, GuiAction, GuiElem, GuiElemCfg, GuiServerImage},
+    gui::{rect_from_rel, DrawInfo, GuiAction, GuiElem, GuiElemCfg, GuiServerImage},
     gui_anim::AnimationController,
     gui_base::Button,
     gui_playback::{get_right_x, image_display, CurrentInfo},
@@ -13,24 +13,32 @@ use crate::{
 };
 
 pub struct IdleDisplay {
-    config: GuiElemCfg,
+    pub config: GuiElemCfg,
     pub idle_mode: f32,
-    current_info: CurrentInfo,
-    current_artist_image: Option<(ArtistId, Option<(String, Option<Option<ImageHandle>>)>)>,
+    pub current_info: CurrentInfo,
+    pub current_artist_image: Option<(ArtistId, Option<(String, Option<Option<ImageHandle>>)>)>,
     pub c_idle_exit_hint: Button<[Label; 1]>,
-    c_top_label: AdvancedLabel,
-    c_side1_label: AdvancedLabel,
-    c_side2_label: AdvancedLabel,
-    c_buttons: PlayPause,
-    cover_aspect_ratio: AnimationController<f32>,
-    artist_image_aspect_ratio: AnimationController<f32>,
-    cover_left: f32,
-    cover_top: f32,
-    cover_bottom: f32,
+    pub c_top_label: AdvancedLabel,
+    pub c_side1_label: AdvancedLabel,
+    pub c_side2_label: AdvancedLabel,
+    pub c_buttons: PlayPause,
+    pub c_buttons_custom_pos: bool,
+
+    pub cover_aspect_ratio: AnimationController<f32>,
+    pub artist_image_aspect_ratio: AnimationController<f32>,
+
+    pub cover_pos: Option<Rectangle>,
+    pub cover_left: f32,
+    pub cover_top: f32,
+    pub cover_bottom: f32,
+
+    pub artist_image_pos: Option<Rectangle>,
     /// 0.0 -> same height as cover,
     /// 0.5 -> lower half of cover
-    artist_image_top: f32,
-    artist_image_to_cover_margin: f32,
+    pub artist_image_top: f32,
+    pub artist_image_to_cover_margin: f32,
+
+    pub force_reset_texts: bool,
 }
 
 impl IdleDisplay {
@@ -60,6 +68,7 @@ impl IdleDisplay {
             c_side1_label: AdvancedLabel::new(GuiElemCfg::default(), Vec2::new(0.0, 0.5), vec![]),
             c_side2_label: AdvancedLabel::new(GuiElemCfg::default(), Vec2::new(0.0, 0.5), vec![]),
             c_buttons: PlayPause::new(GuiElemCfg::default()),
+            c_buttons_custom_pos: false,
             cover_aspect_ratio: AnimationController::new(
                 1.0,
                 1.0,
@@ -78,11 +87,14 @@ impl IdleDisplay {
                 0.6,
                 Instant::now(),
             ),
+            cover_pos: None,
             cover_left: 0.01,
             cover_top: 0.21,
             cover_bottom,
+            artist_image_pos: None,
             artist_image_top: 0.5,
             artist_image_to_cover_margin: 0.01,
+            force_reset_texts: false,
         }
     }
 }
@@ -108,7 +120,7 @@ impl GuiElem for IdleDisplay {
         );
         // update current_info
         self.current_info.update(info, g);
-        if self.current_info.new_song {
+        if self.current_info.new_song || self.force_reset_texts {
             self.current_info.new_song = false;
             self.c_top_label.content = if let Some(song) = self.current_info.current_song {
                 info.gui_config
@@ -207,6 +219,7 @@ impl GuiElem for IdleDisplay {
             image_display(
                 g,
                 cover.as_ref(),
+                self.cover_pos.as_ref().map(|v| rect_from_rel(v, &info.pos)),
                 info.pos.top_left().x + info.pos.height() * self.cover_left,
                 info.pos.top_left().y + info.pos.height() * self.cover_top,
                 info.pos.top_left().y + info.pos.height() * self.cover_bottom,
@@ -220,6 +233,9 @@ impl GuiElem for IdleDisplay {
             image_display(
                 g,
                 img.as_ref(),
+                self.artist_image_pos
+                    .as_ref()
+                    .map(|v| rect_from_rel(v, &info.pos)),
                 get_right_x(
                     info.pos.top_left().x + info.pos.height() * self.cover_left,
                     top,
@@ -265,10 +281,12 @@ impl GuiElem for IdleDisplay {
             let buttons_right_pos = 0.99;
             let buttons_width_max = info.pos.height() * 0.08 / 0.3 / info.pos.width();
             let buttons_width = buttons_width_max.min(0.2);
-            self.c_buttons.config_mut().pos = Rectangle::from_tuples(
-                (buttons_right_pos - buttons_width, 0.86),
-                (buttons_right_pos, 0.94),
-            );
+            if !self.c_buttons_custom_pos {
+                self.c_buttons.config_mut().pos = Rectangle::from_tuples(
+                    (buttons_right_pos - buttons_width, 0.86),
+                    (buttons_right_pos, 0.94),
+                );
+            }
         }
     }
     fn config(&self) -> &GuiElemCfg {

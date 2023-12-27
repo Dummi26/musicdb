@@ -1,11 +1,10 @@
 use std::time::Instant;
 
-use speedy2d::{color::Color, dimen::Vec2, shape::Rectangle};
+use speedy2d::{dimen::Vec2, shape::Rectangle};
 
 use crate::{
     gui::{DrawInfo, GuiElem, GuiElemCfg},
     gui_anim::AnimationController,
-    gui_base::Panel,
     gui_playback::{image_display, CurrentInfo},
     gui_playpause::PlayPause,
     gui_text::AdvancedLabel,
@@ -17,6 +16,7 @@ pub struct StatusBar {
     current_info: CurrentInfo,
     cover_aspect_ratio: AnimationController<f32>,
     c_song_label: AdvancedLabel,
+    pub force_reset_texts: bool,
     c_buttons: PlayPause,
 }
 
@@ -36,6 +36,7 @@ impl StatusBar {
                 Instant::now(),
             ),
             c_song_label: AdvancedLabel::new(GuiElemCfg::default(), Vec2::new(0.0, 0.5), vec![]),
+            force_reset_texts: false,
             c_buttons: PlayPause::new(GuiElemCfg::default()),
         }
     }
@@ -47,7 +48,7 @@ impl GuiElem for StatusBar {
     }
     fn draw(&mut self, info: &mut DrawInfo, g: &mut speedy2d::Graphics2D) {
         self.current_info.update(info, g);
-        if self.current_info.new_song {
+        if self.current_info.new_song || self.force_reset_texts {
             self.current_info.new_song = false;
             self.c_song_label.content = if let Some(song) = self.current_info.current_song {
                 info.gui_config
@@ -101,6 +102,7 @@ impl GuiElem for StatusBar {
             image_display(
                 g,
                 cover.as_ref(),
+                None,
                 info.pos.top_left().x + info.pos.height() * 0.05,
                 info.pos.top_left().y + info.pos.height() * 0.05,
                 info.pos.top_left().y + info.pos.height() * 0.95,

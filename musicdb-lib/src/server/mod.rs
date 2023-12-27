@@ -1,11 +1,8 @@
 pub mod get;
 
 use std::{
-    io::{BufRead, BufReader, Read, Write},
-    net::{SocketAddr, TcpListener},
+    io::{Read, Write},
     sync::{mpsc, Arc, Mutex},
-    thread,
-    time::Duration,
 };
 
 use crate::{
@@ -18,8 +15,15 @@ use crate::{
         AlbumId, ArtistId, SongId,
     },
     load::ToFromBytes,
-    player::Player,
-    server::get::handle_one_connection_as_get,
+};
+#[cfg(feature = "playback")]
+use crate::{player::Player, server::get::handle_one_connection_as_get};
+#[cfg(feature = "playback")]
+use std::{
+    io::{BufRead, BufReader},
+    net::{SocketAddr, TcpListener},
+    thread,
+    time::Duration,
 };
 
 #[derive(Clone, Debug)]
@@ -84,6 +88,7 @@ impl Command {
 /// a) initialize new connections using db.init_connection() to synchronize the new client
 /// b) handle the decoding of messages using Command::from_bytes()
 /// c) re-encode all received messages using Command::to_bytes_vec(), send them to the db, and send them to all your clients.
+#[cfg(feature = "playback")]
 pub fn run_server(
     database: Arc<Mutex<Database>>,
     addr_tcp: Option<SocketAddr>,

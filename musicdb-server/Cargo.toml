@@ -10,7 +10,7 @@ axum = { version = "0.6.19", features = ["headers"] }
 clap = { version = "4.4.6", features = ["derive"] }
 futures = "0.3.28"
 headers = "0.3.8"
-musicdb-lib = { version = "0.1.0", path = "../musicdb-lib" }
+musicdb-lib = { version = "0.1.0", path = "../musicdb-lib", features = ["playback"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1.0", features = ["full"] }

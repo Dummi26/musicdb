@@ -10,21 +10,24 @@ use std::{
 use clap::{Parser, Subcommand};
 #[cfg(feature = "speedy2d")]
 use gui::GuiEvent;
+#[cfg(feature = "playback")]
+use musicdb_lib::player::Player;
 use musicdb_lib::{
     data::{
         database::{ClientIo, Database},
         CoverId, SongId,
     },
     load::ToFromBytes,
-    player::Player,
     server::{get, Command},
 };
+use speedy2d::color::Color;
 #[cfg(feature = "speedy2d")]
 mod gui;
 #[cfg(feature = "speedy2d")]
 mod gui_anim;
 #[cfg(feature = "speedy2d")]
 mod gui_base;
+mod gui_edit_song;
 #[cfg(feature = "speedy2d")]
 mod gui_idle_display;
 #[cfg(feature = "speedy2d")]
@@ -47,6 +50,8 @@ mod gui_statusbar;
 mod gui_text;
 #[cfg(feature = "speedy2d")]
 mod gui_wrappers;
+#[cfg(feature = "merscfg")]
+mod merscfg;
 #[cfg(feature = "speedy2d")]
 mod textcfg;
 
@@ -65,8 +70,10 @@ enum Mode {
     /// graphical user interface
     Gui,
     /// play in sync with the server, but load the songs from a local copy of the lib-dir
+    #[cfg(feature = "playback")]
     SyncplayerLocal { lib_dir: PathBuf },
     /// play in sync with the server, and fetch the songs from it too. slower than the local variant for obvious reasons
+    #[cfg(feature = "playback")]
     SyncplayerNetwork,
 }
 
@@ -97,23 +104,31 @@ fn main() {
         let mut con = con.try_clone().unwrap();
         // this is all you need to keep the db in sync
         thread::spawn(move || {
+            #[cfg(feature = "playback")]
             let mut player =
                 if matches!(mode, Mode::SyncplayerLocal { .. } | Mode::SyncplayerNetwork) {
                     Some(Player::new().unwrap().without_sending_commands())
                 } else {
                     None
                 };
-            if let Mode::SyncplayerLocal { lib_dir } = mode {
-                let mut db = database.lock().unwrap();
-                db.lib_directory = lib_dir;
-            } else {
+            #[allow(unused_labels)]
+            'ifstatementworkaround: {
+                // use if+break instead of if-else because we can't #[cfg(feature)] the if statement,
+                // since we want the else part to run if the feature is disabled
+                #[cfg(feature = "playback")]
+                if let Mode::SyncplayerLocal { lib_dir } = mode {
+                    let mut db = database.lock().unwrap();
+                    db.lib_directory = lib_dir;
+                    break 'ifstatementworkaround;
+                }
                 let mut db = database.lock().unwrap();
                 let client_con: Box<dyn ClientIo> = Box::new(TcpStream::connect(addr).unwrap());
                 db.remote_server_as_song_file_source = Some(Arc::new(Mutex::new(
                     musicdb_lib::server::get::Client::new(BufReader::new(client_con)).unwrap(),
                 )));
-            };
+            }
             loop {
+                #[cfg(feature = "playback")]
                 if let Some(player) = &mut player {
                     let mut db = database.lock().unwrap();
                     if db.is_client_init() {
@@ -121,6 +136,7 @@ fn main() {
                     }
                 }
                 let update = Command::from_bytes(&mut con).unwrap();
+                #[cfg(feature = "playback")]
                 if let Some(player) = &mut player {
                     player.handle_command(&update);
                 }
@@ -154,6 +170,7 @@ fn main() {
                 )
             };
         }
+        #[cfg(feature = "playback")]
         Mode::SyncplayerLocal { .. } | Mode::SyncplayerNetwork => {
             con_thread.join().unwrap();
         }
@@ -179,4 +196,8 @@ fn get_cover(song: SongId, database: &Database) -> Option<CoverId> {
     } else {
         database.albums().get(song.album.as_ref()?)?.cover
     }
+}
+
+pub(crate) fn color_scale(c: Color, r: f32, g: f32, b: f32, new_alpha: Option<f32>) -> Color {
+    Color::from_rgba(c.r() * r, c.g() * g, c.b() * b, new_alpha.unwrap_or(c.a()))
 }

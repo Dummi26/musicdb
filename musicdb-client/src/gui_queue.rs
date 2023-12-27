@@ -96,6 +96,7 @@ impl QueueViewer {
                 crate::gui_base::ScrollBoxSizeUnit::Pixels,
                 vec![],
                 vec![],
+                0.0,
             ),
             c_empty_space_drag_handler: QueueEmptySpaceDragHandler::new(GuiElemCfg::at(
                 Rectangle::from_tuples((0.0, QP_QUEUE1), (1.0, QP_QUEUE2)),

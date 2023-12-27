@@ -34,6 +34,7 @@ impl Settings {
                     scroll_sensitivity_pages,
                 ),
                 vec![],
+                0.0,
             ),
             c_background: Panel::with_background(GuiElemCfg::default().w_mouse(), (), Color::BLACK),
         }

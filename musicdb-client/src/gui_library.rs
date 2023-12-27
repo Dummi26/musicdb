@@ -123,6 +123,7 @@ impl LibraryBrowser {
             crate::gui_base::ScrollBoxSizeUnit::Pixels,
             vec![],
             vec![],
+            0.0,
         );
         let (do_something_sender, do_something_receiver) = mpsc::channel();
         let search_settings_changed = Arc::new(AtomicBool::new(false));
@@ -936,7 +937,7 @@ impl GuiElem for ListArtist {
                     let selected = self.selected.clone();
                     info.actions.push(GuiAction::Do(Box::new(move |gui| {
                         let q = selected.as_queue(
-                            &gui.gui.c_main_view.children.2,
+                            &gui.gui.c_main_view.children.library_browser,
                             &gui.database.lock().unwrap(),
                         );
                         gui.exec_gui_action(GuiAction::SetDragging(Some((
@@ -1074,7 +1075,7 @@ impl GuiElem for ListAlbum {
                     let selected = self.selected.clone();
                     info.actions.push(GuiAction::Do(Box::new(move |gui| {
                         let q = selected.as_queue(
-                            &gui.gui.c_main_view.children.2,
+                            &gui.gui.c_main_view.children.library_browser,
                             &gui.database.lock().unwrap(),
                         );
                         gui.exec_gui_action(GuiAction::SetDragging(Some((
@@ -1208,7 +1209,7 @@ impl GuiElem for ListSong {
                     let selected = self.selected.clone();
                     info.actions.push(GuiAction::Do(Box::new(move |gui| {
                         let q = selected.as_queue(
-                            &gui.gui.c_main_view.children.2,
+                            &gui.gui.c_main_view.children.library_browser,
                             &gui.database.lock().unwrap(),
                         );
                         gui.exec_gui_action(GuiAction::SetDragging(Some((
@@ -1250,6 +1251,31 @@ impl GuiElem for ListSong {
             }
         }
         vec![]
+    }
+    fn mouse_pressed(&mut self, button: MouseButton) -> Vec<GuiAction> {
+        if button == MouseButton::Right {
+            let id = self.id;
+            vec![GuiAction::Build(Box::new(move |db| {
+                if let Some(me) = db.songs().get(&id) {
+                    let me = me.clone();
+                    vec![GuiAction::ContextMenu(Some(vec![Box::new(Button::new(
+                        GuiElemCfg::default(),
+                        move |_| vec![GuiAction::EditSongs(vec![me.clone()])],
+                        [Label::new(
+                            GuiElemCfg::default(),
+                            format!("Edit"),
+                            Color::WHITE,
+                            None,
+                            Vec2::new_y(0.5),
+                        )],
+                    ))]))]
+                } else {
+                    vec![]
+                }
+            }))]
+        } else {
+            vec![]
+        }
     }
 }
 
@@ -1484,24 +1510,28 @@ impl FilterPanel {
                 ),
             ),
             vec![0.0; 10],
+            0.0,
         );
         let c_tab_filters_songs = ScrollBox::new(
             GuiElemCfg::at(Rectangle::from_tuples((VSPLIT, HEIGHT), (1.0, 1.0))),
             crate::gui_base::ScrollBoxSizeUnit::Pixels,
             FilterTab::default(),
             vec![],
+            0.0,
         );
         let c_tab_filters_albums = ScrollBox::new(
             GuiElemCfg::at(Rectangle::from_tuples((VSPLIT, HEIGHT), (1.0, 1.0))).disabled(),
             crate::gui_base::ScrollBoxSizeUnit::Pixels,
             FilterTab::default(),
             vec![],
+            0.0,
         );
         let c_tab_filters_artists = ScrollBox::new(
             GuiElemCfg::at(Rectangle::from_tuples((VSPLIT, HEIGHT), (1.0, 1.0))).disabled(),
             crate::gui_base::ScrollBoxSizeUnit::Pixels,
             FilterTab::default(),
             vec![],
+            0.0,
         );
         let new_tab = Arc::new(AtomicUsize::new(0));
         let set_tab_1 = Arc::clone(&new_tab);

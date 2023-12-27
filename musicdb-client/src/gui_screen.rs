@@ -4,9 +4,10 @@ use musicdb_lib::{data::queue::QueueContent, server::Command};
 use speedy2d::{color::Color, dimen::Vec2, shape::Rectangle, window::VirtualKeyCode, Graphics2D};
 
 use crate::{
-    gui::{DrawInfo, GuiAction, GuiElem, GuiElemCfg},
+    gui::{DrawInfo, GuiAction, GuiElem, GuiElemCfg, GuiElemChildren},
     gui_anim::AnimationController,
     gui_base::{Button, Panel},
+    gui_edit_song::EditorForSongs,
     gui_idle_display::IdleDisplay,
     gui_library::LibraryBrowser,
     gui_notif::NotifOverlay,
@@ -37,17 +38,12 @@ pub fn transition(p: f32) -> f32 {
 
 pub struct GuiScreen {
     config: GuiElemCfg,
-    c_notif_overlay: NotifOverlay,
-    c_idle_display: IdleDisplay,
-    c_status_bar: StatusBar,
+    pub c_notif_overlay: NotifOverlay,
+    pub c_idle_display: IdleDisplay,
+    pub c_editing_songs: Option<EditorForSongs>,
+    pub c_status_bar: StatusBar,
     pub c_settings: Settings,
-    pub c_main_view: Panel<(
-        Button<[Label; 1]>,
-        Button<[Label; 1]>,
-        LibraryBrowser,
-        QueueViewer,
-        Button<[Label; 1]>,
-    )>,
+    pub c_main_view: Panel<MainView>,
     pub c_context_menu: Option<Box<dyn GuiElem>>,
     pub idle: AnimationController<f32>,
     // pub settings: (bool, Option<Instant>),
@@ -56,6 +52,30 @@ pub struct GuiScreen {
     idle_timeout: Option<f64>,
     pub prev_mouse_pos: Vec2,
     pub hotkey: Hotkey,
+}
+pub struct MainView {
+    pub button_clear_queue: Button<[Label; 1]>,
+    pub button_settings: Button<[Label; 1]>,
+    pub button_exit: Button<[Label; 1]>,
+    pub library_browser: LibraryBrowser,
+    pub queue_viewer: QueueViewer,
+}
+impl GuiElemChildren for MainView {
+    fn iter(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElem> + '_> {
+        Box::new(
+            [
+                self.button_clear_queue.elem_mut(),
+                self.button_settings.elem_mut(),
+                self.button_exit.elem_mut(),
+                self.library_browser.elem_mut(),
+                self.queue_viewer.elem_mut(),
+            ]
+            .into_iter(),
+        )
+    }
+    fn len(&self) -> usize {
+        5
+    }
 }
 impl GuiScreen {
     pub fn new(
@@ -74,6 +94,7 @@ impl GuiScreen {
                 (0.0, 0.9),
                 (1.0, 1.0),
             ))),
+            c_editing_songs: None,
             c_idle_display: IdleDisplay::new(GuiElemCfg::default().disabled()),
             c_settings: Settings::new(
                 GuiElemCfg::default().disabled(),
@@ -85,38 +106,8 @@ impl GuiScreen {
             ),
             c_main_view: Panel::new(
                 GuiElemCfg::at(Rectangle::from_tuples((0.0, 0.0), (1.0, 0.9))),
-                (
-                    Button::new(
-                        GuiElemCfg::at(Rectangle::from_tuples((0.75, 0.0), (0.875, 0.03))),
-                        |_| vec![GuiAction::OpenSettings(true)],
-                        [Label::new(
-                            GuiElemCfg::default(),
-                            "Settings".to_string(),
-                            Color::WHITE,
-                            None,
-                            Vec2::new(0.5, 0.5),
-                        )],
-                    ),
-                    Button::new(
-                        GuiElemCfg::at(Rectangle::from_tuples((0.875, 0.0), (1.0, 0.03))),
-                        |_| vec![GuiAction::Exit],
-                        [Label::new(
-                            GuiElemCfg::default(),
-                            "Exit".to_string(),
-                            Color::WHITE,
-                            None,
-                            Vec2::new(0.5, 0.5),
-                        )],
-                    ),
-                    LibraryBrowser::new(GuiElemCfg::at(Rectangle::from_tuples(
-                        (0.0, 0.0),
-                        (0.5, 1.0),
-                    ))),
-                    QueueViewer::new(GuiElemCfg::at(Rectangle::from_tuples(
-                        (0.5, 0.03),
-                        (1.0, 1.0),
-                    ))),
-                    Button::new(
+                MainView {
+                    button_clear_queue: Button::new(
                         GuiElemCfg::at(Rectangle::from_tuples((0.5, 0.0), (0.75, 0.03))),
                         |_| {
                             vec![GuiAction::SendToServer(
@@ -139,7 +130,37 @@ impl GuiScreen {
                             Vec2::new(0.5, 0.5),
                         )],
                     ),
-                ),
+                    button_settings: Button::new(
+                        GuiElemCfg::at(Rectangle::from_tuples((0.75, 0.0), (0.875, 0.03))),
+                        |_| vec![GuiAction::OpenSettings(true)],
+                        [Label::new(
+                            GuiElemCfg::default(),
+                            "Settings".to_string(),
+                            Color::WHITE,
+                            None,
+                            Vec2::new(0.5, 0.5),
+                        )],
+                    ),
+                    button_exit: Button::new(
+                        GuiElemCfg::at(Rectangle::from_tuples((0.875, 0.0), (1.0, 0.03))),
+                        |_| vec![GuiAction::Exit],
+                        [Label::new(
+                            GuiElemCfg::default(),
+                            "Exit".to_string(),
+                            Color::WHITE,
+                            None,
+                            Vec2::new(0.5, 0.5),
+                        )],
+                    ),
+                    library_browser: LibraryBrowser::new(GuiElemCfg::at(Rectangle::from_tuples(
+                        (0.0, 0.0),
+                        (0.5, 1.0),
+                    ))),
+                    queue_viewer: QueueViewer::new(GuiElemCfg::at(Rectangle::from_tuples(
+                        (0.5, 0.03),
+                        (1.0, 1.0),
+                    ))),
+                },
             ),
             c_context_menu: None,
             hotkey: Hotkey::new_noshift(VirtualKeyCode::Escape),
@@ -173,6 +194,9 @@ impl GuiScreen {
             0.0
         }
     }
+    pub fn force_idle(&mut self) {
+        self.idle.target = 1.0;
+    }
     pub fn not_idle(&mut self) {
         self.last_interaction = Instant::now();
         if self.idle.target > 0.0 {
@@ -197,6 +221,12 @@ impl GuiScreen {
             }
         }
     }
+
+    pub fn set_normal_ui_enabled(&mut self, enabled: bool) {
+        self.c_status_bar.config_mut().enabled = enabled;
+        // self.c_settings.config_mut().enabled = enabled;
+        self.c_main_view.config_mut().enabled = enabled;
+    }
 }
 impl GuiElem for GuiScreen {
     fn config(&self) -> &GuiElemCfg {
@@ -207,15 +237,19 @@ impl GuiElem for GuiScreen {
     }
     fn children(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElem> + '_> {
         Box::new(
-            [
-                self.c_notif_overlay.elem_mut(),
-                self.c_idle_display.elem_mut(),
-                self.c_status_bar.elem_mut(),
-                self.c_settings.elem_mut(),
-                self.c_main_view.elem_mut(),
-            ]
-            .into_iter()
-            .chain(self.c_context_menu.as_mut().map(|v| v.elem_mut())),
+            self.c_context_menu.iter_mut().map(|v| v.elem_mut()).chain(
+                [
+                    self.c_notif_overlay.elem_mut(),
+                    self.c_idle_display.elem_mut(),
+                ]
+                .into_iter()
+                .chain(self.c_editing_songs.as_mut().map(|v| v.elem_mut()))
+                .chain([
+                    self.c_status_bar.elem_mut(),
+                    self.c_settings.elem_mut(),
+                    self.c_main_view.elem_mut(),
+                ]),
+            ),
         )
     }
     fn any(&self) -> &dyn std::any::Any {
@@ -301,9 +335,7 @@ impl GuiElem for GuiScreen {
         // animations: idle
         if idle_changed {
             let enable_normal_ui = self.idle.value < 1.0;
-            self.c_main_view.config_mut().enabled = enable_normal_ui;
-            // self.c_settings.config_mut().enabled = enable_normal_ui;
-            self.c_status_bar.config_mut().enabled = enable_normal_ui;
+            self.set_normal_ui_enabled(enable_normal_ui);
             if let Some(h) = &info.helper {
                 h.set_cursor_visible(enable_normal_ui);
             }

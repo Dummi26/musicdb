@@ -147,6 +147,7 @@ impl CurrentInfo {
 pub fn image_display(
     g: &mut speedy2d::Graphics2D,
     img: Option<&ImageHandle>,
+    pos: Option<Rectangle>,
     left: f32,
     top: f32,
     bottom: f32,
@@ -155,8 +156,12 @@ pub fn image_display(
     if let Some(cover) = &img {
         let cover_size = cover.size();
         aspect_ratio.target = if cover_size.x > 0 && cover_size.y > 0 {
-            let right_x = get_right_x(left, top, bottom, aspect_ratio.value);
-            let pos = Rectangle::from_tuples((left, top), (right_x, bottom));
+            let pos = if let Some(pos) = pos {
+                pos
+            } else {
+                let right_x = get_right_x(left, top, bottom, aspect_ratio.value);
+                Rectangle::from_tuples((left, top), (right_x, bottom))
+            };
             let aspect_ratio = cover_size.x as f32 / cover_size.y as f32;
             g.draw_rectangle_image(pos, cover);
             aspect_ratio
