@@ -1,3 +1,4 @@
+use musicdb_lib::server::Command;
 use speedy2d::{color::Color, dimen::Vec2, shape::Rectangle, Graphics2D};
 
 use crate::{
@@ -55,6 +56,7 @@ pub struct SettingsContent {
     pub line_height: Panel<(Label, Slider)>,
     pub scroll_sensitivity: Panel<(Label, Slider)>,
     pub idle_time: Panel<(Label, Slider)>,
+    pub save_button: Button<[Label; 1]>,
 }
 impl GuiElemChildren for SettingsContent {
     fn iter(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElem> + '_> {
@@ -258,6 +260,17 @@ impl SettingsContent {
                         },
                     ),
                 ),
+            ),
+            save_button: Button::new(
+                GuiElemCfg::default(),
+                |_| vec![GuiAction::SendToServer(Command::Save)],
+                [Label::new(
+                    GuiElemCfg::default(),
+                    "Server: Save Changes".to_string(),
+                    Color::WHITE,
+                    None,
+                    Vec2::new(0.5, 0.5),
+                )],
             ),
         }
     }

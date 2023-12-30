@@ -354,6 +354,18 @@ async fn sse_handler(
                 | Command::RemoveSong(_)
                 | Command::RemoveAlbum(_)
                 | Command::RemoveArtist(_)
+                | Command::TagSongFlagSet(..)
+                | Command::TagSongFlagUnset(..)
+                | Command::TagAlbumFlagSet(..)
+                | Command::TagAlbumFlagUnset(..)
+                | Command::TagArtistFlagSet(..)
+                | Command::TagArtistFlagUnset(..)
+                | Command::TagSongPropertySet(..)
+                | Command::TagSongPropertyUnset(..)
+                | Command::TagAlbumPropertySet(..)
+                | Command::TagAlbumPropertyUnset(..)
+                | Command::TagArtistPropertySet(..)
+                | Command::TagArtistPropertyUnset(..)
                 | Command::SetSongDuration(..) => Event::default().event("artists").data({
                     let db = state.db.lock().unwrap();
                     let mut a = db.artists().iter().collect::<Vec<_>>();

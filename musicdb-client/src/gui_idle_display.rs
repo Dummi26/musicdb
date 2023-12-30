@@ -1,4 +1,7 @@
-use std::{sync::Arc, time::Instant};
+use std::{
+    sync::{atomic::AtomicBool, Arc},
+    time::Instant,
+};
 
 use musicdb_lib::data::ArtistId;
 use speedy2d::{color::Color, dimen::Vec2, image::ImageHandle, shape::Rectangle};
@@ -39,11 +42,14 @@ pub struct IdleDisplay {
     pub artist_image_to_cover_margin: f32,
 
     pub force_reset_texts: bool,
+
+    is_fav: (bool, Arc<AtomicBool>),
 }
 
 impl IdleDisplay {
     pub fn new(config: GuiElemCfg) -> Self {
         let cover_bottom = 0.79;
+        let is_fav = Arc::new(AtomicBool::new(false));
         Self {
             config,
             idle_mode: 0.0,
@@ -67,7 +73,8 @@ impl IdleDisplay {
             ),
             c_side1_label: AdvancedLabel::new(GuiElemCfg::default(), Vec2::new(0.0, 0.5), vec![]),
             c_side2_label: AdvancedLabel::new(GuiElemCfg::default(), Vec2::new(0.0, 0.5), vec![]),
-            c_buttons: PlayPause::new(GuiElemCfg::default()),
+            is_fav: (false, Arc::clone(&is_fav)),
+            c_buttons: PlayPause::new(GuiElemCfg::default(), is_fav),
             c_buttons_custom_pos: false,
             cover_aspect_ratio: AnimationController::new(
                 1.0,
@@ -122,6 +129,19 @@ impl GuiElem for IdleDisplay {
         self.current_info.update(info, g);
         if self.current_info.new_song || self.force_reset_texts {
             self.current_info.new_song = false;
+            self.force_reset_texts = false;
+            let is_fav = self
+                .current_info
+                .current_song
+                .and_then(|id| info.database.get_song(&id))
+                .map(|song| song.general.tags.iter().any(|v| v == "Fav"))
+                .unwrap_or(false);
+            if self.is_fav.0 != is_fav {
+                self.is_fav.0 = is_fav;
+                self.is_fav
+                    .1
+                    .store(is_fav, std::sync::atomic::Ordering::Relaxed);
+            }
             self.c_top_label.content = if let Some(song) = self.current_info.current_song {
                 info.gui_config
                     .idle_top_text
@@ -278,9 +298,10 @@ impl GuiElem for IdleDisplay {
             self.c_side2_label.config_mut().pos =
                 Rectangle::from_tuples((left, ai_top), (max_right, bottom));
             // limit width of c_buttons
-            let buttons_right_pos = 0.99;
-            let buttons_width_max = info.pos.height() * 0.08 / 0.3 / info.pos.width();
-            let buttons_width = buttons_width_max.min(0.2);
+            let buttons_right_pos = 1.0;
+            let buttons_width_max = info.pos.height() * 0.08 * 4.0 / info.pos.width();
+            // buttons use at most half the width (set to 0.2 later, when screen space is used for other things)
+            let buttons_width = buttons_width_max.min(0.5);
             if !self.c_buttons_custom_pos {
                 self.c_buttons.config_mut().pos = Rectangle::from_tuples(
                     (buttons_right_pos - buttons_width, 0.86),
@@ -309,6 +330,7 @@ impl GuiElem for IdleDisplay {
     }
     fn updated_library(&mut self) {
         self.current_info.update = true;
+        self.force_reset_texts = true;
     }
     fn updated_queue(&mut self) {
         self.current_info.update = true;

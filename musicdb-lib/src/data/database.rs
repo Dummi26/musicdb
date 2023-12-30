@@ -359,6 +359,96 @@ impl Database {
             Command::RemoveArtist(artist) => {
                 _ = self.remove_artist(artist);
             }
+            Command::TagSongFlagSet(id, tag) => {
+                if let Some(v) = self.get_song_mut(&id) {
+                    if !v.general.tags.contains(&tag) {
+                        v.general.tags.push(tag);
+                    }
+                }
+            },
+            Command::TagSongFlagUnset(id, tag) => {
+                if let Some(v) = self.get_song_mut(&id) {
+                    if let Some(i) = v.general.tags.iter().position(|v| v == &tag) {
+                        v.general.tags.remove(i);
+                    }
+                }
+            },
+            Command::TagAlbumFlagSet(id, tag) => {
+                if let Some(v) = self.albums.get_mut(&id) {
+                    if !v.general.tags.contains(&tag) {
+                        v.general.tags.push(tag);
+                    }
+                }
+            },
+            Command::TagAlbumFlagUnset(id, tag) => {
+                if let Some(v) = self.albums.get_mut(&id) {
+                    if let Some(i) = v.general.tags.iter().position(|v| v == &tag) {
+                        v.general.tags.remove(i);
+                    }
+                }
+            },
+            Command::TagArtistFlagSet(id, tag) => {
+                if let Some(v) = self.artists.get_mut(&id) {
+                    if !v.general.tags.contains(&tag) {
+                        v.general.tags.push(tag);
+                    }
+                }
+            },
+            Command::TagArtistFlagUnset(id, tag) => {
+                if let Some(v) = self.artists.get_mut(&id) {
+                    if let Some(i) = v.general.tags.iter().position(|v| v == &tag) {
+                        v.general.tags.remove(i);
+                    }
+                }
+            },
+            Command::TagSongPropertySet(id, key, val) => {
+                if let Some(v) = self.get_song_mut(&id) {
+                    let new = format!("{key}{val}");
+                    if let Some(v) = v.general.tags.iter_mut().find(|v| v.starts_with(&key)) {
+                        *v = new;
+                    } else {
+                        v.general.tags.push(new);
+                    }
+                }
+            }
+            Command::TagSongPropertyUnset(id, key) => {
+                if let Some(v) = self.get_song_mut(&id) {
+                    let tags = std::mem::replace(&mut v.general.tags, vec![]);
+                    v.general.tags = tags.into_iter().filter(|v| !v.starts_with(&key)).collect();
+                }
+            }
+            Command::TagAlbumPropertySet(id, key, val) => {
+                if let Some(v) = self.albums.get_mut(&id) {
+                    let new = format!("{key}{val}");
+                    if let Some(v) = v.general.tags.iter_mut().find(|v| v.starts_with(&key)) {
+                        *v = new;
+                    } else {
+                        v.general.tags.push(new);
+                    }
+                }
+            }
+            Command::TagAlbumPropertyUnset(id, key) => {
+                if let Some(v) = self.albums.get_mut(&id) {
+                    let tags = std::mem::replace(&mut v.general.tags, vec![]);
+                    v.general.tags = tags.into_iter().filter(|v| !v.starts_with(&key)).collect();
+                }
+            }
+            Command::TagArtistPropertySet(id, key, val) => {
+                if let Some(v) = self.artists.get_mut(&id) {
+                    let new = format!("{key}{val}");
+                    if let Some(v) = v.general.tags.iter_mut().find(|v| v.starts_with(&key)) {
+                        *v = new;
+                    } else {
+                        v.general.tags.push(new);
+                    }
+                }
+            }
+            Command::TagArtistPropertyUnset(id, key) => {
+                if let Some(v) = self.artists.get_mut(&id) {
+                    let tags = std::mem::replace(&mut v.general.tags, vec![]);
+                    v.general.tags = tags.into_iter().filter(|v| !v.starts_with(&key)).collect();
+                }
+            }
             Command::SetSongDuration(id, duration) => {
                 if let Some(song) = self.get_song_mut(&id) {
                     song.duration_millis = duration;

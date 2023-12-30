@@ -1,4 +1,7 @@
-use std::time::Instant;
+use std::{
+    sync::{atomic::AtomicBool, Arc},
+    time::Instant,
+};
 
 use speedy2d::{dimen::Vec2, shape::Rectangle};
 
@@ -18,10 +21,12 @@ pub struct StatusBar {
     c_song_label: AdvancedLabel,
     pub force_reset_texts: bool,
     c_buttons: PlayPause,
+    is_fav: (bool, Arc<AtomicBool>),
 }
 
 impl StatusBar {
     pub fn new(config: GuiElemCfg) -> Self {
+        let is_fav = Arc::new(AtomicBool::new(false));
         Self {
             config,
             idle_mode: 0.0,
@@ -37,7 +42,8 @@ impl StatusBar {
             ),
             c_song_label: AdvancedLabel::new(GuiElemCfg::default(), Vec2::new(0.0, 0.5), vec![]),
             force_reset_texts: false,
-            c_buttons: PlayPause::new(GuiElemCfg::default()),
+            is_fav: (false, Arc::clone(&is_fav)),
+            c_buttons: PlayPause::new(GuiElemCfg::default(), is_fav),
         }
     }
 }
@@ -50,6 +56,20 @@ impl GuiElem for StatusBar {
         self.current_info.update(info, g);
         if self.current_info.new_song || self.force_reset_texts {
             self.current_info.new_song = false;
+            self.force_reset_texts = false;
+            let is_fav = self
+                .current_info
+                .current_song
+                .and_then(|id| info.database.get_song(&id))
+                .map(|song| song.general.tags.iter().any(|v| v == "Fav"))
+                .unwrap_or(false);
+            eprintln!("is_fav: {is_fav}");
+            if self.is_fav.0 != is_fav {
+                self.is_fav.0 = is_fav;
+                self.is_fav
+                    .1
+                    .store(is_fav, std::sync::atomic::Ordering::Relaxed);
+            }
             self.c_song_label.content = if let Some(song) = self.current_info.current_song {
                 info.gui_config
                     .status_bar_text
@@ -78,7 +98,7 @@ impl GuiElem for StatusBar {
             }
             // limit width of c_buttons
             let buttons_right_pos = 0.99;
-            let buttons_width_max = info.pos.height() * 0.7 / 0.3 / info.pos.width();
+            let buttons_width_max = info.pos.height() * 0.7 * 4.0 / info.pos.width();
             let buttons_width = buttons_width_max.min(0.2);
             self.c_buttons.config_mut().pos = Rectangle::from_tuples(
                 (buttons_right_pos - buttons_width, 0.15),
@@ -130,6 +150,7 @@ impl GuiElem for StatusBar {
     }
     fn updated_library(&mut self) {
         self.current_info.update = true;
+        self.force_reset_texts = true;
     }
     fn updated_queue(&mut self) {
         self.current_info.update = true;

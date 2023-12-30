@@ -234,7 +234,7 @@ pub fn main(
                 ),
                 (
                     "Year".to_owned(),
-                    crate::gui_library::FilterType::TagWithValueInt("Year".to_owned(), 1990, 2000),
+                    crate::gui_library::FilterType::TagWithValueInt("Year=".to_owned(), 1990, 2000),
                 ),
             ],
             filter_presets_album: vec![
@@ -244,7 +244,7 @@ pub fn main(
                 ),
                 (
                     "Year".to_owned(),
-                    crate::gui_library::FilterType::TagWithValueInt("Year".to_owned(), 1990, 2000),
+                    crate::gui_library::FilterType::TagWithValueInt("Year=".to_owned(), 1990, 2000),
                 ),
             ],
             filter_presets_artist: vec![
@@ -254,7 +254,7 @@ pub fn main(
                 ),
                 (
                     "Year".to_owned(),
-                    crate::gui_library::FilterType::TagWithValueInt("Year".to_owned(), 1990, 2000),
+                    crate::gui_library::FilterType::TagWithValueInt("Year=".to_owned(), 1990, 2000),
                 ),
             ],
             #[cfg(feature = "merscfg")]
@@ -371,6 +371,18 @@ impl Gui {
                 | Command::RemoveSong(_)
                 | Command::RemoveAlbum(_)
                 | Command::RemoveArtist(_)
+                | Command::TagSongFlagSet(..)
+                | Command::TagSongFlagUnset(..)
+                | Command::TagAlbumFlagSet(..)
+                | Command::TagAlbumFlagUnset(..)
+                | Command::TagArtistFlagSet(..)
+                | Command::TagArtistFlagUnset(..)
+                | Command::TagSongPropertySet(..)
+                | Command::TagSongPropertyUnset(..)
+                | Command::TagAlbumPropertySet(..)
+                | Command::TagAlbumPropertyUnset(..)
+                | Command::TagArtistPropertySet(..)
+                | Command::TagArtistPropertyUnset(..)
                 | Command::SetSongDuration(..) => {
                     if let Some(s) = &*event_sender_arc.lock().unwrap() {
                         _ = s.send_event(GuiEvent::UpdatedLibrary);
