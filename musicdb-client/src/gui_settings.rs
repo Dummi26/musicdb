@@ -68,12 +68,13 @@ impl GuiElemChildren for SettingsContent {
                 self.line_height.elem_mut(),
                 self.scroll_sensitivity.elem_mut(),
                 self.idle_time.elem_mut(),
+                self.save_button.elem_mut(),
             ]
             .into_iter(),
         )
     }
     fn len(&self) -> usize {
-        6
+        7
     }
 }
 impl SettingsContent {
