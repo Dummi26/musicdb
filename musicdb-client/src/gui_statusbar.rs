@@ -63,7 +63,6 @@ impl GuiElem for StatusBar {
                 .and_then(|id| info.database.get_song(&id))
                 .map(|song| song.general.tags.iter().any(|v| v == "Fav"))
                 .unwrap_or(false);
-            eprintln!("is_fav: {is_fav}");
             if self.is_fav.0 != is_fav {
                 self.is_fav.0 = is_fav;
                 self.is_fav
