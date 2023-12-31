@@ -6,6 +6,8 @@ use std::{
     thread::JoinHandle,
 };
 
+use colorize::AnsiColor;
+
 use crate::load::ToFromBytes;
 
 use super::{
@@ -139,20 +141,20 @@ impl Song {
     ) -> Option<Vec<u8>> {
         match src {
             Ok(path) => {
-                eprintln!("[info] loading song from {:?}", path);
+                eprintln!("[{}] loading song from {:?}", "INFO".cyan(), path);
                 match std::fs::read(&path) {
                     Ok(v) => {
-                        eprintln!("[info] loaded song from {:?}", path);
+                        eprintln!("[{}] loaded song from {:?}", "INFO".green(), path);
                         Some(v)
                     }
                     Err(e) => {
-                        eprintln!("[info] error loading {:?}: {e:?}", path);
+                        eprintln!("[{}] error loading {:?}: {e:?}", "ERR!".red(), path);
                         None
                     }
                 }
             }
             Err((id, dlcon)) => {
-                eprintln!("[info] loading song {id}");
+                eprintln!("[{}] loading song {id}", "INFO".cyan());
                 match dlcon
                     .lock()
                     .unwrap()
@@ -161,7 +163,7 @@ impl Song {
                 {
                     Ok(data) => Some(data),
                     Err(e) => {
-                        eprintln!("[WARN] error loading song {id}: {e}");
+                        eprintln!("[{}] error loading song {id}: {e}", "ERR!".red());
                         None
                     }
                 }

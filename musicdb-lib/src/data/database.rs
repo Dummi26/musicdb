@@ -7,6 +7,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+use colorize::AnsiColor;
+
 use crate::{load::ToFromBytes, server::Command};
 
 use super::{
@@ -263,7 +265,7 @@ impl Database {
             }
             Command::Save => {
                 if let Err(e) = self.save_database(None) {
-                    eprintln!("Couldn't save: {e}");
+                    eprintln!("[{}] Couldn't save: {e}", "ERR!".red());
                 }
             }
             Command::SyncDatabase(a, b, c) => self.sync(a, b, c),
@@ -274,28 +276,17 @@ impl Database {
                 }
                 Queue::handle_actions(self, actions);
             }
-            Command::QueueAdd(mut index, new_data) => {
+            Command::QueueAdd(index, new_data) => {
                 let mut actions = vec![];
                 if let Some(v) = self.queue.get_item_at_index_mut(&index, 0, &mut actions) {
-                    if let Some(i) = v.add_to_end(new_data) {
-                        index.push(i);
-                        if let Some(q) = self.queue.get_item_at_index_mut(&index, 0, &mut actions) {
-                            let mut actions = Vec::new();
-                            q.init(index, &mut actions);
-                            Queue::handle_actions(self, actions);
-                        }
-                    }
+                    v.add_to_end(new_data, index, &mut actions);
                 }
                 Queue::handle_actions(self, actions);
             }
-            Command::QueueInsert(mut index, pos, mut new_data) => {
+            Command::QueueInsert(index, pos, new_data) => {
                 let mut actions = vec![];
                 if let Some(v) = self.queue.get_item_at_index_mut(&index, 0, &mut actions) {
-                    index.push(pos);
-                    let mut actions = Vec::new();
-                    new_data.init(index, &mut actions);
-                    v.insert(new_data, pos);
-                    Queue::handle_actions(self, actions);
+                    v.insert(new_data, pos, index, &mut actions);
                 }
                 Queue::handle_actions(self, actions);
             }
@@ -316,7 +307,7 @@ impl Database {
                                 if let Some(a) = o.get_mut(i).and_then(Option::take) {
                                     v.push(a);
                                 } else {
-                                    eprintln!("[warn] Can't properly apply requested order to Queue/Shuffle: no element at index {i}. Index may be out of bounds or used twice. Len: {}, Order: {order:?}.", v.len());
+                                    eprintln!("[{}] Can't properly apply requested order to Queue/Shuffle: no element at index {i}. Index may be out of bounds or used twice. Len: {}, Order: {order:?}.", "WARN".yellow(), v.len());
                                 }
                             }
                         }
@@ -327,7 +318,10 @@ impl Database {
                         );
                     }
                 } else {
-                    eprintln!("[warn] can't QueueSetShuffle - no element at path {path:?}");
+                    eprintln!(
+                        "[{}] can't QueueSetShuffle - no element at path {path:?}",
+                        "WARN".yellow()
+                    );
                 }
                 Queue::handle_actions(self, actions);
             }
@@ -365,42 +359,42 @@ impl Database {
                         v.general.tags.push(tag);
                     }
                 }
-            },
+            }
             Command::TagSongFlagUnset(id, tag) => {
                 if let Some(v) = self.get_song_mut(&id) {
                     if let Some(i) = v.general.tags.iter().position(|v| v == &tag) {
                         v.general.tags.remove(i);
                     }
                 }
-            },
+            }
             Command::TagAlbumFlagSet(id, tag) => {
                 if let Some(v) = self.albums.get_mut(&id) {
                     if !v.general.tags.contains(&tag) {
                         v.general.tags.push(tag);
                     }
                 }
-            },
+            }
             Command::TagAlbumFlagUnset(id, tag) => {
                 if let Some(v) = self.albums.get_mut(&id) {
                     if let Some(i) = v.general.tags.iter().position(|v| v == &tag) {
                         v.general.tags.remove(i);
                     }
                 }
-            },
+            }
             Command::TagArtistFlagSet(id, tag) => {
                 if let Some(v) = self.artists.get_mut(&id) {
                     if !v.general.tags.contains(&tag) {
                         v.general.tags.push(tag);
                     }
                 }
-            },
+            }
             Command::TagArtistFlagUnset(id, tag) => {
                 if let Some(v) = self.artists.get_mut(&id) {
                     if let Some(i) = v.general.tags.iter().position(|v| v == &tag) {
                         v.general.tags.remove(i);
                     }
                 }
-            },
+            }
             Command::TagSongPropertySet(id, key, val) => {
                 if let Some(v) = self.get_song_mut(&id) {
                     let new = format!("{key}{val}");
@@ -507,8 +501,8 @@ impl Database {
     }
     pub fn load_database(path: PathBuf, lib_directory: PathBuf) -> Result<Self, std::io::Error> {
         let mut file = BufReader::new(File::open(&path)?);
-        eprintln!("[info] loading library from {file:?}");
-        Ok(Self {
+        eprintln!("[{}] loading library from {file:?}", "INFO".cyan());
+        let s = Self {
             db_file: path,
             lib_directory,
             artists: ToFromBytes::from_bytes(&mut file)?,
@@ -524,7 +518,9 @@ impl Database {
             command_sender: None,
             remote_server_as_song_file_source: None,
             client_is_init: false,
-        })
+        };
+        eprintln!("[{}] loaded library", "INFO".green());
+        Ok(s)
     }
     /// saves the database's contents. save path can be overridden
     pub fn save_database(&self, path: Option<PathBuf>) -> Result<PathBuf, std::io::Error> {
@@ -537,7 +533,7 @@ impl Database {
         if path.as_os_str().is_empty() {
             return Ok(path);
         }
-        eprintln!("[info] saving db to {path:?}.");
+        eprintln!("[{}] saving db to {path:?}", "INFO".cyan());
         let mut file = fs::OpenOptions::new()
             .write(true)
             .truncate(true)
@@ -547,6 +543,7 @@ impl Database {
         self.albums.to_bytes(&mut file)?;
         self.songs.to_bytes(&mut file)?;
         self.covers.to_bytes(&mut file)?;
+        eprintln!("[{}] saved db", "INFO".green());
         Ok(path)
     }
     pub fn broadcast_update(&mut self, update: &Command) {

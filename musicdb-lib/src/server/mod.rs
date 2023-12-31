@@ -5,6 +5,8 @@ use std::{
     sync::{mpsc, Arc, Mutex},
 };
 
+use colorize::AnsiColor;
+
 use crate::{
     data::{
         album::Album,
@@ -34,8 +36,8 @@ pub enum Command {
     NextSong,
     SyncDatabase(Vec<Artist>, Vec<Album>, Vec<Song>),
     QueueUpdate(Vec<usize>, Queue),
-    QueueAdd(Vec<usize>, Queue),
-    QueueInsert(Vec<usize>, usize, Queue),
+    QueueAdd(Vec<usize>, Vec<Queue>),
+    QueueInsert(Vec<usize>, usize, Vec<Queue>),
     QueueRemove(Vec<usize>),
     QueueGoto(Vec<usize>),
     QueueSetShuffle(Vec<usize>, Vec<usize>),
@@ -165,7 +167,7 @@ pub fn run_server(
                 });
             }
             Err(e) => {
-                eprintln!("[WARN] Couldn't start TCP listener: {e}");
+                eprintln!("[{}] Couldn't start TCP listener: {e}", "ERR!".red());
             }
         }
     }
@@ -242,7 +244,7 @@ const BYTE_TAG_SONG_FLAG_SET: u8 = 0b11100000;
 const BYTE_TAG_SONG_FLAG_UNSET: u8 = 0b11100001;
 const BYTE_TAG_ALBUM_FLAG_SET: u8 = 0b11100010;
 const BYTE_TAG_ALBUM_FLAG_UNSET: u8 = 0b11100011;
-const BYTE_TAG_ARTIST_FLAG_SET: u8 =   0b11100110;
+const BYTE_TAG_ARTIST_FLAG_SET: u8 = 0b11100110;
 const BYTE_TAG_ARTIST_FLAG_UNSET: u8 = 0b11100111;
 const BYTE_TAG_SONG_PROPERTY_SET: u8 = 0b11101001;
 const BYTE_TAG_SONG_PROPERTY_UNSET: u8 = 0b11101010;
@@ -484,7 +486,10 @@ impl ToFromBytes for Command {
             BYTE_SAVE => Self::Save,
             BYTE_ERRORINFO => Self::ErrorInfo(from_bytes!(), from_bytes!()),
             _ => {
-                eprintln!("unexpected byte when reading command; stopping playback.");
+                eprintln!(
+                    "[{}] unexpected byte when reading command; stopping playback.",
+                    "WARN".yellow()
+                );
                 Self::Stop
             }
         })

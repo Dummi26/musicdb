@@ -287,7 +287,7 @@ pub async fn main(db: Arc<Mutex<Database>>, sender: mpsc::Sender<Command>, addr:
             post(move |Path(song_id)| async move {
                 _ = s6.send(Command::QueueAdd(
                     vec![],
-                    QueueContent::Song(song_id).into(),
+                    vec![QueueContent::Song(song_id).into()],
                 ));
             }),
         )
@@ -297,7 +297,7 @@ pub async fn main(db: Arc<Mutex<Database>>, sender: mpsc::Sender<Command>, addr:
                 if let Some(album) = db1.lock().unwrap().albums().get(&album_id) {
                     _ = s7.send(Command::QueueAdd(
                         vec![],
-                        QueueContent::Folder(
+                        vec![QueueContent::Folder(
                             0,
                             album
                                 .songs
@@ -306,7 +306,7 @@ pub async fn main(db: Arc<Mutex<Database>>, sender: mpsc::Sender<Command>, addr:
                                 .collect(),
                             album.name.clone(),
                         )
-                        .into(),
+                        .into()],
                     ));
                 }
             }),

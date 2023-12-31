@@ -408,7 +408,7 @@ impl GuiElem for QueueEmptySpaceDragHandler {
         self
     }
     fn dragged(&mut self, dragged: Dragging) -> Vec<GuiAction> {
-        dragged_add_to_queue(dragged, |q, _| Command::QueueAdd(vec![], q))
+        dragged_add_to_queue(dragged, |q| Command::QueueAdd(vec![], q))
     }
 }
 
@@ -623,9 +623,9 @@ impl GuiElem for QueueSong {
         if !self.always_copy {
             let mut p = self.path.clone();
             let insert_below = self.insert_below;
-            dragged_add_to_queue(dragged, move |q, i| {
+            dragged_add_to_queue(dragged, move |q| {
                 if let Some(j) = p.pop() {
-                    Command::QueueInsert(p.clone(), if insert_below { j + 1 } else { j } + i, q)
+                    Command::QueueInsert(p.clone(), if insert_below { j + 1 } else { j }, q)
                 } else {
                     Command::QueueAdd(p.clone(), q)
                 }
@@ -782,13 +782,11 @@ impl GuiElem for QueueFolder {
         if !self.always_copy {
             if self.insert_into {
                 let p = self.path.clone();
-                dragged_add_to_queue(dragged, move |q, _| Command::QueueAdd(p.clone(), q))
+                dragged_add_to_queue(dragged, move |q| Command::QueueAdd(p.clone(), q))
             } else {
                 let mut p = self.path.clone();
                 let j = p.pop().unwrap_or(0);
-                dragged_add_to_queue(dragged, move |q, i| {
-                    Command::QueueInsert(p.clone(), j + i, q)
-                })
+                dragged_add_to_queue(dragged, move |q| Command::QueueInsert(p.clone(), j, q))
             }
         } else {
             vec![]
@@ -850,9 +848,7 @@ impl GuiElem for QueueIndentEnd {
     }
     fn dragged(&mut self, dragged: Dragging) -> Vec<GuiAction> {
         let (p, j) = self.path_insert.clone();
-        dragged_add_to_queue(dragged, move |q, i| {
-            Command::QueueInsert(p.clone(), j + i, q)
-        })
+        dragged_add_to_queue(dragged, move |q| Command::QueueInsert(p.clone(), j, q))
     }
 }
 
@@ -1004,7 +1000,7 @@ impl GuiElem for QueueLoop {
         if !self.always_copy {
             let mut p = self.path.clone();
             p.push(0);
-            dragged_add_to_queue(dragged, move |q, _| Command::QueueAdd(p.clone(), q))
+            dragged_add_to_queue(dragged, move |q| Command::QueueAdd(p.clone(), q))
         } else {
             vec![]
         }
@@ -1130,7 +1126,7 @@ impl GuiElem for QueueRandom {
     fn dragged(&mut self, dragged: Dragging) -> Vec<GuiAction> {
         if !self.always_copy {
             let p = self.path.clone();
-            dragged_add_to_queue(dragged, move |q, _| Command::QueueAdd(p.clone(), q))
+            dragged_add_to_queue(dragged, move |q| Command::QueueAdd(p.clone(), q))
         } else {
             vec![]
         }
@@ -1257,22 +1253,22 @@ impl GuiElem for QueueShuffle {
         if !self.always_copy {
             let mut p = self.path.clone();
             p.push(0);
-            dragged_add_to_queue(dragged, move |q, _| Command::QueueAdd(p.clone(), q))
+            dragged_add_to_queue(dragged, move |q| Command::QueueAdd(p.clone(), q))
         } else {
             vec![]
         }
     }
 }
 
-fn dragged_add_to_queue<F: FnMut(Queue, usize) -> Command + 'static>(
+fn dragged_add_to_queue<F: FnOnce(Vec<Queue>) -> Command + 'static>(
     dragged: Dragging,
-    mut f: F,
+    f: F,
 ) -> Vec<GuiAction> {
     match dragged {
         Dragging::Artist(id) => {
             vec![GuiAction::Build(Box::new(move |db| {
                 if let Some(q) = add_to_queue_artist_by_id(id, db) {
-                    vec![GuiAction::SendToServer(f(q, 0))]
+                    vec![GuiAction::SendToServer(f(vec![q]))]
                 } else {
                     vec![]
                 }
@@ -1281,7 +1277,7 @@ fn dragged_add_to_queue<F: FnMut(Queue, usize) -> Command + 'static>(
         Dragging::Album(id) => {
             vec![GuiAction::Build(Box::new(move |db| {
                 if let Some(q) = add_to_queue_album_by_id(id, db) {
-                    vec![GuiAction::SendToServer(f(q, 0))]
+                    vec![GuiAction::SendToServer(f(vec![q]))]
                 } else {
                     vec![]
                 }
@@ -1289,16 +1285,12 @@ fn dragged_add_to_queue<F: FnMut(Queue, usize) -> Command + 'static>(
         }
         Dragging::Song(id) => {
             let q = QueueContent::Song(id).into();
-            vec![GuiAction::SendToServer(f(q, 0))]
+            vec![GuiAction::SendToServer(f(vec![q]))]
         }
         Dragging::Queue(q) => {
-            vec![GuiAction::SendToServer(f(q, 0))]
+            vec![GuiAction::SendToServer(f(vec![q]))]
         }
-        Dragging::Queues(q) => q
-            .into_iter()
-            .enumerate()
-            .map(|(i, q)| GuiAction::SendToServer(f(q, i)))
-            .collect(),
+        Dragging::Queues(q) => vec![GuiAction::SendToServer(f(q))],
     }
 }
 

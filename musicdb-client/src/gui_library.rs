@@ -2157,7 +2157,7 @@ mod selected {
             let lock = self.0.lock().unwrap();
             let (sel_artists, sel_albums, sel_songs) = &*lock;
             let mut out = vec![];
-            for (artist, singles, albums, _) in &lb.library_filtered {
+            for (artist, singles, albums) in &lb.library_sorted {
                 let artist_selected = sel_artists.contains(artist);
                 let mut local_artist_owned = vec![];
                 let mut local_artist = if artist_selected {
@@ -2165,13 +2165,13 @@ mod selected {
                 } else {
                     &mut out
                 };
-                for (song, _) in singles {
+                for song in singles {
                     let song_selected = sel_songs.contains(song);
                     if song_selected {
                         local_artist.push(QueueContent::Song(*song).into());
                     }
                 }
-                for (album, songs, _) in albums {
+                for (album, songs) in albums {
                     let album_selected = sel_albums.contains(album);
                     let mut local_album_owned = vec![];
                     let local_album = if album_selected {
@@ -2179,7 +2179,7 @@ mod selected {
                     } else {
                         &mut local_artist
                     };
-                    for (song, _) in songs {
+                    for song in songs {
                         let song_selected = sel_songs.contains(song);
                         if song_selected {
                             local_album.push(QueueContent::Song(*song).into());

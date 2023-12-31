@@ -6,6 +6,7 @@ use awedio::{
     sounds::wrappers::{AsyncCompletionNotifier, Controller, Pausable},
     Sound,
 };
+use colorize::AnsiColor;
 use rc_u8_reader::ArcU8Reader;
 
 use crate::{
@@ -148,7 +149,10 @@ impl Player {
                                     self.manager.play(Box::new(sound));
                                 }
                                 Err(e) => {
-                                    eprintln!("[player] Can't play, skipping! {e}");
+                                    eprintln!(
+                                        "[{}] [player] Can't play, skipping! {e}",
+                                        "INFO".blue()
+                                    );
                                     apply_command!(Command::NextSong);
                                 }
                             }

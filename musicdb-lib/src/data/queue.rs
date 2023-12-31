@@ -31,6 +31,7 @@ pub enum ShuffleState {
 
 pub enum QueueAction {
     AddRandomSong(Vec<usize>),
+    /// `partial: bool`, if true, indicates that we only shuffle what is beyond the current index
     SetShuffle(Vec<usize>, bool),
 }
 
@@ -45,30 +46,64 @@ impl Queue {
         &mut self.content
     }
 
-    pub fn add_to_end(&mut self, v: Self) -> Option<usize> {
+    pub fn add_to_end(
+        &mut self,
+        v: Vec<Self>,
+        mut path: Vec<usize>,
+        actions: &mut Vec<QueueAction>,
+    ) -> Option<usize> {
         match &mut self.content {
             QueueContent::Song(_) => None,
             QueueContent::Folder(_, vec, _) => {
-                vec.push(v);
-                Some(vec.len() - 1)
+                let len = vec.len();
+                for (i, mut v) in v.into_iter().enumerate() {
+                    path.push(len + i);
+                    v.init(path.clone(), actions);
+                    vec.push(v);
+                    path.pop();
+                }
+                Some(len)
             }
             QueueContent::Loop(..) => None,
             QueueContent::Random(q) => {
-                q.push_back(v);
-                Some(q.len() - 1)
+                // insert new elements
+                let len = q.len();
+                for (i, mut v) in v.into_iter().enumerate() {
+                    path.push(len + i);
+                    v.init(path.clone(), actions);
+                    q.push_back(v);
+                    path.pop();
+                }
+                Some(len)
             }
             QueueContent::Shuffle { .. } => None,
         }
     }
-    pub fn insert(&mut self, v: Self, index: usize) -> bool {
+    pub fn insert(
+        &mut self,
+        v: Vec<Self>,
+        index: usize,
+        mut path: Vec<usize>,
+        actions: &mut Vec<QueueAction>,
+    ) -> bool {
         match &mut self.content {
             QueueContent::Song(_) => false,
             QueueContent::Folder(current, vec, _) => {
                 if index <= vec.len() {
                     if *current >= index {
-                        *current += 1;
+                        *current += v.len();
                     }
-                    vec.insert(index, v);
+                    // remove the elements starting at the insertion point
+                    let end = vec.split_off(index);
+                    // insert new elements
+                    for (i, mut v) in v.into_iter().enumerate() {
+                        path.push(index + i);
+                        v.init(path.clone(), actions);
+                        vec.push(v);
+                        path.pop();
+                    }
+                    // re-add previously removed elements
+                    vec.extend(end);
                     true
                 } else {
                     false
@@ -268,7 +303,9 @@ impl Queue {
             QueueContent::Shuffle { inner, state } => {
                 let mut p = path.clone();
                 p.push(0);
-                if matches!(state, ShuffleState::NotShuffled | ShuffleState::Modified) {
+                if inner.len() == 0 {
+                    *state = ShuffleState::NotShuffled;
+                } else if matches!(state, ShuffleState::NotShuffled | ShuffleState::Modified) {
                     actions.push(QueueAction::SetShuffle(
                         path,
                         matches!(state, ShuffleState::Modified),
@@ -287,7 +324,7 @@ impl Queue {
                         if let Some(song) = db.songs().keys().choose(&mut rand::thread_rng()) {
                             db.apply_command(Command::QueueAdd(
                                 path,
-                                QueueContent::Song(*song).into(),
+                                vec![QueueContent::Song(*song).into()],
                             ));
                         }
                     }
@@ -394,6 +431,7 @@ impl Queue {
                 let mut p = path.clone();
                 p.push(0);
                 if !inner.advance_index_inner(p, actions) {
+                    // end of inner Folder element, reshuffle for next time
                     *state = ShuffleState::Shuffled;
                     actions.push(QueueAction::SetShuffle(path, false));
                     false

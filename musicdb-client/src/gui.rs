@@ -1106,6 +1106,8 @@ impl Gui {
                 }
             }
             GuiAction::SendToServer(cmd) => {
+                #[cfg(debug_assertions)]
+                eprintln!("[DEBUG] Sending command to server: {cmd:?}");
                 if let Err(e) = cmd.to_bytes(&mut self.connection) {
                     eprintln!("Error sending command to server: {e}");
                 }
