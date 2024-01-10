@@ -15,13 +15,13 @@ use musicdb_lib::data::database::Database;
 
 #[derive(Parser, Debug)]
 struct Args {
-    /// The file which contains information about the songs in your library
+    /// The directory which contains information about the songs in your library
     #[arg()]
-    dbfile: PathBuf,
+    db_dir: PathBuf,
     /// The path containing your actual library.
     #[arg()]
     lib_dir: PathBuf,
-    /// skip reading the `dbfile` (because it doesn't exist yet)
+    /// skip reading the dbfile (because it doesn't exist yet)
     #[arg(long)]
     init: bool,
     /// optional address for tcp connections to the server
@@ -42,13 +42,13 @@ async fn main() {
     // parse args
     let args = Args::parse();
     let mut database = if args.init {
-        Database::new_empty(args.dbfile, args.lib_dir)
+        Database::new_empty_in_dir(args.db_dir, args.lib_dir)
     } else {
-        match Database::load_database(args.dbfile.clone(), args.lib_dir.clone()) {
+        match Database::load_database_from_dir(args.db_dir.clone(), args.lib_dir.clone()) {
             Ok(db) => db,
             Err(e) => {
                 eprintln!("Couldn't load database!");
-                eprintln!("  dbfile: {:?}", args.dbfile);
+                eprintln!("  dbfile: {:?}", args.db_dir);
                 eprintln!("  libdir: {:?}", args.lib_dir);
                 eprintln!("  err: {}", e);
                 exit(1);

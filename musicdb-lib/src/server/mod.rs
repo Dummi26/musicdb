@@ -115,6 +115,8 @@ pub fn run_server(
     addr_tcp: Option<SocketAddr>,
     sender_sender: Option<tokio::sync::mpsc::Sender<mpsc::Sender<Command>>>,
 ) {
+    use std::time::Instant;
+
     let mut player = Player::new().unwrap();
     // commands sent to this will be handeled later in this function in an infinite loop.
     // these commands are sent to the database asap.
@@ -171,11 +173,26 @@ pub fn run_server(
             }
         }
     }
-    // for now, update the player 10 times a second so it can detect when a song has finished and start a new one.
-    // TODO: player should send a NextSong update to the mpsc::Sender to wake up this thread
-    let dur = Duration::from_secs_f32(0.1);
+    let dur = Duration::from_secs(10);
+    let command_sender = Arc::new(move |cmd| {
+        _ = command_sender.send(cmd);
+    });
     loop {
-        player.update(&mut database.lock().unwrap());
+        {
+            // at the start and once after every command sent to the server,
+            let mut db = database.lock().unwrap();
+            // update the player
+            player.update(&mut db, &command_sender);
+            // autosave if necessary
+            if let Some((first, last)) = db.times_data_modified {
+                let now = Instant::now();
+                if (now - first).as_secs_f32() > 60.0 && (now - last).as_secs_f32() > 5.0 {
+                    if let Err(e) = db.save_database(None) {
+                        eprintln!("[{}] Autosave failed: {e}", "ERR!".red());
+                    }
+                }
+            }
+        }
         if let Ok(command) = command_receiver.recv_timeout(dur) {
             player.handle_command(&command);
             database.lock().unwrap().apply_command(command);

@@ -1,4 +1,7 @@
-use std::{collections::HashSet, sync::Arc};
+use std::{
+    collections::HashSet,
+    sync::{atomic::AtomicBool, Arc},
+};
 
 use awedio::{
     backends::CpalBackend,
@@ -20,7 +23,7 @@ pub struct Player {
     backend: CpalBackend,
     source: Option<(
         Controller<AsyncCompletionNotifier<Pausable<Box<dyn Sound>>>>,
-        tokio::sync::oneshot::Receiver<()>,
+        Arc<AtomicBool>,
     )>,
     manager: Manager,
     current_song_id: SongOpt,
@@ -82,7 +85,11 @@ impl Player {
             self.current_song_id = SongOpt::New(None);
         }
     }
-    pub fn update(&mut self, db: &mut Database) {
+    pub fn update(
+        &mut self,
+        db: &mut Database,
+        command_sender: &Arc<impl Fn(Command) + Send + Sync + 'static>,
+    ) {
         macro_rules! apply_command {
             ($cmd:expr) => {
                 if self.allow_sending_commands {
@@ -99,9 +106,8 @@ impl Player {
                 apply_command!(Command::Stop);
             }
         } else if let Some((_source, notif)) = &mut self.source {
-            if let Ok(()) = notif.try_recv() {
+            if notif.load(std::sync::atomic::Ordering::Relaxed) {
                 // song has finished playing
-                apply_command!(Command::NextSong);
                 self.current_song_id = SongOpt::New(db.queue.get_current_song().cloned());
             }
         }
@@ -144,7 +150,17 @@ impl Player {
                                         v.pausable().with_async_completion_notifier();
                                     // add it
                                     let (sound, controller) = sound.controllable();
-                                    self.source = Some((controller, notif));
+                                    let finished = Arc::new(AtomicBool::new(false));
+                                    let fin = Arc::clone(&finished);
+                                    let command_sender = Arc::clone(command_sender);
+                                    std::thread::spawn(move || {
+                                        // `blocking_recv` returns `Err(_)` when the sound is dropped, so the thread won't linger forever
+                                        if let Ok(_v) = notif.blocking_recv() {
+                                            fin.store(true, std::sync::atomic::Ordering::Relaxed);
+                                            command_sender(Command::NextSong);
+                                        }
+                                    });
+                                    self.source = Some((controller, finished));
                                     // and play it
                                     self.manager.play(Box::new(sound));
                                 }

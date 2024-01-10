@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    fmt::format,
     fs::{self, File},
     io::{BufReader, Read, Write},
     path::PathBuf,
@@ -20,6 +21,8 @@ use super::{
 };
 
 pub struct Database {
+    /// the directory that contains the dbfile, backups, statistics, ...
+    pub db_dir: PathBuf,
     /// the path to the file used to save/load the data. empty if database is in client mode.
     pub db_file: PathBuf,
     /// the path to the directory containing the actual music and cover image files
@@ -34,9 +37,6 @@ pub struct Database {
     /// Some(None) -> access to lib_directory
     /// Some(Some(path)) -> access to path
     pub custom_files: Option<Option<PathBuf>>,
-    // These will be used for autosave once that gets implemented
-    db_data_file_change_first: Option<Instant>,
-    db_data_file_change_last: Option<Instant>,
     pub queue: Queue,
     /// if the database receives an update, it will inform all of its clients so they can stay in sync.
     /// this is a list containing all the clients.
@@ -48,6 +48,10 @@ pub struct Database {
         Option<Arc<Mutex<crate::server::get::Client<Box<dyn ClientIo>>>>>,
     /// only relevant for clients. true if init is done
     client_is_init: bool,
+
+    /// If `Some`, contains the first time and the last time data was modified.
+    /// When the DB is saved, this is reset to `None` to represent that nothing was modified.
+    pub times_data_modified: Option<(Instant, Instant)>,
 }
 pub trait ClientIo: Read + Write + Send {}
 impl<T: Read + Write + Send> ClientIo for T {}
@@ -60,13 +64,6 @@ pub enum UpdateEndpoint {
 }
 
 impl Database {
-    /// TODO!
-    fn panic(&self, msg: &str) -> ! {
-        // custom panic handler
-        // make a backup
-        // exit
-        panic!("DatabasePanic: {msg}");
-    }
     pub fn is_client(&self) -> bool {
         self.db_file.as_os_str().is_empty()
     }
@@ -76,11 +73,20 @@ impl Database {
     pub fn get_path(&self, location: &DatabaseLocation) -> PathBuf {
         self.lib_directory.join(&location.rel_path)
     }
+    fn modified_data(&mut self) {
+        let now = Instant::now();
+        if let Some((_first, last)) = &mut self.times_data_modified {
+            *last = now;
+        } else {
+            self.times_data_modified = Some((now, now));
+        }
+    }
     // NOTE: just use `songs` directly? not sure yet...
     pub fn get_song(&self, song: &SongId) -> Option<&Song> {
         self.songs.get(song)
     }
     pub fn get_song_mut(&mut self, song: &SongId) -> Option<&mut Song> {
+        self.modified_data();
         self.songs.get_mut(song)
     }
     /// adds a song to the database.
@@ -101,6 +107,7 @@ impl Database {
     }
     /// used internally
     pub fn add_song_new_nomagic(&mut self, mut song: Song) -> SongId {
+        self.modified_data();
         for key in 0.. {
             if !self.songs.contains_key(&key) {
                 song.id = key;
@@ -119,6 +126,7 @@ impl Database {
     }
     /// used internally
     fn add_artist_new_nomagic(&mut self, mut artist: Artist) -> ArtistId {
+        self.modified_data();
         for key in 0.. {
             if !self.artists.contains_key(&key) {
                 artist.id = key;
@@ -141,6 +149,7 @@ impl Database {
     }
     /// used internally
     fn add_album_new_nomagic(&mut self, mut album: Album) -> AlbumId {
+        self.modified_data();
         for key in 0.. {
             if !self.albums.contains_key(&key) {
                 album.id = key;
@@ -157,6 +166,7 @@ impl Database {
     }
     /// used internally
     fn add_cover_new_nomagic(&mut self, cover: Cover) -> AlbumId {
+        self.modified_data();
         for key in 0.. {
             if !self.covers.contains_key(&key) {
                 self.covers.insert(key, cover);
@@ -171,21 +181,27 @@ impl Database {
     /// Otherwise Some(old_data) is returned.
     pub fn update_song(&mut self, song: Song) -> Result<Song, ()> {
         if let Some(prev_song) = self.songs.get_mut(&song.id) {
-            Ok(std::mem::replace(prev_song, song))
+            let old = std::mem::replace(prev_song, song);
+            self.modified_data();
+            Ok(old)
         } else {
             Err(())
         }
     }
     pub fn update_album(&mut self, album: Album) -> Result<Album, ()> {
         if let Some(prev_album) = self.albums.get_mut(&album.id) {
-            Ok(std::mem::replace(prev_album, album))
+            let old = std::mem::replace(prev_album, album);
+            self.modified_data();
+            Ok(old)
         } else {
             Err(())
         }
     }
     pub fn update_artist(&mut self, artist: Artist) -> Result<Artist, ()> {
         if let Some(prev_artist) = self.artists.get_mut(&artist.id) {
-            Ok(std::mem::replace(prev_artist, artist))
+            let old = std::mem::replace(prev_artist, artist);
+            self.modified_data();
+            Ok(old)
         } else {
             Err(())
         }
@@ -194,11 +210,13 @@ impl Database {
     /// uses song.id. If another song with that ID exists, it is replaced and Some(other_song) is returned.
     /// If no other song exists, the song will be added to the database with the given ID and None is returned.
     pub fn update_or_add_song(&mut self, song: Song) -> Option<Song> {
+        self.modified_data();
         self.songs.insert(song.id, song)
     }
 
     pub fn remove_song(&mut self, song: SongId) -> Option<Song> {
         if let Some(removed) = self.songs.remove(&song) {
+            self.modified_data();
             Some(removed)
         } else {
             None
@@ -206,6 +224,7 @@ impl Database {
     }
     pub fn remove_album(&mut self, song: SongId) -> Option<Song> {
         if let Some(removed) = self.songs.remove(&song) {
+            self.modified_data();
             Some(removed)
         } else {
             None
@@ -213,6 +232,7 @@ impl Database {
     }
     pub fn remove_artist(&mut self, song: SongId) -> Option<Song> {
         if let Some(removed) = self.songs.remove(&song) {
+            self.modified_data();
             Some(removed)
         } else {
             None
@@ -231,7 +251,6 @@ impl Database {
         if self.playing {
             Command::Resume.to_bytes(con)?;
         }
-        // since this is so easy to check for, it comes last.
         // this allows clients to find out when init_connection is done.
         Command::InitComplete.to_bytes(con)?;
         // is initialized now - client can receive updates after this point.
@@ -459,10 +478,18 @@ impl Database {
 // file saving/loading
 
 impl Database {
+    /// TODO!
+    fn panic(&self, msg: &str) -> ! {
+        // custom panic handler
+        // make a backup
+        // exit
+        panic!("DatabasePanic: {msg}");
+    }
     /// Database is also used for clients, to keep things consistent.
     /// A client database doesn't need any storage paths and won't perform autosaves.
     pub fn new_clientside() -> Self {
         Self {
+            db_dir: PathBuf::new(),
             db_file: PathBuf::new(),
             lib_directory: PathBuf::new(),
             artists: HashMap::new(),
@@ -470,18 +497,19 @@ impl Database {
             songs: HashMap::new(),
             covers: HashMap::new(),
             custom_files: None,
-            db_data_file_change_first: None,
-            db_data_file_change_last: None,
             queue: QueueContent::Folder(0, vec![], String::new()).into(),
             update_endpoints: vec![],
             playing: false,
             command_sender: None,
             remote_server_as_song_file_source: None,
             client_is_init: false,
+            times_data_modified: None,
         }
     }
-    pub fn new_empty(path: PathBuf, lib_dir: PathBuf) -> Self {
+    pub fn new_empty_in_dir(dir: PathBuf, lib_dir: PathBuf) -> Self {
+        let path = dir.join("dbfile");
         Self {
+            db_dir: dir,
             db_file: path,
             lib_directory: lib_dir,
             artists: HashMap::new(),
@@ -489,20 +517,24 @@ impl Database {
             songs: HashMap::new(),
             covers: HashMap::new(),
             custom_files: None,
-            db_data_file_change_first: None,
-            db_data_file_change_last: None,
             queue: QueueContent::Folder(0, vec![], String::new()).into(),
             update_endpoints: vec![],
             playing: false,
             command_sender: None,
             remote_server_as_song_file_source: None,
             client_is_init: false,
+            times_data_modified: None,
         }
     }
-    pub fn load_database(path: PathBuf, lib_directory: PathBuf) -> Result<Self, std::io::Error> {
+    pub fn load_database_from_dir(
+        dir: PathBuf,
+        lib_directory: PathBuf,
+    ) -> Result<Self, std::io::Error> {
+        let path = dir.join("dbfile");
         let mut file = BufReader::new(File::open(&path)?);
         eprintln!("[{}] loading library from {file:?}", "INFO".cyan());
         let s = Self {
+            db_dir: dir,
             db_file: path,
             lib_directory,
             artists: ToFromBytes::from_bytes(&mut file)?,
@@ -510,20 +542,19 @@ impl Database {
             songs: ToFromBytes::from_bytes(&mut file)?,
             covers: ToFromBytes::from_bytes(&mut file)?,
             custom_files: None,
-            db_data_file_change_first: None,
-            db_data_file_change_last: None,
             queue: QueueContent::Folder(0, vec![], String::new()).into(),
             update_endpoints: vec![],
             playing: false,
             command_sender: None,
             remote_server_as_song_file_source: None,
             client_is_init: false,
+            times_data_modified: None,
         };
         eprintln!("[{}] loaded library", "INFO".green());
         Ok(s)
     }
     /// saves the database's contents. save path can be overridden
-    pub fn save_database(&self, path: Option<PathBuf>) -> Result<PathBuf, std::io::Error> {
+    pub fn save_database(&mut self, path: Option<PathBuf>) -> Result<PathBuf, std::io::Error> {
         let path = if let Some(p) = path {
             p
         } else {
@@ -534,6 +565,22 @@ impl Database {
             return Ok(path);
         }
         eprintln!("[{}] saving db to {path:?}", "INFO".cyan());
+        if path.try_exists()? {
+            let backup_name = format!(
+                "dbfile-{}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::SystemTime::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0),
+            );
+            if let Err(e) = fs::rename(&path, self.db_dir.join(&backup_name)) {
+                eprintln!(
+                    "[{}] Couldn't move previous dbfile to {backup_name}!",
+                    "ERR!".red()
+                );
+                return Err(e);
+            }
+        }
         let mut file = fs::OpenOptions::new()
             .write(true)
             .truncate(true)
@@ -544,6 +591,8 @@ impl Database {
         self.songs.to_bytes(&mut file)?;
         self.covers.to_bytes(&mut file)?;
         eprintln!("[{}] saved db", "INFO".green());
+        // all changes saved, data no longer modified
+        self.times_data_modified = None;
         Ok(path)
     }
     pub fn broadcast_update(&mut self, update: &Command) {
@@ -595,6 +644,7 @@ impl Database {
         }
     }
     pub fn sync(&mut self, artists: Vec<Artist>, albums: Vec<Album>, songs: Vec<Song>) {
+        self.modified_data();
         self.artists = artists.iter().map(|v| (v.id, v.clone())).collect();
         self.albums = albums.iter().map(|v| (v.id, v.clone())).collect();
         self.songs = songs.iter().map(|v| (v.id, v.clone())).collect();
@@ -616,18 +666,22 @@ impl Database {
     }
     /// you should probably use a Command to do this...
     pub fn songs_mut(&mut self) -> &mut HashMap<SongId, Song> {
+        self.modified_data();
         &mut self.songs
     }
     /// you should probably use a Command to do this...
     pub fn albums_mut(&mut self) -> &mut HashMap<AlbumId, Album> {
+        self.modified_data();
         &mut self.albums
     }
     /// you should probably use a Command to do this...
     pub fn artists_mut(&mut self) -> &mut HashMap<ArtistId, Artist> {
+        self.modified_data();
         &mut self.artists
     }
     /// you should probably use a Command to do this...
     pub fn covers_mut(&mut self) -> &mut HashMap<CoverId, Cover> {
+        self.modified_data();
         &mut self.covers
     }
 }
