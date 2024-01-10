@@ -23,6 +23,8 @@ A feature-rich music player consisting of a server and a client.
 - repeat
   + can repeat its contents forever or n times
 
+https://github.com/Dummi26/musicdb/assets/67615357/888a2217-6966-490f-a49f-5085ddcf3461
+
 ## Server
 
 The server caches the next song before it is played,
@@ -39,6 +41,8 @@ All connected clients will be synchronized, so if you do something on one device
 The client can show a user interface (`gui`) or even connect to the server and mirror its playback (`syncplayer-*`).
 
 Using the `syncplayer` functionality, you can play the same music on multiple devices, in multiple different locations.
+
+https://github.com/Dummi26/musicdb/assets/67615357/afb0c9fa-3cf0-414a-a59f-7e462837b989
 
 # Setup
 
