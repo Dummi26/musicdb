@@ -1,104 +1,90 @@
 # musicdb
 
-custom music player which can be controlled from other WiFi devices (phone/pc)
+A feature-rich music player consisting of a server and a client.
 
-should perform pretty well (it runs well on my Pine A64 with 10k+ songs)
+## Library
 
-https://github.com/Dummi26/musicdb/assets/67615357/8ba85f00-27a5-4e41-8688-4816b8aaaff4
+- search for artists, albums, songs
+- apply filters to your search
+- select multiple songs, albums, artists
+- drag songs, albums, artists or your selection to add them to the queue
 
-## why???
+## Queue
 
-#### server/client
+- recursive structure, organized by how songs were added
+  + adding an album puts the songs in a folder
+  + if you add an album, you can drag the entire folder rather than individual songs
+  + adding an artist adds a folder containing a folder for each album
+- shuffle
+  + works like a folder, but plays its contents in a random order
+  + reshuffles as you add new songs
+  + only shuffles elements that you didn't listen to yet, so you won't hear a song twice
+  + can shuffle any element, so you could, for example, listen to random albums, but the songs in each album stay in the correct order
+- repeat
+  + can repeat its contents forever or n times
 
-allows you to play music on any device you want while controlling playback from anywhere.
-you can either run the client and server on the same machine or have them be in the same network
-so that they can connect using TCP.
+## Server
 
-if one client makes a change, all other clients will be notified of it and update almost instantly.
+The server caches the next song before it is played,
+so you get gapless playback even when loading songs from a very slow disk or network-attached storage (NAS).
 
-it is also possible for a fake "client" to mirror the main server's playback, so you could sync up your entire house if you wanted to.
+It can be accessed using the client (TCP), or a website it can optionally host.
+It should also be very easy to switch from TCP to any other protocol, since most of the code in this project just requires the `Read + Write` traits, not specifically a TCP connection.
 
-#### complicated queue
+## Clients
 
-- allows more customization of playback (loops, custom shuffles, etc.)
-- is more organized (adding an album doesn't add 10-20 songs, it creates a folder so you can (re)move the entire album in/from the queue)
+Multiple clients can connect to a server at the same time.
+All connected clients will be synchronized, so if you do something on one device, all other connected devices will show that change.
 
-#### caching of songs
+The client can show a user interface (`gui`) or even connect to the server and mirror its playback (`syncplayer-*`).
 
-for (almost) gapless playback, even when the data is stored on a NAS or cloud
+Using the `syncplayer` functionality, you can play the same music on multiple devices, in multiple different locations.
 
-#### custom database file
+# Setup
 
-when storing data on a cloud, it would take forever to load all songs and scan them for metadata.
-you would also run into issues with different file formats and where to store the cover images.
-a custom database speeds up server startup and allows for more features.
-
-## usage
-
-### build
-
-build `musicdb-server` and `musicdb-client` (and `musicdb-filldb`) using cargo.
-
-Note: the client has a config file in ~/.config/musicdb-client/, which includes the path to a font. You need to set this manually or the client won't start.
-The file and directory will be created when you first run the client in gui mode.
-
-## setup
-
-### prep
-
-You need some directory where your music is located (mp3 files).
-I will assume this is `/music` for simplicity.
-
-You will also need a file that will hold your database.
-I will assume this is `dbfile`.
-
-Note: Instead of adding the executables (`musicdb-client` and `musicdb-server`) to your `$PATH`, you can run `cargo run --release -- ` followed by the arguments.
-Since this is using cargo, you need to be in the source directory for whatever you want to run.
-
-### database
-
-`musicdb-filldb` will read all files in the /music directory and all of its subdirectories, read their metadata and try to figure out as much about these songs as possible. It will then generate a `dbfile` which `musicdb-server` can read.
-You can make changes to the database later, but this should be the easiest way to get started:
+Review, then run the `setup.sh` script:
 
 ```sh
-musicdb-filldb /music
+./setup.sh ~/my_dbdir ~/music
 ```
 
-### starting the server
+Where `~/music` is the directory containing your music (mp3 files).
 
-Copy the `musicdb-server/assets` directory to `./assets`, then run:
+Confirm that all paths are correct, then press Enter when prompted.
+
+You will probably have to add a valid font path to the client's gui config, for example
+
+```toml
+font = '/usr/share/fonts/...'
+
+...
+```
+
+The script will start a server and client.
+After closing the client, the server may still be running, so you may have to `pkill musicdb-server` if you want to stop it.
+
+To open the player again:
 
 ```sh
-musicdb-server dbfile /music --tcp 127.0.0.1:26314 --web 127.0.0.1:8080
+musicdb-client 0.0.0.0:26002 gui
 ```
 
-Note: If you don't care about the HTML site, you can leave out the `--web 127.0.0.1:8080`.
-You also won't need the `assets` then.
-
-And that's it - the rest should just work.
-
-You can now open 127.0.0.1:8080 in a browser or use `musicdb-client`:
+To start the server:
 
 ```sh
-musicdb-client 127.0.0.1:26314 gui
+musicdb-server ~/my_dbdir ~/music --tcp 0.0.0.0:26002
 ```
 
-### syncplayer
-
-`musicdb-client` has a syncplayer mode, where it will play back songs in sync with the server.
-It's usually easier to use syncplayer-network, which will get the song files from the server,
-but syncplayer-local may be more stable and responsive, because it assumes you have a local copy of the server's music files (`/music`) somewhere, for example at `~/music`:
+A simple script can start the server and then the client:
 
 ```sh
-musicdb-client 127.0.0.1:26314 syncplayer-network
+# if the server is already running, this command will fail since 0.0.0.0:26002 is already in use,
+# and you will never end up with 2+ servers running at the same time
+musicdb-server ~/my_dbdir ~/music --tcp 0.0.0.0:26002 &
+# wait for the server to load (on most systems, this should never take more than 0.1 seconds, but just in case...)
+sleep 1
+# now start the client
+musicdb-client 0.0.0.0:26002 gui
 ```
 
-```sh
-musicdb-client 127.0.0.1:26314 syncplayer-local ~/music
-```
-# TODOs
-
-If the server can't play a song, it seems to get stuck.
-It should instead send a notification to all clients about the error and skip to the next song.
-The clients should then display this notification to the user.
-TODO: Figure out what to do when no user acknowledges the notification. Send it again later or just pretend nothing happened?
+You could use this script from a `.desktop` file to get a menu entry which simply opens the player.

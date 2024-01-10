@@ -1,6 +1,5 @@
 use std::{
     collections::HashMap,
-    fmt::format,
     fs::{self, File},
     io::{BufReader, Read, Write},
     path::PathBuf,

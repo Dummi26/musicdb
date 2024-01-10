@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     fs,
     io::Write,
     path::{Path, PathBuf},
@@ -89,7 +89,7 @@ fn main() {
         }
     }
     eprintln!("\nloaded metadata of {} files.", songs.len());
-    let mut database = Database::new_empty(PathBuf::from("dbfile"), PathBuf::from(&lib_dir));
+    let mut database = Database::new_empty_in_dir(PathBuf::from("."), PathBuf::from(&lib_dir));
     let unknown_artist = database.add_artist_new(Artist {
         id: 0,
         name: format!("<unknown>"),
