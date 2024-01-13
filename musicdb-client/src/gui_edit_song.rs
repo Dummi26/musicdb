@@ -1,6 +1,9 @@
 use std::time::Instant;
 
-use musicdb_lib::data::{song::Song, ArtistId};
+use musicdb_lib::{
+    data::{song::Song, ArtistId},
+    server::Command,
+};
 use speedy2d::{color::Color, dimen::Vec2, shape::Rectangle};
 
 use crate::{
@@ -165,7 +168,30 @@ impl GuiElem for EditorForSongs {
                         gui.gui.c_editing_songs = None;
                         gui.gui.set_normal_ui_enabled(true);
                     }))),
-                    Event::Apply => eprintln!("TODO: Apply"),
+                    Event::Apply => {
+                        for song in &self.songs {
+                            let mut song = song.clone();
+
+                            let new_title = self
+                                .c_scrollbox
+                                .children
+                                .c_title
+                                .c_input
+                                .content
+                                .get_text()
+                                .trim();
+                            if !new_title.is_empty() {
+                                song.title = new_title.to_owned();
+                            }
+
+                            if let Some(artist_id) = self.c_scrollbox.children.c_artist.chosen_id {
+                                song.artist = artist_id;
+                                song.album = None;
+                            }
+                            info.actions
+                                .push(GuiAction::SendToServer(Command::ModifySong(song)));
+                        }
+                    }
                     Event::SetArtist(name, id) => {
                         self.c_scrollbox.children.c_artist.chosen_id = id;
                         self.c_scrollbox.children.c_artist.last_search = name.to_lowercase();
