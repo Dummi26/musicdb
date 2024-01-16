@@ -39,6 +39,8 @@ use crate::{
 
 pub enum GuiEvent {
     Refresh,
+    #[cfg(feature = "merscfg")]
+    RefreshMers,
     UpdatedQueue,
     UpdatedLibrary,
     Exit,
@@ -213,7 +215,7 @@ pub fn main(
     let sender = window.create_user_event_sender();
     window.run_loop(Gui::new(
         font,
-        database,
+        Arc::clone(&database),
         connection,
         Arc::new(Mutex::new(get_con)),
         event_sender_arc,
@@ -258,7 +260,7 @@ pub fn main(
                 ),
             ],
             #[cfg(feature = "merscfg")]
-            merscfg: crate::merscfg::MersCfg::new(config_dir.join("dynamic_config.mers")),
+            merscfg: crate::merscfg::MersCfg::new(config_dir.join("dynamic_config.mers"), database),
         },
     ));
 }
@@ -316,7 +318,8 @@ impl Gui {
         scroll_pixels_multiplier: f64,
         scroll_lines_multiplier: f64,
         scroll_pages_multiplier: f64,
-        gui_config: GuiConfig,
+        #[cfg(not(feature = "merscfg"))] gui_config: GuiConfig,
+        #[cfg(feature = "merscfg")] mut gui_config: GuiConfig,
     ) -> Self {
         let (notif_overlay, notif_sender) = NotifOverlay::new();
         let notif_sender_two = notif_sender.clone();
@@ -1195,13 +1198,14 @@ impl WindowHandler<GuiEvent> for Gui {
             Rectangle::new(Vec2::ZERO, self.size.into_f32()),
             Color::BLACK,
         );
+        let mut cfg = self.gui_config.take().unwrap();
+        // before the db is locked!
+        #[cfg(feature = "merscfg")]
+        MersCfg::run(&mut cfg, self, |m| &m.func_before_draw);
         let dblock = Arc::clone(&self.database);
         let mut dblock = dblock.lock().unwrap();
         let mut covers = self.covers.take().unwrap();
         let mut custom_images = self.custom_images.take().unwrap();
-        let mut cfg = self.gui_config.take().unwrap();
-        #[cfg(feature = "merscfg")]
-        MersCfg::run(&mut cfg, self, Some(&mut dblock), |m| &m.func_before_draw);
         let mut info = DrawInfo {
             time: draw_start_time,
             actions: Vec::with_capacity(0),
@@ -1450,15 +1454,17 @@ impl WindowHandler<GuiEvent> for Gui {
     fn on_user_event(&mut self, helper: &mut WindowHelper<GuiEvent>, user_event: GuiEvent) {
         match user_event {
             GuiEvent::Refresh => helper.request_redraw(),
+            #[cfg(feature = "merscfg")]
+            GuiEvent::RefreshMers => {
+                if let Some(mut cfg) = self.gui_config.take() {
+                    MersCfg::run(&mut cfg, self, |cfg| &crate::merscfg::OptFunc(None));
+                    self.gui_config = Some(cfg);
+                }
+            }
             GuiEvent::UpdatedLibrary => {
                 #[cfg(feature = "merscfg")]
                 if let Some(mut gc) = self.gui_config.take() {
-                    MersCfg::run(
-                        &mut gc,
-                        self,
-                        self.database.clone().lock().ok().as_mut().map(|v| &mut **v),
-                        |m| &m.func_library_updated,
-                    );
+                    MersCfg::run(&mut gc, self, |m| &m.func_library_updated);
                     self.gui_config = Some(gc);
                 } else {
                     eprintln!("WARN: Skipping call to merscfg's library_updated because gui_config is not available");
@@ -1469,12 +1475,7 @@ impl WindowHandler<GuiEvent> for Gui {
             GuiEvent::UpdatedQueue => {
                 #[cfg(feature = "merscfg")]
                 if let Some(mut gc) = self.gui_config.take() {
-                    MersCfg::run(
-                        &mut gc,
-                        self,
-                        self.database.clone().lock().ok().as_mut().map(|v| &mut **v),
-                        |m| &m.func_queue_updated,
-                    );
+                    MersCfg::run(&mut gc, self, |m| &m.func_queue_updated);
                     self.gui_config = Some(gc);
                 } else {
                     eprintln!("WARN: Skipping call to merscfg's queue_updated because gui_config is not available");

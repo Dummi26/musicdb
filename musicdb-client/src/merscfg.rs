@@ -24,7 +24,7 @@ use crate::{
     textcfg::TextBuilder,
 };
 
-pub struct OptFunc(Option<mers_lib::data::function::Function>);
+pub struct OptFunc(pub Option<mers_lib::data::function::Function>);
 impl OptFunc {
     pub fn none() -> Self {
         Self(None)
@@ -65,6 +65,7 @@ impl OptFunc {
 /// - `set_idle_screen_side_text_2_format`
 pub struct MersCfg {
     pub source_file: PathBuf,
+    pub database: Arc<Mutex<Database>>,
     // - - handler functions - -
     pub func_before_draw: OptFunc,
     pub func_library_updated: OptFunc,
@@ -75,6 +76,10 @@ pub struct MersCfg {
     pub var_window_size_in_pixels: Arc<RwLock<Data>>,
     pub var_idle_screen_cover_aspect_ratio: Arc<RwLock<Data>>,
     // - - results from running functions - -
+    pub channel_gui_actions: (
+        std::sync::mpsc::Sender<Command>,
+        std::sync::mpsc::Receiver<Command>,
+    ),
     pub updated_playing_status: Arc<AtomicU8>,
     pub updated_idle_status: Arc<AtomicU8>,
     pub updated_idle_screen_cover_pos: Arc<Updatable<Option<Rectangle>>>,
@@ -90,9 +95,10 @@ pub struct MersCfg {
 }
 
 impl MersCfg {
-    pub fn new(path: PathBuf) -> Self {
+    pub fn new(path: PathBuf, database: Arc<Mutex<Database>>) -> Self {
         Self {
             source_file: path,
+            database,
 
             func_before_draw: OptFunc::none(),
             func_library_updated: OptFunc::none(),
@@ -110,6 +116,7 @@ impl MersCfg {
                 mers_lib::data::float::Float(0.0),
             ))),
 
+            channel_gui_actions: std::sync::mpsc::channel(),
             updated_playing_status: Arc::new(AtomicU8::new(0)),
             updated_idle_status: Arc::new(AtomicU8::new(0)),
             updated_idle_screen_cover_pos: Arc::new(Updatable::new()),
@@ -127,12 +134,19 @@ impl MersCfg {
     fn custom_globals(
         &self,
         cfg: mers_lib::prelude_extend_config::Config,
+        db: &Arc<Mutex<Database>>,
         event_sender: Arc<UserEventSender<GuiEvent>>,
         notif_sender: Sender<
             Box<dyn FnOnce(&NotifOverlay) -> (Box<dyn GuiElem>, NotifInfo) + Send>,
         >,
     ) -> mers_lib::prelude_extend_config::Config {
-        cfg.add_var_arc(
+        let cmd_es = event_sender.clone();
+        let cmd_ga = self.channel_gui_actions.0.clone();
+        musicdb_mers::add(cfg, db, &Arc::new(move |cmd| {
+            cmd_ga.send(cmd).unwrap();
+            cmd_es.send_event(GuiEvent::RefreshMers).unwrap();
+        }))
+            .add_var_arc(
             "is_playing".to_owned(),
             Arc::clone(&self.var_is_playing),
             self.var_is_playing.read().unwrap().get().as_type(),
@@ -545,14 +559,11 @@ impl MersCfg {
         //     ]))))
     }
 
-    pub fn run(
-        gui_cfg: &mut GuiConfig,
-        gui: &mut Gui,
-        mut db: Option<&mut Database>,
-        run: impl FnOnce(&Self) -> &OptFunc,
-    ) {
-        // prepare vars
-        if let Some(db) = &mut db {
+    pub fn run(gui_cfg: &mut GuiConfig, gui: &mut Gui, run: impl FnOnce(&Self) -> &OptFunc) {
+        {
+            let mut db = gui_cfg.merscfg.database.lock().unwrap();
+            let db = &mut db;
+            // prepare vars
             *gui_cfg.merscfg.var_is_playing.write().unwrap() =
                 mers_lib::data::Data::new(mers_lib::data::bool::Bool(db.playing));
         }
@@ -571,6 +582,14 @@ impl MersCfg {
 
         // run
         run(&gui_cfg.merscfg).run();
+
+        loop {
+            if let Ok(a) = gui_cfg.merscfg.channel_gui_actions.1.try_recv() {
+                gui.exec_gui_action(GuiAction::SendToServer(a));
+            } else {
+                break;
+            }
+        }
 
         // apply updates
 
@@ -701,6 +720,7 @@ impl MersCfg {
         let (mut i1, mut i2, mut i3) = self
             .custom_globals(
                 mers_lib::prelude_extend_config::Config::new().bundle_std(),
+                &self.database,
                 event_sender,
                 notif_sender,
             )

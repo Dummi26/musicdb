@@ -4,7 +4,6 @@ use std::{
     path::PathBuf,
     sync::{Arc, Mutex},
     thread,
-    time::Duration,
 };
 
 use clap::{Parser, Subcommand};
@@ -18,8 +17,9 @@ use musicdb_lib::{
         CoverId, SongId,
     },
     load::ToFromBytes,
-    server::{get, Command},
+    server::Command,
 };
+#[cfg(feature = "speedy2d")]
 use speedy2d::color::Color;
 #[cfg(feature = "speedy2d")]
 mod gui;
@@ -27,6 +27,7 @@ mod gui;
 mod gui_anim;
 #[cfg(feature = "speedy2d")]
 mod gui_base;
+#[cfg(feature = "speedy2d")]
 mod gui_edit_song;
 #[cfg(feature = "speedy2d")]
 mod gui_idle_display;
@@ -75,6 +76,8 @@ enum Mode {
     /// play in sync with the server, and fetch the songs from it too. slower than the local variant for obvious reasons
     #[cfg(feature = "playback")]
     SyncplayerNetwork,
+    #[cfg(feature = "mers")]
+    RunMers { path: PathBuf },
 }
 
 fn get_config_file_path() -> PathBuf {
@@ -85,6 +88,10 @@ fn get_config_file_path() -> PathBuf {
 }
 
 fn main() {
+    #[cfg(not(feature = "speedy2d"))]
+    #[cfg(not(feature = "mers"))]
+    #[cfg(not(feature = "playback"))]
+    compile_error!("None of the optional features are enabled. Without at least one of these, the application is useless! See Cargo.toml for info.");
     // parse args
     let args = Args::parse();
     // start
@@ -132,7 +139,8 @@ fn main() {
                 if let Some(player) = &mut player {
                     let mut db = database.lock().unwrap();
                     if db.is_client_init() {
-                        player.update(&mut db);
+                        // command_sender does nothing. if a song finishes, we don't want to move to the next song, we want to wait for the server to send the NextSong event.
+                        player.update(&mut db, &Arc::new(|_| {}));
                     }
                 }
                 let update = Command::from_bytes(&mut con).unwrap();
@@ -154,7 +162,7 @@ fn main() {
             {
                 let occasional_refresh_sender = Arc::clone(&sender);
                 thread::spawn(move || loop {
-                    std::thread::sleep(Duration::from_secs(1));
+                    std::thread::sleep(std::time::Duration::from_secs(1));
                     if let Some(v) = &*occasional_refresh_sender.lock().unwrap() {
                         v.send_event(GuiEvent::Refresh).unwrap();
                     }
@@ -162,7 +170,7 @@ fn main() {
                 gui::main(
                     database,
                     con,
-                    get::Client::new(BufReader::new(
+                    musicdb_lib::server::get::Client::new(BufReader::new(
                         TcpStream::connect(addr).expect("opening get client connection"),
                     ))
                     .expect("initializing get client connection"),
@@ -173,6 +181,38 @@ fn main() {
         #[cfg(feature = "playback")]
         Mode::SyncplayerLocal { .. } | Mode::SyncplayerNetwork => {
             con_thread.join().unwrap();
+        }
+        #[cfg(feature = "mers")]
+        Mode::RunMers { path } => {
+            let mut src = mers_lib::prelude_compile::Source::new_from_file(path).unwrap();
+            let srca = Arc::new(src.clone());
+            let con = Mutex::new(con);
+            let (mut i1, mut i2, mut i3) = musicdb_mers::add(
+                mers_lib::prelude_compile::Config::new().bundle_std(),
+                &database,
+                &Arc::new(move |cmd: Command| cmd.to_bytes(&mut *con.lock().unwrap()).unwrap()),
+            )
+            .infos();
+            let program = mers_lib::prelude_compile::parse(&mut src, &srca)
+                .unwrap()
+                .compile(&mut i1, mers_lib::prelude_compile::CompInfo::default())
+                .unwrap();
+            match program.check(&mut i3, None) {
+                Ok(_) => {}
+                Err(e) => {
+                    eprintln!("{e}");
+                    std::process::exit(60);
+                }
+            };
+            // wait until db is synced
+            let dur = std::time::Duration::from_secs_f32(0.1);
+            loop {
+                std::thread::sleep(dur);
+                if database.lock().unwrap().is_client_init() {
+                    break;
+                }
+            }
+            program.run(&mut i2);
         }
     }
 }
@@ -198,6 +238,7 @@ fn get_cover(song: SongId, database: &Database) -> Option<CoverId> {
     }
 }
 
+#[cfg(feature = "speedy2d")]
 pub(crate) fn color_scale(c: Color, r: f32, g: f32, b: f32, new_alpha: Option<f32>) -> Color {
     Color::from_rgba(c.r() * r, c.g() * g, c.b() * b, new_alpha.unwrap_or(c.a()))
 }
