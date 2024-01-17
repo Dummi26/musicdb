@@ -38,6 +38,90 @@ pub fn add(
     cfg.with_list()
         .add_type(MusicDbIdT.to_string(), Ok(Arc::new(MusicDbIdT)))
         .add_var(
+            "send_server_notification".to_owned(),
+            func!(
+                |a, _| {
+                    if a.is_included_in(&data::string::StringT) {
+                        Ok(Type::empty_tuple())
+                    } else {
+                        Err(format!("Function argument must be `()`.").into())
+                    }
+                },
+                {
+                    let cmd = Arc::clone(cmd);
+                    move |a, _| {
+                        cmd(Command::ErrorInfo(
+                            String::new(),
+                            a.get()
+                                .as_any()
+                                .downcast_ref::<data::string::String>()
+                                .unwrap()
+                                .0
+                                .clone(),
+                        ));
+                        Data::empty_tuple()
+                    }
+                }
+            ),
+        )
+        .add_var(
+            "resume".to_owned(),
+            func!(
+                |a, _| {
+                    if a.is_included_in(&Type::empty_tuple()) {
+                        Ok(Type::empty_tuple())
+                    } else {
+                        Err(format!("Function argument must be `()`.").into())
+                    }
+                },
+                {
+                    let cmd = Arc::clone(cmd);
+                    move |_, _| {
+                        cmd(Command::Resume);
+                        Data::empty_tuple()
+                    }
+                }
+            ),
+        )
+        .add_var(
+            "pause".to_owned(),
+            func!(
+                |a, _| {
+                    if a.is_included_in(&Type::empty_tuple()) {
+                        Ok(Type::empty_tuple())
+                    } else {
+                        Err(format!("Function argument must be `()`.").into())
+                    }
+                },
+                {
+                    let cmd = Arc::clone(cmd);
+                    move |_, _| {
+                        cmd(Command::Pause);
+                        Data::empty_tuple()
+                    }
+                }
+            ),
+        )
+        .add_var(
+            "stop_playback".to_owned(),
+            func!(
+                |a, _| {
+                    if a.is_included_in(&Type::empty_tuple()) {
+                        Ok(Type::empty_tuple())
+                    } else {
+                        Err(format!("Function argument must be `()`.").into())
+                    }
+                },
+                {
+                    let cmd = Arc::clone(cmd);
+                    move |_, _| {
+                        cmd(Command::Stop);
+                        Data::empty_tuple()
+                    }
+                }
+            ),
+        )
+        .add_var(
             "queue_get_current_song".to_owned(),
             func!(
                 |a, _| {
@@ -122,7 +206,7 @@ pub fn add(
                     }
                 },
                 {
-                    let cmd = cmd.clone();
+                    let cmd = Arc::clone(cmd);
                     move |a, _| {
                         let a = a.get();
                         let a = &a.as_any().downcast_ref::<data::tuple::Tuple>().unwrap().0;
