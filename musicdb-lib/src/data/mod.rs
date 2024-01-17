@@ -7,6 +7,7 @@ use crate::load::ToFromBytes;
 
 pub mod album;
 pub mod artist;
+pub mod cache_manager;
 pub mod database;
 pub mod queue;
 pub mod song;

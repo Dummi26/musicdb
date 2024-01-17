@@ -9,7 +9,7 @@ use std::{
 };
 
 use clap::Parser;
-use musicdb_lib::server::run_server;
+use musicdb_lib::server::{run_server, run_server_caching_thread_opt};
 
 use musicdb_lib::data::database::Database;
 
@@ -35,6 +35,16 @@ struct Args {
     /// allow clients to access files in this directory, or the lib_dir if not specified.
     #[arg(long)]
     custom_files: Option<Option<PathBuf>>,
+
+    /// Use an extra background thread to cache more songs ahead of time. Useful for remote filesystems or very slow disks. If more than this many MiB of system memory are available, cache more songs.
+    #[arg(long, value_name = "max_avail_mem_in_mib")]
+    advanced_cache: Option<u64>,
+    /// Only does something if `--advanced-cache` is used. If available system memory drops below this amount (in MiB), remove songs from cache.
+    #[arg(long, value_name = "min_avail_mem_in_mib", default_value_t = 1024)]
+    advanced_cache_min_mem: u64,
+    /// Only does something if `--advanced-cache` is used. CacheManager will cache the current, next, ..., songs in the queue, but at most this many songs.
+    #[arg(long, value_name = "number_of_songs", default_value_t = 10)]
+    advanced_cache_song_lookahead_limit: u32,
 }
 
 #[tokio::main]
@@ -67,7 +77,21 @@ async fn main() {
                 web::main(db, sender, *addr).await;
             }
         } else {
-            run_server(database, args.tcp, None);
+            let mem_min = args.advanced_cache_min_mem;
+            let cache_limit = args.advanced_cache_song_lookahead_limit;
+            run_server_caching_thread_opt(
+                database,
+                args.tcp,
+                None,
+                args.advanced_cache.map(|max| {
+                    Box::new(
+                        move |cm: &mut musicdb_lib::data::cache_manager::CacheManager| {
+                            cm.set_memory_mib(mem_min, max.max(mem_min + 128));
+                            cm.set_cache_songs_count(cache_limit);
+                        },
+                    ) as _
+                }),
+            );
         }
     } else {
         eprintln!("nothing to do, not starting the server.");

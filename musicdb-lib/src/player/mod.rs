@@ -90,6 +90,22 @@ impl Player {
         db: &mut Database,
         command_sender: &Arc<impl Fn(Command) + Send + Sync + 'static>,
     ) {
+        self.update_uncache_opt(db, command_sender, true)
+    }
+    /// never uncache songs (this is something the CacheManager has to do if you decide to use this function)
+    pub fn update_dont_uncache(
+        &mut self,
+        db: &mut Database,
+        command_sender: &Arc<impl Fn(Command) + Send + Sync + 'static>,
+    ) {
+        self.update_uncache_opt(db, command_sender, true)
+    }
+    pub fn update_uncache_opt(
+        &mut self,
+        db: &mut Database,
+        command_sender: &Arc<impl Fn(Command) + Send + Sync + 'static>,
+        allow_uncaching: bool,
+    ) {
         macro_rules! apply_command {
             ($cmd:expr) => {
                 if self.allow_sending_commands {
@@ -193,18 +209,20 @@ impl Player {
                 self.current_song_id = SongOpt::None;
             }
             let next_song = db.queue.get_next_song().and_then(|v| db.get_song(v));
-            for &id in &self.cached {
-                if Some(id) != next_song.map(|v| v.id)
-                    && !matches!(self.current_song_id, SongOpt::Some(v) if v == id)
-                {
-                    if let Some(song) = db.songs().get(&id) {
-                        if let Ok(()) = song.uncache_data() {
+            if allow_uncaching {
+                for &id in &self.cached {
+                    if Some(id) != next_song.map(|v| v.id)
+                        && !matches!(self.current_song_id, SongOpt::Some(v) if v == id)
+                    {
+                        if let Some(song) = db.songs().get(&id) {
+                            if let Ok(_) = song.uncache_data() {
+                                self.cached.remove(&id);
+                                break;
+                            }
+                        } else {
                             self.cached.remove(&id);
                             break;
                         }
-                    } else {
-                        self.cached.remove(&id);
-                        break;
                     }
                 }
             }

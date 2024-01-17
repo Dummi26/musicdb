@@ -115,9 +115,27 @@ pub fn run_server(
     addr_tcp: Option<SocketAddr>,
     sender_sender: Option<tokio::sync::mpsc::Sender<mpsc::Sender<Command>>>,
 ) {
+    run_server_caching_thread_opt(database, addr_tcp, sender_sender, None)
+}
+#[cfg(feature = "playback")]
+pub fn run_server_caching_thread_opt(
+    database: Arc<Mutex<Database>>,
+    addr_tcp: Option<SocketAddr>,
+    sender_sender: Option<tokio::sync::mpsc::Sender<mpsc::Sender<Command>>>,
+    caching_thread: Option<Box<dyn FnOnce(&mut crate::data::cache_manager::CacheManager)>>,
+) {
     use std::time::Instant;
 
+    use crate::data::cache_manager::CacheManager;
+
     let mut player = Player::new().unwrap();
+    let cache_manager = if let Some(func) = caching_thread {
+        let mut cm = CacheManager::new(Arc::clone(&database));
+        func(&mut cm);
+        Some(cm)
+    } else {
+        None
+    };
     // commands sent to this will be handeled later in this function in an infinite loop.
     // these commands are sent to the database asap.
     let (command_sender, command_receiver) = mpsc::channel();
@@ -182,7 +200,11 @@ pub fn run_server(
             // at the start and once after every command sent to the server,
             let mut db = database.lock().unwrap();
             // update the player
-            player.update(&mut db, &command_sender);
+            if cache_manager.is_some() {
+                player.update_dont_uncache(&mut db, &command_sender);
+            } else {
+                player.update(&mut db, &command_sender);
+            }
             // autosave if necessary
             if let Some((first, last)) = db.times_data_modified {
                 let now = Instant::now();

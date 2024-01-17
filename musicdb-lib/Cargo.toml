@@ -11,6 +11,7 @@ base64 = "0.21.2"
 colorize = "0.1.0"
 rand = "0.8.5"
 rc-u8-reader = "2.0.16"
+sysinfo = "0.30.5"
 tokio = { version = "1.29.1", features = ["sync"] }
 
 [features]

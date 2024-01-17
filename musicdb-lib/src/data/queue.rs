@@ -354,7 +354,7 @@ impl Queue {
             }
         }
     }
-    fn advance_index_inner(
+    pub fn advance_index_inner(
         &mut self,
         mut path: Vec<usize>,
         actions: &mut Vec<QueueAction>,
