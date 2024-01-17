@@ -69,20 +69,14 @@ async fn main() {
     // database can be shared by multiple threads using Arc<Mutex<_>>
     let database = Arc::new(Mutex::new(database));
     if args.tcp.is_some() || args.web.is_some() {
-        if let Some(addr) = &args.web {
-            let (s, mut r) = tokio::sync::mpsc::channel(2);
-            let db = Arc::clone(&database);
-            thread::spawn(move || run_server(database, args.tcp, Some(s)));
-            if let Some(sender) = r.recv().await {
-                web::main(db, sender, *addr).await;
-            }
-        } else {
-            let mem_min = args.advanced_cache_min_mem;
-            let cache_limit = args.advanced_cache_song_lookahead_limit;
+        let mem_min = args.advanced_cache_min_mem;
+        let cache_limit = args.advanced_cache_song_lookahead_limit;
+        let args_tcp = args.tcp;
+        let run_server = move |database, sender_sender| {
             run_server_caching_thread_opt(
                 database,
-                args.tcp,
-                None,
+                args_tcp,
+                sender_sender,
                 args.advanced_cache.map(|max| {
                     Box::new(
                         move |cm: &mut musicdb_lib::data::cache_manager::CacheManager| {
@@ -92,6 +86,16 @@ async fn main() {
                     ) as _
                 }),
             );
+        };
+        if let Some(addr) = &args.web {
+            let (s, mut r) = tokio::sync::mpsc::channel(2);
+            let db = Arc::clone(&database);
+            thread::spawn(move || run_server(database, Some(s)));
+            if let Some(sender) = r.recv().await {
+                web::main(db, sender, *addr).await;
+            }
+        } else {
+            run_server(database, None);
         }
     } else {
         eprintln!("nothing to do, not starting the server.");
