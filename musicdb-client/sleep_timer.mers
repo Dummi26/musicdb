@@ -1,0 +1,62 @@
+"Wait time (minutes): ".print
+time := ().read_line.trim.parse_float.try((
+  () -> {
+    "Not a number!".eprintln
+    1.panic
+  }
+  f -> f
+))
+
+("Waiting for ", time, " minutes...").concat.eprintln
+
+secs := time.product(60)
+
+secs.sleep
+
+"Will pause in 10 minutes or once the current song finishes playing.".eprintln
+
+last_song := ().queue_get_current_song.try((
+  () -> {
+    ().pause
+    0.panic
+  }
+  song -> song
+))
+
+// after 10 mins, give up
+break := false
+{() -> { 600.sleep, &break = true }}.thread
+
+waiting_chars := ("|", "/", "-", "\\")
+waiting_index := 0
+
+// wait for song change or for 10 minutes to have elapsed
+().loop(() -> {
+  if break (()) else {
+    song := ().queue_get_current_song
+    song.try((
+      // no song playing, so exit
+      () -> (())
+      // a song is playing. check if it has changed
+      song -> if song.eq(last_song) {
+        // show a spinner
+        waiting_chars.get(waiting_index).try((
+          () -> ()
+          (c) -> ("\r", c).concat.eprint
+        ))
+        &waiting_index = waiting_index.sum(1)
+        if waiting_index.gtoe(waiting_chars.len) {
+          &waiting_index = 0
+        }
+        // wait a second before checking again
+        1.sleep
+      } else {
+        (())
+      }
+    ))
+  }
+})
+
+"\rPausing".eprintln
+().pause
+"Sleep Timer!".send_server_notification
