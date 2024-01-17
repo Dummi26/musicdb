@@ -60,12 +60,19 @@ impl Song {
     }
     pub fn uncache_data(&self) -> Result<bool, ()> {
         let mut cached = self.cached_data.0.lock().unwrap();
-        match cached.0.as_ref() {
-            Some(Ok(_data)) => {
-                cached.0 = None;
-                Ok(true)
+        match cached.0.take() {
+            Some(Ok(_data)) => Ok(true),
+            Some(Err(thread)) => {
+                if thread.is_finished() {
+                    // get value from thread and drop it
+                    _ = thread.join();
+                    Ok(true)
+                } else {
+                    // thread is still running...
+                    cached.0 = Some(Err(thread));
+                    Err(())
+                }
             }
-            Some(Err(_thread)) => Err(()),
             None => Ok(false),
         }
     }

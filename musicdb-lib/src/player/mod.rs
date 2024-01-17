@@ -98,7 +98,7 @@ impl Player {
         db: &mut Database,
         command_sender: &Arc<impl Fn(Command) + Send + Sync + 'static>,
     ) {
-        self.update_uncache_opt(db, command_sender, true)
+        self.update_uncache_opt(db, command_sender, false)
     }
     pub fn update_uncache_opt(
         &mut self,

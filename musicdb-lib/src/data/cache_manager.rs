@@ -1,11 +1,10 @@
 use std::{
-    collections::BTreeSet,
     sync::{
         atomic::{AtomicU32, AtomicU64},
         Arc, Mutex,
     },
     thread::{self, JoinHandle},
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use colorize::AnsiColor;
@@ -34,12 +33,13 @@ impl CacheManager {
             max_avail_mem: Arc::clone(&max_avail_mem),
             songs_to_cache: Arc::clone(&songs_to_cache),
             thread: Arc::new(thread::spawn(move || {
-                let sleep_dur_long = Duration::from_secs(60);
-                let sleep_dur_short = Duration::from_secs(5);
+                let sleep_dur_long = Duration::from_secs(20);
+                let sleep_dur_short = Duration::from_secs(1);
                 let mut si = sysinfo::System::new_with_specifics(
                     sysinfo::RefreshKind::new()
                         .with_memory(sysinfo::MemoryRefreshKind::new().with_ram()),
                 );
+                eprintln!("[{}] Starting CacheManager", "INFO".cyan());
                 let mut sleep_short = true;
                 loop {
                     thread::sleep(if sleep_short {
@@ -51,6 +51,7 @@ impl CacheManager {
                     si.refresh_memory_specifics(sysinfo::MemoryRefreshKind::new().with_ram());
                     let available_memory = si.available_memory();
                     let min_avail_mem = min_avail_mem.load(std::sync::atomic::Ordering::Relaxed);
+                    let low_memory = available_memory < min_avail_mem;
                     let max_avail_mem = max_avail_mem.load(std::sync::atomic::Ordering::Relaxed);
                     let songs_to_cache = songs_to_cache.load(std::sync::atomic::Ordering::Relaxed);
 
@@ -58,92 +59,100 @@ impl CacheManager {
 
                     let db = database.lock().unwrap();
 
-                    let (_queue_current_song, queue_next_song, ids_to_cache) =
-                        if songs_to_cache <= 2 {
-                            let queue_current_song = db.queue.get_current_song().copied();
-                            let queue_next_song = db.queue.get_next_song().copied();
+                    let (queue_current_song, queue_next_song, ids_to_cache) = if songs_to_cache <= 2
+                    {
+                        let queue_current_song = db.queue.get_current_song().copied();
+                        let queue_next_song = db.queue.get_next_song().copied();
 
-                            let ids_to_cache = queue_current_song
-                                .into_iter()
-                                .chain(queue_next_song)
-                                .collect::<Vec<_>>();
-
-                            (
-                                queue_current_song,
-                                queue_next_song,
-                                match (queue_current_song, queue_next_song) {
-                                    (None, None) => vec![],
-                                    (Some(a), None) | (None, Some(a)) => vec![a],
-                                    (Some(a), Some(b)) => {
-                                        if a == b {
-                                            vec![a]
-                                        } else {
-                                            vec![a, b]
-                                        }
+                        (
+                            queue_current_song,
+                            queue_next_song,
+                            match (queue_current_song, queue_next_song) {
+                                (None, None) => vec![],
+                                (Some(a), None) | (None, Some(a)) => vec![a],
+                                (Some(a), Some(b)) => {
+                                    if a == b {
+                                        vec![a]
+                                    } else {
+                                        vec![a, b]
                                     }
-                                },
-                            )
-                        } else {
-                            let mut queue = db.queue.clone();
-
-                            let mut actions = vec![];
-
-                            let queue_current_song = queue.get_current_song().copied();
-                            queue.advance_index_inner(vec![], &mut actions);
-                            let queue_next_song = if actions.is_empty() {
-                                queue.get_current_song().copied()
-                            } else {
-                                None
-                            };
-
-                            let mut ids_to_cache = queue_current_song
-                                .into_iter()
-                                .chain(queue_next_song)
-                                .collect::<Vec<_>>();
-
-                            for _ in 2..songs_to_cache {
-                                queue.advance_index_inner(vec![], &mut actions);
-                                if !actions.is_empty() {
-                                    break;
                                 }
-                                if let Some(id) = queue.get_current_song() {
-                                    if !ids_to_cache.contains(id) {
-                                        ids_to_cache.push(*id);
-                                    }
-                                } else {
+                            },
+                        )
+                    } else {
+                        let mut queue = db.queue.clone();
+
+                        let mut actions = vec![];
+
+                        let queue_current_song = queue.get_current_song().copied();
+                        queue.advance_index_inner(vec![], &mut actions);
+                        let queue_next_song = if actions.is_empty() {
+                            queue.get_current_song().copied()
+                        } else {
+                            None
+                        };
+
+                        let mut ids_to_cache = queue_current_song
+                            .into_iter()
+                            .chain(queue_next_song)
+                            .collect::<Vec<_>>();
+
+                        for _ in 2..songs_to_cache {
+                            queue.advance_index_inner(vec![], &mut actions);
+                            if !actions.is_empty() {
+                                break;
+                            }
+                            if let Some(id) = queue.get_current_song() {
+                                if !ids_to_cache.contains(id) {
+                                    ids_to_cache.push(*id);
+                                }
+                            } else {
+                                break;
+                            }
+                        }
+
+                        (queue_current_song, queue_next_song, ids_to_cache)
+                    };
+
+                    if low_memory {
+                        let mut found = false;
+                        for (id, song) in db.songs().iter() {
+                            if !ids_to_cache.contains(id) {
+                                if let Ok(true) = song.uncache_data() {
+                                    eprintln!(
+                                        "[{}] CacheManager :: Uncached bytes for song '{}'.",
+                                        "INFO".cyan(),
+                                        song.title
+                                    );
+                                    found = true;
                                     break;
                                 }
                             }
-
-                            (queue_current_song, queue_next_song, ids_to_cache)
-                        };
-
-                    if available_memory < min_avail_mem {
-                        let mem_to_free = min_avail_mem - available_memory;
-                        let mut freed_memory = 0;
-                        for (id, song) in db.songs().iter() {
-                            if !ids_to_cache.contains(id) {
-                                let cache = song.cached_data.0.lock().unwrap();
-                                if let Some(size) = cache.1 {
-                                    if let Ok(true) = song.uncache_data() {
-                                        freed_memory += size;
-                                        if freed_memory >= mem_to_free as usize {
+                        }
+                        if !found {
+                            // also uncache songs that should be cached, but not current/next song
+                            for id in ids_to_cache.iter().rev() {
+                                if !(queue_current_song.is_some_and(|i| i == *id)
+                                    || queue_next_song.is_some_and(|i| i == *id))
+                                {
+                                    if let Some(song) = db.get_song(id) {
+                                        if let Ok(true) = song.uncache_data() {
+                                            eprintln!(
+                                                "[{}] CacheManager :: Uncached bytes for song '{}'.",
+                                                "INFO".cyan(),
+                                                song.title
+                                            );
+                                            found = true;
                                             break;
                                         }
                                     }
                                 }
                             }
                         }
-                        eprintln!(
-                            "[{}] CacheManager :: Uncaching songs freed {:.1} mb of memory",
-                            if freed_memory >= mem_to_free as usize {
-                                "INFO".cyan()
-                            } else {
-                                sleep_short = true;
-                                "INFO".blue()
-                            },
-                            freed_memory as f32 / 1024.0 / 1024.0
-                        );
+                        if found {
+                            // uncache more songs
+                            sleep_short = true;
+                        }
                     } else if available_memory > max_avail_mem {
                         // we have some memory left, maybe cache a song (or cache multiple if we know their byte-sizes)
                         for song in &ids_to_cache {
@@ -152,15 +161,14 @@ impl CacheManager {
                                     Err(false) => (),
                                     // thread already running, don't start a second one (otherwise we may load too many songs, using too much memory, causing a cache-uncache-cycle)
                                     Err(true) => {
-                                        sleep_short = true;
                                         break;
                                     }
                                     Ok(()) => {
                                         eprintln!(
-                                        "[{}] CacheManager :: Start caching bytes for song '{}'.",
-                                        "INFO".cyan(),
-                                        song.title
-                                    );
+                                            "[{}] CacheManager :: Start caching bytes for song '{}'.",
+                                            "INFO".cyan(),
+                                            song.title
+                                        );
                                         sleep_short = true;
                                         break;
                                     }

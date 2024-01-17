@@ -9,7 +9,7 @@ use std::{
 };
 
 use clap::Parser;
-use musicdb_lib::server::{run_server, run_server_caching_thread_opt};
+use musicdb_lib::server::run_server_caching_thread_opt;
 
 use musicdb_lib::data::database::Database;
 
