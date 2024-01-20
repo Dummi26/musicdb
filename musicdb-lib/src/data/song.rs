@@ -88,8 +88,8 @@ impl Song {
         let mut cd = self.cached_data.0.lock().unwrap();
         match cd.0.as_ref() {
             None => (),
-            Some(Err(_)) => return Err(false),
-            Some(Ok(_)) => return Err(true),
+            Some(Err(_)) => return Err(true),
+            Some(Ok(_)) => return Err(false),
         };
         let src = if let Some(dlcon) = &db.remote_server_as_song_file_source {
             Err((self.id, Arc::clone(dlcon)))
