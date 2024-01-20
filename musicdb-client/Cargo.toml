@@ -16,7 +16,7 @@ mers_lib = { version = "0.3.2", optional = true }
 musicdb-mers = { version = "0.1.0", path = "../musicdb-mers", optional = true }
 
 [features]
-default = ["gui"]
+default = ["gui", "mers", "merscfg"]
 # gui:
 #   enables the gui mode
 # merscfg:

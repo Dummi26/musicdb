@@ -1,0 +1,289 @@
+gen_escape_str := str -> {
+  "echo".run_command(("-ne", str)).try((
+    (s, stdout, stderr) -> if s.eq(0) stdout else ""
+    e -> ""
+  ))
+}
+gen_color := mode -> ("\\x1b[", mode, "m").concat.gen_escape_str
+
+// 0: reset | 1: bold, 2: dim, 3: italic, 4: underline, 9: strikethrough
+// Colors: FG/BG=3x/4x (bright, if supported: 9x/10x) | 1red 2green 3yellow 4blue 5magenta 6cyan 7white 9default
+clr_reset := "0".gen_color
+clr_red := "31".gen_color
+clr_green := "32".gen_color
+clr_yellow := "33".gen_color
+clr_blue := "34".gen_color
+clr_magenta := "35".gen_color
+clr_cyan := "36".gen_color
+clr_white := "37".gen_color
+clr_default := "39".gen_color
+clr_dim := "2".gen_color
+
+clr_top_bar_decorations := "2;34" // dim blue
+clr_top_bar_title := "1;37".gen_color // bold white
+clr_top_bar_err := "1;31".gen_color // bold red
+clr_top_bar_empty := clr_dim // dim
+clr_artist := "35".gen_color // magenta
+clr_album := "32".gen_color // green
+clr_user_input_line_decor := "2;36".gen_color // dim cyan
+clr_user_input_line := "1;36".gen_color // bold cyan
+clr_unknown_cmd := "31".gen_color // red
+clr_buf_timestamp := "2;34".gen_color // dim blue
+clr_search := "1;32".gen_color // dim green
+
+// clear terminal and reset cursor and colors
+"\\x1b[2J\\x1b[H\\x1b[0m".gen_escape_str.eprint
+// save cursor, reset cursor and color
+term_before_redraw := "\\x1b[s\\x1b[H\\x1b[0m".gen_escape_str
+// restore cursor pos
+term_put_cursor_back := "\\x1b[u".gen_escape_str
+// erase rest of line in case previous version of this line was longer than new version, then add newline
+term_clear_rest_of_screen := "\\x1b[0J".gen_escape_str
+line_end := ("\\x1b[0K".gen_escape_str, clr_reset, "\n").concat
+
+str_repeat := (str, count) -> {
+  out := ""
+  ().loop(() -> if count.gt(0) {
+    &count = count.subtract(1)
+    &out = (out, str).concat
+  } else (()))
+  out
+}
+
+current_queue_index := [List<Int>] ().as_list
+
+reset_cursor_pos := true
+
+term_buf_len := 10
+term_buf := ("Welcome! Type `help` for help.").as_list
+
+bprintln := line -> {
+  time := "date".run_command(("+%T")).try((
+    (s, stdout, stderr) -> if s.eq(0) stdout.trim else ""
+    e -> ""
+  ))
+  &term_buf.push((clr_buf_timestamp, time, " | ", clr_reset, line).concat)
+  // remove start of term_buf if it gets too long
+  if term_buf.len.gt(term_buf_len.product(2)) {
+    &term_buf = term_buf.enumerate.filter_map((i, v) -> if i.lt(term_buf_len) () else (v)).as_list
+  }
+}
+
+custom_input_handler := [()/(String, String, List<String>)] ()
+
+update_ui := () -> {
+  screen := term_before_redraw
+  sprintln := line -> &screen = (screen, line, line_end).concat
+  // top bar
+  (top_bar_line_1, top_bar_line_2) := ().queue_get_current_song.try((
+    () -> ((clr_top_bar_empty, "[-]").concat, "")
+    id -> id.get_song.try((
+      () -> ((clr_top_bar_err, "[!]").concat, "")
+      {id: _, title: title, album: album, artist: artist, cover: _} -> {
+        l1 := (clr_top_bar_title, title).concat
+        artist := artist.get_artist
+        album := album.try_allow_unused((
+          () -> ()
+          id -> album.get_album
+        ))
+        l2 := (artist, album).try_allow_unused((
+          ((), ()) -> ""
+          ({id: _, name: artist_name, cover: _, albums: _, singles: _}, ()) -> (clr_dim, "by ", clr_artist, artist_name).concat
+          ((), {id: _, name: album_name, artist: _, cover: _, songs: _}) -> (clr_dim, "on ", clr_album, album_name).concat
+          ({id: _, name: artist_name, cover: _, albums: _, singles: _}, {id: _, name: album_name, artist: _, cover: _, songs: _}) -> (clr_dim, "by ", clr_reset, clr_artist, artist_name, clr_reset, clr_dim, " on ", clr_reset, clr_album, album_name).concat
+        ))
+        (l1, l2)
+      }
+    ))
+  ))
+  (if ().get_playing "⏵" else "⏸", " ", top_bar_line_1).concat.sprintln
+  top_bar_line_2.sprintln
+
+  // term buf
+  {
+    buf_ln := 0
+    ().loop(() -> if buf_ln.lt(term_buf_len){
+      term_buf.get(term_buf.len.subtract(term_buf_len).sum(buf_ln)).try((
+        () -> "".sprintln
+        (line) -> line.sprintln
+      ))
+      &buf_ln = buf_ln.sum(1)
+    } else (()))
+  }
+
+  // user input line
+  user_input_line := (clr_user_input_line_decor, custom_input_handler.try((() -> if current_queue_index.len.gt(0) ">> " else " > ", (_, v, _) -> v)), clr_user_input_line).concat
+    
+  // print screen
+  (
+    screen, user_input_line,
+    if reset_cursor_pos term_clear_rest_of_screen else term_put_cursor_back
+  ).concat.eprint
+  &reset_cursor_pos = false
+}
+
+if false ().update_ui // check
+
+show_queue_recursive := max_depth_layers -> {
+  stack := ((current_queue_index, -1, false)).as_list
+  ().loop(() -> {
+    &stack.pop.try((
+      () -> (())
+      ((index, depth, show)) -> if (max_depth_layers.eq(0), depth.lt(max_depth_layers)).any {
+        index := [List<Int>] index
+        line := if show {
+          o := ""
+          i := 0
+          ().loop(() -> if i.lt(depth) { &o = (o, "  ").concat, &i = i.sum(1) } else (()))
+          o
+        } else ""
+        if show &line = (clr_dim, line).concat
+        index.queue_get_elem.try((
+          () -> ()
+          {enabled: _, song: id} -> id.get_song.try((
+            () -> &line = (line, clr_reset, "[!] ", id).concat
+            {id: _, title: title, album: _, artist: _, cover: _} -> &line = (line, clr_reset, title).concat
+          ))
+          {enabled: _, loop: {total: total, done: done}} -> {
+            index := index
+            &index.push(0)
+            &stack.push((index, depth, false))
+            &line = (line, "Loop").concat
+          }
+          {enabled: _, random: ()} -> {
+            &line = (line, "Random").concat
+            index := index
+            &index.push(0)
+            &stack.push((index, depth.sum(1), true))
+          }
+          {enabled: _, shuffle: ()} -> {
+            &line = (line, "Shuffle").concat
+            index := index
+            &index.push(0)
+            &stack.push((index, depth, false))
+          }
+          {enabled: _, folder: {index: ix, length: length, name: name}} -> {
+            &line = (line, "[", name, "]").concat
+            i := length
+            ().loop(() -> {
+              &i = i.subtract(1)
+              if i.lt(0) (()) else {
+                index := index
+                &index.push(i)
+                &stack.push((index, depth.sum(1), true))
+              }
+            })
+          }
+        ))
+        if show line.bprintln
+      }
+    ))
+  })
+}
+
+// handlers
+on_resume := () -> ().update_ui
+on_pause := () -> ().update_ui
+on_next_song := () -> ().update_ui
+on_library_changed := () -> ().update_ui
+on_queue_changed := () -> ().update_ui
+on_notification_received := (title, content) -> {
+  ("Notification: ", title).concat.bprintln
+  content.bprintln
+  ().update_ui
+}
+// add as handlers
+on_resume.handle_event_resume
+on_pause.handle_event_pause
+on_next_song.handle_event_next_song
+on_library_changed.handle_event_library_changed
+on_queue_changed.handle_event_queue_changed
+on_notification_received.handle_event_notification_received
+
+&found_songs := [List<MusicDbId>] ().as_list
+
+().loop(() -> {
+  ().update_ui
+  line := ().read_line
+  exit := line.len.eq(0)
+  line := line.trim
+  &reset_cursor_pos = true
+  custom_input_handler.try((
+    () -> {
+      if (exit, line.eq("exit")).any  {
+        (())
+      } else if line.eq("help") {
+        "===== Help =====".bprintln
+        "Commands:".bprintln
+        "- exit, pause, play".bprintln
+        "- next, search, add song, clear queue, queue random, queue show".bprintln
+        "- send notif, set buf len, clear".bprintln
+      } else if line.eq("pause") {
+        ().pause
+      } else if line.eq("play") {
+        ().resume
+      } else if line.eq("next") {
+        ().next_song
+      } else if line.eq("clear") {
+        &term_buf = ().as_list
+      } else if line.eq("queue show") {
+        "== Queue ==".bprintln
+        0.show_queue_recursive
+      } else if line.eq("clear queue") {
+        ().queue_clear
+      } else if line.eq("queue random") {
+        ().queue_clear
+        (().as_list, 0).queue_add_loop
+        (0, 0).as_list.queue_add_random
+      } else if line.eq("send notif") {
+        &custom_input_handler = ("SN", "Notification: ", ().as_list)
+      } else if line.eq("set buf len") {
+        &custom_input_handler = ("SetBufLen", "Length (lines): ", ().as_list)
+      } else if line.eq("search") {
+        &custom_input_handler = ("Search", "Song: ", ().as_list)
+      } else if line.eq("add song") {
+        if found_songs.len.gt(0) {
+          &custom_input_handler = ("AddSong", ("(1-", found_songs.len, ") ").concat, ().as_list)
+        } else {
+          "Use `search` to find songs first!".bprintln
+        }
+      } else if line.len.gt(0) {
+        (clr_unknown_cmd, "Unknown command: ", line).concat.bprintln
+      }
+    }
+    (id, desc, args) -> {
+      &custom_input_handler = ()
+      args := [List<String>] args
+      if id.eq("SN") {
+        line.send_server_notification
+      } else if id.eq("SetBufLen") {
+        line.parse_int.try((
+          () -> (clr_unknown_cmd, "not an int").concat.bprintln
+          n -> &term_buf_len = n,
+        ))
+      } else if id.eq("Search") {
+        songs := ().all_songs.filter_map({id: id, title: title, album: _, artist: _, cover: _} -> title.index_of(line).try((() -> (), n -> ((id, title))))).take(term_buf_len)
+        if (songs.len.gt(0), songs.len.eq(term_buf_len)).all {
+          &songs = songs.take(term_buf_len.subtract(1))
+          (clr_search, "Search: ", clr_reset, line, clr_dim, " (found more results than will be displayed)").concat.bprintln
+        } else {
+          (clr_search, "Search: ", clr_reset, line).concat.bprintln
+        }
+        &found_songs = songs.map((id, _) -> id).as_list
+        songs.enumerate.for_each((i, (_, song)) -> (clr_dim, i.sum(1), " ", clr_reset, song).concat.bprintln)
+      } else if id.eq("AddSong") {
+        line.parse_int.try((
+          () -> (clr_unknown_cmd, "not an int (must be 1-", found_songs.len, ")").concat.bprintln
+          n -> found_songs.get(n.subtract(1)).try((
+            () -> (clr_unknown_cmd, "out of range (must be 1-", found_songs.len, ")").concat.bprintln
+            (id) -> (current_queue_index, id).queue_add_song
+          ))
+        ))
+      } else {
+        ("Unknown CIH ID ", id, ".").concat.eprintln
+        1.panic
+      }
+    }
+})
+
+clr_reset.eprintln

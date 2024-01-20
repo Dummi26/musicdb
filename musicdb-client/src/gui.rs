@@ -80,6 +80,7 @@ pub fn main(
     connection: TcpStream,
     get_con: get::Client<TcpStream>,
     event_sender_arc: Arc<Mutex<Option<UserEventSender<GuiEvent>>>>,
+    after_db_cmd: &Arc<Mutex<Option<Box<dyn FnMut(Command) + Send + Sync + 'static>>>>,
 ) {
     let config_dir = super::get_config_file_path();
     let config_file = config_dir.join("config_gui.toml");
@@ -262,6 +263,7 @@ pub fn main(
             #[cfg(feature = "merscfg")]
             merscfg: crate::merscfg::MersCfg::new(config_dir.join("dynamic_config.mers"), database),
         },
+        after_db_cmd,
     ));
 }
 
@@ -320,14 +322,18 @@ impl Gui {
         scroll_pages_multiplier: f64,
         #[cfg(not(feature = "merscfg"))] gui_config: GuiConfig,
         #[cfg(feature = "merscfg")] mut gui_config: GuiConfig,
+        #[cfg(feature = "merscfg")] after_db_cmd: &Arc<
+            Mutex<Option<Box<dyn FnMut(Command) + Send + Sync + 'static>>>,
+        >,
     ) -> Self {
         let (notif_overlay, notif_sender) = NotifOverlay::new();
         let notif_sender_two = notif_sender.clone();
         #[cfg(feature = "merscfg")]
-        match gui_config
-            .merscfg
-            .load(Arc::clone(&event_sender), notif_sender.clone())
-        {
+        match gui_config.merscfg.load(
+            Arc::clone(&event_sender),
+            notif_sender.clone(),
+            after_db_cmd,
+        ) {
             Err(e) => {
                 if !matches!(e.kind(), std::io::ErrorKind::NotFound) {
                     eprintln!("Couldn't load merscfg: {e}")

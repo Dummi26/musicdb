@@ -105,7 +105,12 @@ fn main() {
         Arc::new(Mutex::new(None));
     #[cfg(feature = "speedy2d")]
     let sender = Arc::clone(&update_gui_sender);
+    #[cfg(any(feature = "mers", feature = "merscfg"))]
+    let mers_after_db_updated_action: Arc<
+        Mutex<Option<Box<dyn FnMut(Command) + Send + Sync + 'static>>>,
+    > = Arc::new(Mutex::new(None));
     let con_thread = {
+        let mers_after_db_updated_action = Arc::clone(&mers_after_db_updated_action);
         let mode = mode.clone();
         let database = Arc::clone(&database);
         let mut con = con.try_clone().unwrap();
@@ -148,7 +153,13 @@ fn main() {
                 if let Some(player) = &mut player {
                     player.handle_command(&update);
                 }
-                database.lock().unwrap().apply_command(update);
+                #[cfg(any(feature = "mers", feature = "merscfg"))]
+                if let Some(action) = &mut *mers_after_db_updated_action.lock().unwrap() {
+                    database.lock().unwrap().apply_command(update.clone());
+                    action(update);
+                } else {
+                    database.lock().unwrap().apply_command(update);
+                }
                 #[cfg(feature = "speedy2d")]
                 if let Some(v) = &*update_gui_sender.lock().unwrap() {
                     v.send_event(GuiEvent::Refresh).unwrap();
@@ -175,6 +186,8 @@ fn main() {
                     ))
                     .expect("initializing get client connection"),
                     sender,
+                    #[cfg(feature = "merscfg")]
+                    &mers_after_db_updated_action,
                 )
             };
         }
@@ -191,6 +204,7 @@ fn main() {
                 mers_lib::prelude_compile::Config::new().bundle_std(),
                 &database,
                 &Arc::new(move |cmd: Command| cmd.to_bytes(&mut *con.lock().unwrap()).unwrap()),
+                &mers_after_db_updated_action,
             )
             .infos();
             let program = mers_lib::prelude_compile::parse(&mut src, &srca)

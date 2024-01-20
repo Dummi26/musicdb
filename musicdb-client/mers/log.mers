@@ -1,0 +1,22 @@
+// define handlers
+on_resume := () -> "Resumed".eprintln
+on_pause := () -> "Paused".eprintln
+on_next_song := () -> "Next song".eprintln
+on_library_changed := () -> "Library changed".eprintln
+on_queue_changed := () -> "Queue changed".eprintln
+on_notification_received := (title, content) -> ("Notif:\n  - ", title, " -\n", content).concat.eprintln
+
+// use handlers to handle events
+on_resume.handle_event_resume
+on_pause.handle_event_pause
+on_next_song.handle_event_next_song
+on_library_changed.handle_event_library_changed
+on_queue_changed.handle_event_queue_changed
+on_notification_received.handle_event_notification_received
+
+// because on_resume won't be called if playback was resumed before this client connected
+if ().get_playing {
+  "Resumed (was playing)".eprintln
+}
+
+().loop(() -> 60.sleep)

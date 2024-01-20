@@ -139,13 +139,14 @@ impl MersCfg {
         notif_sender: Sender<
             Box<dyn FnOnce(&NotifOverlay) -> (Box<dyn GuiElem>, NotifInfo) + Send>,
         >,
+        after_db_cmd: &Arc<Mutex<Option<Box<dyn FnMut(Command) + Send + Sync + 'static>>>>,
     ) -> mers_lib::prelude_extend_config::Config {
         let cmd_es = event_sender.clone();
         let cmd_ga = self.channel_gui_actions.0.clone();
         musicdb_mers::add(cfg, db, &Arc::new(move |cmd| {
             cmd_ga.send(cmd).unwrap();
             cmd_es.send_event(GuiEvent::RefreshMers).unwrap();
-        }))
+        }), after_db_cmd)
             .add_var_arc(
             "is_playing".to_owned(),
             Arc::clone(&self.var_is_playing),
@@ -704,9 +705,10 @@ impl MersCfg {
         notif_sender: Sender<
             Box<dyn FnOnce(&NotifOverlay) -> (Box<dyn GuiElem>, NotifInfo) + Send>,
         >,
+        after_db_cmd: &Arc<Mutex<Option<Box<dyn FnMut(Command) + Send + Sync + 'static>>>>,
     ) -> std::io::Result<Result<Result<(), (String, Option<CheckError>)>, CheckError>> {
         let src = mers_lib::prelude_compile::Source::new_from_file(self.source_file.clone())?;
-        Ok(self.load2(src, event_sender, notif_sender))
+        Ok(self.load2(src, event_sender, notif_sender, after_db_cmd))
     }
     fn load2(
         &mut self,
@@ -715,6 +717,7 @@ impl MersCfg {
         notif_sender: Sender<
             Box<dyn FnOnce(&NotifOverlay) -> (Box<dyn GuiElem>, NotifInfo) + Send>,
         >,
+        after_db_cmd: &Arc<Mutex<Option<Box<dyn FnMut(Command) + Send + Sync + 'static>>>>,
     ) -> Result<Result<(), (String, Option<CheckError>)>, CheckError> {
         let srca = Arc::new(src.clone());
         let (mut i1, mut i2, mut i3) = self
@@ -723,6 +726,7 @@ impl MersCfg {
                 &self.database,
                 event_sender,
                 notif_sender,
+                after_db_cmd,
             )
             .infos();
         let compiled = mers_lib::prelude_compile::parse(&mut src, &srca)?
