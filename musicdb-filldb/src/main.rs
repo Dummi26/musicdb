@@ -1,4 +1,5 @@
 use std::{
+    cmp::Ordering,
     collections::HashMap,
     fs,
     io::Write,
@@ -11,7 +12,7 @@ use musicdb_lib::data::{
     album::Album,
     artist::Artist,
     database::{Cover, Database},
-    song::Song,
+    song::{CachedData, Song},
     CoverId, DatabaseLocation, GeneralData,
 };
 
@@ -104,6 +105,22 @@ fn main() {
     let mut artists = HashMap::new();
     let len = songs.len();
     let mut prev_perc = 999;
+    songs.sort_by(|(path1, _, tags1), (path2, _, tags2)| {
+        // Sort by Disc->Track->Path
+        if let (Some(d1), Some(d2)) = (tags1.disc(), tags2.disc()) {
+            d1.cmp(&d2)
+        } else {
+            Ordering::Equal
+        }
+        .then_with(|| {
+            if let (Some(t1), Some(t2)) = (tags1.track(), tags2.track()) {
+                t1.cmp(&t2)
+            } else {
+                Ordering::Equal
+            }
+            .then_with(|| path1.cmp(&path2))
+        })
+    });
     for (i, (song_path, song_file_metadata, song_tags)) in songs.into_iter().enumerate() {
         let perc = i * 100 / len;
         if perc != prev_perc {
@@ -112,6 +129,18 @@ fn main() {
             prev_perc = perc;
         }
         let mut general = GeneralData::default();
+        match (song_tags.track(), song_tags.total_tracks()) {
+            (None, None) => {}
+            (Some(n), Some(t)) => general.tags.push(format!("TrackNr={n}/{t}")),
+            (Some(n), None) => general.tags.push(format!("TrackNr={n}")),
+            (None, Some(t)) => general.tags.push(format!("TrackNr=?/{t}")),
+        }
+        match (song_tags.disc(), song_tags.total_discs()) {
+            (None, None) => {}
+            (Some(n), Some(t)) => general.tags.push(format!("DiscNr={n}/{t}")),
+            (Some(n), None) => general.tags.push(format!("DiscNr={n}")),
+            (None, Some(t)) => general.tags.push(format!("DiscNr=?/{t}")),
+        }
         if let Some(year) = song_tags.year() {
             general.tags.push(format!("Year={year}"));
         }
@@ -220,7 +249,7 @@ fn main() {
                 }
             },
             general,
-            cached_data: Arc::new(Mutex::new(None)),
+            cached_data: CachedData(Arc::new(Mutex::new((None, None)))),
         });
     }
     eprintln!("searching for covers...");
