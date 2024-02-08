@@ -275,7 +275,6 @@ impl GuiElem for GuiScreen {
         _scan: speedy2d::window::KeyScancode,
     ) -> Vec<GuiAction> {
         if down {
-            // on releasing Ctrl in Ctrl+I => Idle keybind, don't unidle
             self.not_idle();
         }
         if self.hotkey.triggered(modifiers, down, key) {

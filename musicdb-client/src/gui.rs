@@ -1212,7 +1212,6 @@ impl Gui {
                     self.keybinds.remove(&b);
                 }
                 if let Some(bind) = bind {
-                    eprintln!("Setting keybind: {:b} {:?}", bind.modifiers, bind.key);
                     self.keybinds.insert(bind, action);
                 }
             }
@@ -1507,6 +1506,7 @@ impl WindowHandler<GuiEvent> for Gui {
                     for a in self.key_actions.get(action).execute() {
                         self.exec_gui_action(a);
                     }
+                    return;
                 }
             }
         }
