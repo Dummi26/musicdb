@@ -611,7 +611,7 @@ impl GuiElem for Slider {
         );
         let line_left = line_pos.top_left().x;
         let line_width = line_pos.width();
-        if self.config.mouse_down.0 {
+        if self.config.mouse_pressed.0 {
             self.val = self.min
                 + (self.max - self.min)
                     * 1.0f64.min(0.0f64.max(

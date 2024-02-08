@@ -1,6 +1,6 @@
 use std::{
     any::Any,
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     io::Cursor,
     net::TcpStream,
     sync::{mpsc::Sender, Arc, Mutex},
@@ -290,6 +290,8 @@ pub struct Gui {
     pub size: UVec2,
     pub mouse_pos: Vec2,
     pub font: Font,
+    pub keybinds: BTreeMap<KeyBinding, KeyActionId>,
+    pub key_actions: KeyActions,
     pub covers: Option<HashMap<CoverId, GuiServerImage>>,
     pub custom_images: Option<HashMap<String, GuiServerImage>>,
     pub modifiers: ModifiersState,
@@ -448,6 +450,8 @@ impl Gui {
             size: UVec2::ZERO,
             mouse_pos: Vec2::ZERO,
             font,
+            keybinds: BTreeMap::new(),
+            key_actions: KeyActions::default(),
             covers: Some(HashMap::new()),
             custom_images: Some(HashMap::new()),
             // font: Font::new(include_bytes!("/usr/share/fonts/TTF/FiraSans-Regular.ttf")).unwrap(),
@@ -463,6 +467,32 @@ impl Gui {
             last_performance_check: Instant::now(),
             average_frame_time_ms: 0,
             frames_drawn: 0,
+        }
+    }
+
+    fn get_specific_gui_elem_config(&mut self, elem: SpecificGuiElem) -> &mut GuiElemCfg {
+        match elem {
+            SpecificGuiElem::SearchArtist => self
+                .gui
+                .c_main_view
+                .children
+                .library_browser
+                .c_search_artist
+                .config_mut(),
+            SpecificGuiElem::SearchAlbum => self
+                .gui
+                .c_main_view
+                .children
+                .library_browser
+                .c_search_album
+                .config_mut(),
+            SpecificGuiElem::SearchSong => self
+                .gui
+                .c_main_view
+                .children
+                .library_browser
+                .c_search_song
+                .config_mut(),
         }
     }
 }
@@ -547,8 +577,14 @@ pub(crate) trait GuiElemInternal: GuiElem {
                 info.child_has_keyboard_focus = false;
             }
         }
+        info.mouse_pos_in_bounds = info.pos.contains(info.mouse_pos);
+        if !info.mouse_pos_in_bounds {
+            self.config_mut().mouse_down = (false, false, false);
+        }
         // call trait's draw function
         self.draw(info, g);
+        // reset cfg
+        self.config_mut().init = false;
         // reset info
         info.has_keyboard_focus = false;
         let focus_path = info.child_has_keyboard_focus;
@@ -626,9 +662,18 @@ pub(crate) trait GuiElemInternal: GuiElem {
                 &mut |v: &mut dyn GuiElem| {
                     if v.config().mouse_events {
                         match button {
-                            MouseButton::Left => v.config_mut().mouse_down.0 = true,
-                            MouseButton::Middle => v.config_mut().mouse_down.1 = true,
-                            MouseButton::Right => v.config_mut().mouse_down.2 = true,
+                            MouseButton::Left => {
+                                v.config_mut().mouse_down.0 = true;
+                                v.config_mut().mouse_pressed.0 = true;
+                            }
+                            MouseButton::Middle => {
+                                v.config_mut().mouse_down.1 = true;
+                                v.config_mut().mouse_pressed.1 = true;
+                            }
+                            MouseButton::Right => {
+                                v.config_mut().mouse_down.2 = true;
+                                v.config_mut().mouse_pressed.2 = true;
+                            }
                             MouseButton::Other(_) => {}
                         }
                         Some(v.mouse_down(button))
@@ -660,9 +705,18 @@ pub(crate) trait GuiElemInternal: GuiElem {
             self._recursive_all(&mut |v| {
                 if v.config().mouse_events {
                     match button {
-                        MouseButton::Left => v.config_mut().mouse_down.0 = false,
-                        MouseButton::Middle => v.config_mut().mouse_down.1 = false,
-                        MouseButton::Right => v.config_mut().mouse_down.2 = false,
+                        MouseButton::Left => {
+                            v.config_mut().mouse_down.0 = false;
+                            v.config_mut().mouse_pressed.0 = false;
+                        }
+                        MouseButton::Middle => {
+                            v.config_mut().mouse_down.1 = false;
+                            v.config_mut().mouse_pressed.1 = false;
+                        }
+                        MouseButton::Right => {
+                            v.config_mut().mouse_down.2 = false;
+                            v.config_mut().mouse_pressed.2 = false;
+                        }
                         MouseButton::Other(_) => {}
                     }
                     vec.extend(v.mouse_up(button));
@@ -947,6 +1001,9 @@ pub struct GuiElemCfg {
     /// if true, indicates that something (text size, screen size, ...) has changed
     /// and you should probably relayout and redraw from scratch.
     pub redraw: bool,
+    /// will be set to false after `draw`.
+    /// can be used to, for example, add the keybinds for your element.
+    pub init: bool,
     /// Position relative to the parent where this element should be drawn.
     /// ((0, 0), (1, 1)) is the default and fills all available space.
     /// ((0, 0.5), (0.5, 1)) fills the bottom left quarter.
@@ -955,8 +1012,10 @@ pub struct GuiElemCfg {
     /// in draw, use info.pos instead, as pixel_pos is only updated *after* draw().
     /// this can act like a "previous pos" field within draw.
     pub pixel_pos: Rectangle,
-    /// which mouse buttons were pressed down while the mouse was on this element and haven't been released since? (Left/Middle/Right)
+    /// which mouse buttons were pressed down while the mouse was on this element and haven't been released OR moved away since? (Left/Middle/Right)
     pub mouse_down: (bool, bool, bool),
+    /// which mouse buttons were pressed down while the mouse was on this element and haven't been released since? (Left/Middle/Right)
+    pub mouse_pressed: (bool, bool, bool),
     /// Set this to true to receive mouse click events when the mouse is within this element's bounds
     pub mouse_events: bool,
     /// Set this to true to receive scroll events when the mouse is within this element's bounds
@@ -1015,9 +1074,11 @@ impl Default for GuiElemCfg {
         Self {
             enabled: true,
             redraw: false,
+            init: true,
             pos: Rectangle::new(Vec2::ZERO, Vec2::new(1.0, 1.0)),
             pixel_pos: Rectangle::ZERO,
             mouse_down: (false, false, false),
+            mouse_pressed: (false, false, false),
             mouse_events: false,
             scroll_events: false,
             keyboard_events_watch: false,
@@ -1031,6 +1092,11 @@ impl Default for GuiElemCfg {
 #[allow(unused)]
 pub enum GuiAction {
     OpenMain,
+    /// Add a key action (and optionally bind it) and then call the given function
+    AddKeybind(Option<KeyBinding>, KeyAction, Box<dyn FnOnce(KeyActionId)>),
+    /// Binds the action to the keybinding, or unbinds it entirely
+    SetKeybind(KeyActionId, Option<KeyBinding>),
+    ForceIdle,
     /// false -> prevent idling, true -> end idling even if already idle
     EndIdle(bool),
     SetHighPerformance(bool),
@@ -1042,6 +1108,7 @@ pub enum GuiAction {
     ContextMenu(Option<(Vec<Box<dyn GuiElem>>)>),
     /// unfocuses all gui elements, then assigns keyboard focus to one with config().request_keyboard_focus == true if there is one.
     ResetKeyboardFocus,
+    SetFocused(SpecificGuiElem),
     SetDragging(
         Option<(
             Dragging,
@@ -1064,6 +1131,11 @@ pub enum Dragging {
     Queue(Queue),
     Queues(Vec<Queue>),
 }
+pub enum SpecificGuiElem {
+    SearchArtist,
+    SearchAlbum,
+    SearchSong,
+}
 
 /// GuiElems have access to this within draw.
 /// Except for `actions`, they should not change any of these values - GuiElem::draw will handle everything automatically.
@@ -1076,6 +1148,8 @@ pub struct DrawInfo<'a> {
     /// absolute position of the mouse on the screen.
     /// compare this to `pos` to find the mouse's relative position.
     pub mouse_pos: Vec2,
+    /// true if `info.pos.contains(info.mouse_pos)`.
+    pub mouse_pos_in_bounds: bool,
     pub helper: Option<&'a mut WindowHelper<GuiEvent>>,
     pub get_con: Arc<Mutex<get::Client<TcpStream>>>,
     pub covers: &'a mut HashMap<CoverId, GuiServerImage>,
@@ -1114,6 +1188,34 @@ impl Gui {
                     self.exec_gui_action(action);
                 }
             }
+            GuiAction::AddKeybind(bind, action, func) => {
+                let id = self.key_actions.add(action);
+                if let Some(bind) = bind {
+                    self.keybinds.insert(bind, id);
+                }
+                func(id);
+            }
+            GuiAction::SetKeybind(action, bind) => {
+                for b in self
+                    .keybinds
+                    .iter()
+                    .filter_map(|(b, a)| {
+                        if a.get_index() == action.get_index() {
+                            Some(b)
+                        } else {
+                            None
+                        }
+                    })
+                    .copied()
+                    .collect::<Vec<_>>()
+                {
+                    self.keybinds.remove(&b);
+                }
+                if let Some(bind) = bind {
+                    eprintln!("Setting keybind: {:b} {:?}", bind.modifiers, bind.key);
+                    self.keybinds.insert(bind, action);
+                }
+            }
             GuiAction::SendToServer(cmd) => {
                 #[cfg(debug_assertions)]
                 eprintln!("[DEBUG] Sending command to server: {cmd:?}");
@@ -1122,6 +1224,11 @@ impl Gui {
                 }
             }
             GuiAction::ShowNotification(func) => _ = self.notif_sender.send(func),
+            GuiAction::SetFocused(elem) => {
+                self.get_specific_gui_elem_config(elem)
+                    .request_keyboard_focus = true;
+                self.gui._keyboard_reset_focus();
+            }
             GuiAction::ResetKeyboardFocus => _ = self.gui._keyboard_reset_focus(),
             GuiAction::SetDragging(d) => self.dragging = d,
             GuiAction::SetHighPerformance(d) => self.high_performance = d,
@@ -1172,6 +1279,9 @@ impl Gui {
             }
             GuiAction::Do(f) => f(self),
             GuiAction::Exit => _ = self.event_sender.send_event(GuiEvent::Exit),
+            GuiAction::ForceIdle => {
+                self.gui.force_idle();
+            }
             GuiAction::EndIdle(v) => {
                 if v {
                     self.gui.unidle();
@@ -1219,6 +1329,7 @@ impl WindowHandler<GuiEvent> for Gui {
             database: &mut *dblock,
             font: &self.font,
             mouse_pos: self.mouse_pos,
+            mouse_pos_in_bounds: false,
             get_con: Arc::clone(&self.get_con),
             covers: &mut covers,
             custom_images: &mut custom_images,
@@ -1388,6 +1499,17 @@ impl WindowHandler<GuiEvent> for Gui {
         scancode: KeyScancode,
     ) {
         helper.request_redraw();
+        // handle keybinds unless settings are open, opening or closing
+        if self.gui.settings.0 == false && self.gui.settings.1.is_none() {
+            if let Some(key) = virtual_key_code {
+                let keybind = KeyBinding::new(&self.modifiers, key);
+                if let Some(action) = self.keybinds.get(&keybind) {
+                    for a in self.key_actions.get(action).execute() {
+                        self.exec_gui_action(a);
+                    }
+                }
+            }
+        }
         if let Some(VirtualKeyCode::Tab) = virtual_key_code {
             if !(self.modifiers.ctrl() || self.modifiers.alt() || self.modifiers.logo()) {
                 self.gui._keyboard_move_focus(self.modifiers.shift(), false);
@@ -1573,6 +1695,92 @@ impl GuiServerImage {
                 }
             }
         }
+    }
+}
+
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
+pub struct KeyBinding {
+    pub modifiers: u8,
+    pub key: VirtualKeyCode,
+}
+impl KeyBinding {
+    const CTRL: u8 = 1;
+    const ALT: u8 = 2;
+    const SHIFT: u8 = 4;
+    const META: u8 = 8;
+    pub fn new(modifiers: &ModifiersState, key: VirtualKeyCode) -> Self {
+        Self {
+            modifiers: if modifiers.ctrl() { Self::CTRL } else { 0 }
+                | if modifiers.alt() { Self::ALT } else { 0 }
+                | if modifiers.shift() { Self::SHIFT } else { 0 }
+                | if modifiers.logo() { Self::META } else { 0 },
+            key,
+        }
+    }
+    pub fn ctrl(key: VirtualKeyCode) -> Self {
+        Self {
+            modifiers: Self::CTRL,
+            key,
+        }
+    }
+    pub fn ctrl_shift(key: VirtualKeyCode) -> Self {
+        Self {
+            modifiers: Self::CTRL | Self::SHIFT,
+            key,
+        }
+    }
+    pub fn get_ctrl(&self) -> bool {
+        self.modifiers & Self::CTRL != 0
+    }
+    pub fn get_alt(&self) -> bool {
+        self.modifiers & Self::ALT != 0
+    }
+    pub fn get_shift(&self) -> bool {
+        self.modifiers & Self::SHIFT != 0
+    }
+    pub fn get_meta(&self) -> bool {
+        self.modifiers & Self::META != 0
+    }
+}
+pub struct KeyAction {
+    pub category: String,
+    pub title: String,
+    pub description: String,
+    pub action: Box<dyn FnMut() -> Vec<GuiAction>>,
+    pub enabled: bool,
+}
+impl KeyAction {
+    pub fn execute(&mut self) -> Vec<GuiAction> {
+        if self.enabled {
+            (self.action)()
+        } else {
+            vec![]
+        }
+    }
+}
+#[derive(Default)]
+pub struct KeyActions(Vec<KeyAction>);
+#[derive(Clone, Copy)]
+pub struct KeyActionId(usize);
+impl KeyActionId {
+    pub fn get_index(&self) -> usize {
+        self.0
+    }
+}
+impl KeyActions {
+    pub fn add(&mut self, action: KeyAction) -> KeyActionId {
+        let id = KeyActionId(self.0.len());
+        self.0.push(action);
+        id
+    }
+    pub fn get(&mut self, action: &KeyActionId) -> &mut KeyAction {
+        &mut self.0[action.0]
+    }
+    pub fn view(&self) -> &[KeyAction] {
+        &self.0
+    }
+    pub fn iter(&self) -> impl Iterator<Item = (KeyActionId, &KeyAction)> {
+        self.0.iter().enumerate().map(|(i, v)| (KeyActionId(i), v))
     }
 }
 

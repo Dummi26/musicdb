@@ -4,7 +4,10 @@ use musicdb_lib::{data::queue::QueueContent, server::Command};
 use speedy2d::{color::Color, dimen::Vec2, shape::Rectangle, window::VirtualKeyCode, Graphics2D};
 
 use crate::{
-    gui::{DrawInfo, GuiAction, GuiElem, GuiElemCfg, GuiElemChildren},
+    gui::{
+        DrawInfo, GuiAction, GuiElem, GuiElemCfg, GuiElemChildren, KeyAction, KeyBinding,
+        SpecificGuiElem,
+    },
     gui_anim::AnimationController,
     gui_base::{Button, Panel},
     gui_edit_song::EditorForSongs,
@@ -271,7 +274,10 @@ impl GuiElem for GuiScreen {
         key: Option<speedy2d::window::VirtualKeyCode>,
         _scan: speedy2d::window::KeyScancode,
     ) -> Vec<GuiAction> {
-        self.not_idle();
+        if down {
+            // on releasing Ctrl in Ctrl+I => Idle keybind, don't unidle
+            self.not_idle();
+        }
         if self.hotkey.triggered(modifiers, down, key) {
             self.config.request_keyboard_focus = true;
             vec![GuiAction::ResetKeyboardFocus]
@@ -284,6 +290,45 @@ impl GuiElem for GuiScreen {
         vec![]
     }
     fn draw(&mut self, info: &mut DrawInfo, _g: &mut Graphics2D) {
+        if self.config.init {
+            info.actions.extend([
+                GuiAction::AddKeybind(
+                    Some(KeyBinding::ctrl(VirtualKeyCode::Q)),
+                    KeyAction {
+                        category: "General".to_owned(),
+                        title: "Quit".to_owned(),
+                        description: "Closes the application".to_owned(),
+                        action: Box::new(|| vec![GuiAction::Exit]),
+                        enabled: true,
+                    },
+                    Box::new(|_| {}),
+                ),
+                GuiAction::AddKeybind(
+                    Some(KeyBinding::ctrl(VirtualKeyCode::I)),
+                    KeyAction {
+                        category: "General".to_owned(),
+                        title: "Idle".to_owned(),
+                        description: "Opens the idle display".to_owned(),
+                        action: Box::new(|| vec![GuiAction::ForceIdle]),
+                        enabled: true,
+                    },
+                    Box::new(|_| {}),
+                ),
+                GuiAction::AddKeybind(
+                    Some(KeyBinding::ctrl(VirtualKeyCode::F)),
+                    KeyAction {
+                        category: "Library".to_owned(),
+                        title: "Search songs".to_owned(),
+                        description: "moves keyboard focus to the song search".to_owned(),
+                        action: Box::new(|| {
+                            vec![GuiAction::SetFocused(SpecificGuiElem::SearchSong)]
+                        }),
+                        enabled: true,
+                    },
+                    Box::new(|_| {}),
+                ),
+            ]);
+        }
         // idle stuff
         if self.prev_mouse_pos != info.mouse_pos {
             self.prev_mouse_pos = info.mouse_pos;

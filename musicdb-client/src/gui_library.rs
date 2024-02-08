@@ -46,13 +46,13 @@ with Regex search and drag-n-drop.
 
 pub struct LibraryBrowser {
     config: GuiElemCfg,
-    c_search_artist: TextField,
-    c_search_album: TextField,
-    c_search_song: TextField,
-    c_scroll_box: ScrollBox<Vec<ListElement>>,
-    c_filter_button: Button<[Label; 1]>,
-    c_filter_panel: FilterPanel,
-    c_selected_counter_panel: Panel<[Label; 1]>,
+    pub c_search_artist: TextField,
+    pub c_search_album: TextField,
+    pub c_search_song: TextField,
+    pub c_scroll_box: ScrollBox<Vec<ListElement>>,
+    pub c_filter_button: Button<[Label; 1]>,
+    pub c_filter_panel: FilterPanel,
+    pub c_selected_counter_panel: Panel<[Label; 1]>,
     // - - -
     library_sorted: Vec<(ArtistId, Vec<SongId>, Vec<(AlbumId, Vec<SongId>)>)>,
     library_filtered: Vec<(
