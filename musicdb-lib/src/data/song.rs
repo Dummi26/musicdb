@@ -112,7 +112,7 @@ impl Song {
             None
         }
     }
-    /// Gets the cached data, if available.
+    /// Gets or loads the cached data.
     /// If a thread is running to load the data, it *is* awaited.
     /// This function will block until the data is loaded.
     /// If it still returns none, some error must have occured.

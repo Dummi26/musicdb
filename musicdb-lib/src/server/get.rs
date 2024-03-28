@@ -122,10 +122,8 @@ pub fn handle_one_connection_as_get(
                                 .next()
                                 .and_then(|id| id.parse().ok())
                                 .and_then(|id| {
-                                    db.lock()
-                                        .unwrap()
-                                        .get_song(&id)
-                                        .and_then(|song| song.cached_data())
+                                    let db = db.lock().unwrap();
+                                    db.get_song(&id).and_then(|song| song.cached_data_now(&db))
                                 })
                         {
                             writeln!(connection.get_mut(), "len: {}", bytes.len())?;
