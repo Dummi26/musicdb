@@ -102,6 +102,14 @@ impl Song {
         })));
         Ok(())
     }
+    /// If the song's data is cached, returns the number of bytes.
+    pub fn has_cached_data(&self) -> Option<usize> {
+        if let Some(Ok(v)) = self.cached_data.0.lock().unwrap().0.as_ref() {
+            Some(v.len())
+        } else {
+            None
+        }
+    }
     /// Gets the cached data, if available.
     /// If a thread is running to load the data, it is not awaited.
     /// This function doesn't block.

@@ -9,6 +9,8 @@ use std::{
 
 use colorize::AnsiColor;
 
+use crate::data::queue::{Queue, QueueContent};
+
 use super::database::Database;
 
 // CacheManage will never uncache the currently playing song or the song that will be played next.
@@ -42,6 +44,8 @@ impl CacheManager {
                 );
                 eprintln!("[{}] Starting CacheManager", "INFO".cyan());
                 let mut sleep_short = true;
+                let cleanup_max = 100;
+                let mut cleanup_countdown = cleanup_max;
                 loop {
                     thread::sleep(if sleep_short {
                         sleep_dur_short
@@ -49,6 +53,7 @@ impl CacheManager {
                         sleep_dur_long
                     });
                     sleep_short = false;
+                    // memory stuff
                     si.refresh_memory_specifics(sysinfo::MemoryRefreshKind::new().with_ram());
                     let available_memory = si.available_memory();
                     let min_avail_mem = min_avail_mem.load(std::sync::atomic::Ordering::Relaxed);
@@ -112,7 +117,7 @@ impl CacheManager {
                             if !ids_to_cache.contains(id) {
                                 if let Ok(true) = song.uncache_data() {
                                     eprintln!(
-                                        "[{}] CacheManager :: Uncached bytes for song '{}'.",
+                                        "[{}] CacheManager :: Uncached bytes for song '{}' (memory limit).",
                                         "INFO".cyan(),
                                         song.title
                                     );
@@ -130,7 +135,7 @@ impl CacheManager {
                                     if let Some(song) = db.get_song(id) {
                                         if let Ok(true) = song.uncache_data() {
                                             eprintln!(
-                                                "[{}] CacheManager :: Uncached bytes for song '{}'.",
+                                                "[{}] CacheManager :: Uncached bytes for song '{}' (memory limit).",
                                                 "INFO".cyan(),
                                                 song.title
                                             );
@@ -180,6 +185,35 @@ impl CacheManager {
                             }
                         }
                     }
+
+                    // periodic cleanup?
+                    if cleanup_countdown > 0 {
+                        cleanup_countdown -= 1;
+                    } else {
+                        cleanup_countdown = cleanup_max;
+                        for (id, song) in db.songs() {
+                            if let Some(_size) = song.has_cached_data() {
+                                if !is_in_queue(*id, &db.queue) {
+                                    if let Ok(true) = song.uncache_data() {
+                                        eprintln!(
+                                            "[{}] CacheManager :: Uncached bytes for song '{}' (not in queue).",
+                                            "INFO".cyan(),
+                                            song.title
+                                        );
+                                    }
+                                }
+                                fn is_in_queue(id: u64, queue: &Queue) -> bool {
+                                    match queue.content() {
+                                        QueueContent::Song(v) => return *v == id,
+                                        QueueContent::Folder(folder) => {
+                                            folder.content.iter().any(|q| is_in_queue(id, q))
+                                        }
+                                        QueueContent::Loop(_, _, inner) => is_in_queue(id, inner),
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             })),
         }
@@ -187,7 +221,10 @@ impl CacheManager {
     /// Songs will be removed from cache if `available_memory < min_avail_mem`.
     /// New songs will only be cached if `available_memory > max_avail_mem`.
     /// `min` and `max` in MiB (1024*1024 Bytes)
-    pub fn set_memory_mib(&self, min: u64, max: u64) {
+    pub fn set_memory_mib(&self, min: u64, mut max: u64) {
+        if max < min + 16 {
+            max = min + 16;
+        }
         self.min_avail_mem
             .store(1024 * 1024 * min, std::sync::atomic::Ordering::Relaxed);
         self.max_avail_mem
