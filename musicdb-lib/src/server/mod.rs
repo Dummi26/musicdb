@@ -40,7 +40,11 @@ pub enum Command {
     QueueInsert(Vec<usize>, usize, Vec<Queue>),
     QueueRemove(Vec<usize>),
     QueueGoto(Vec<usize>),
+    // sent by clients when they want to shuffle a folder
+    QueueShuffle(Vec<usize>),
+    // sent by the server when the folder was shuffled
     QueueSetShuffle(Vec<usize>, Vec<usize>),
+    QueueUnshuffle(Vec<usize>),
 
     /// .id field is ignored!
     AddSong(Song),
@@ -256,47 +260,57 @@ pub fn handle_one_connection_as_control(
     }
 }
 
-const BYTE_RESUME: u8 = 0b11000000;
-const BYTE_PAUSE: u8 = 0b00110000;
-const BYTE_STOP: u8 = 0b11110000;
-const BYTE_NEXT_SONG: u8 = 0b11110010;
+// 01_***_*** => Simple commands
+// 01_00*_*** => Playback
+// 01_010_*** => Other
+// 01_100_*** => Errors
+// 10_***_*** => Complicated commands
+// 10_00*_*** => Queue
+// 10_010_*** => Misc
+// 10_100_*** => Library
 
-const BYTE_SYNC_DATABASE: u8 = 0b01011000;
-const BYTE_QUEUE_UPDATE: u8 = 0b00011100;
-const BYTE_QUEUE_ADD: u8 = 0b00011010;
-const BYTE_QUEUE_INSERT: u8 = 0b00011110;
-const BYTE_QUEUE_REMOVE: u8 = 0b00011001;
-const BYTE_QUEUE_GOTO: u8 = 0b00011011;
-const BYTE_QUEUE_SET_SHUFFLE: u8 = 0b10011011;
+const BYTE_RESUME: u8 = 0b01_000_000;
+const BYTE_PAUSE: u8 = 0b01_000_001;
+const BYTE_STOP: u8 = 0b01_000_010;
+const BYTE_NEXT_SONG: u8 = 0b01_000_100;
 
-const BYTE_ADD_SONG: u8 = 0b01010000;
-const BYTE_ADD_ALBUM: u8 = 0b01010011;
-const BYTE_ADD_ARTIST: u8 = 0b01011100;
-const BYTE_ADD_COVER: u8 = 0b01011101;
-const BYTE_MODIFY_SONG: u8 = 0b10010000;
-const BYTE_MODIFY_ALBUM: u8 = 0b10010011;
-const BYTE_MODIFY_ARTIST: u8 = 0b10011100;
-const BYTE_REMOVE_SONG: u8 = 0b11010000;
-const BYTE_REMOVE_ALBUM: u8 = 0b11010011;
-const BYTE_REMOVE_ARTIST: u8 = 0b11011100;
-const BYTE_TAG_SONG_FLAG_SET: u8 = 0b11100000;
-const BYTE_TAG_SONG_FLAG_UNSET: u8 = 0b11100001;
-const BYTE_TAG_ALBUM_FLAG_SET: u8 = 0b11100010;
-const BYTE_TAG_ALBUM_FLAG_UNSET: u8 = 0b11100011;
-const BYTE_TAG_ARTIST_FLAG_SET: u8 = 0b11100110;
-const BYTE_TAG_ARTIST_FLAG_UNSET: u8 = 0b11100111;
-const BYTE_TAG_SONG_PROPERTY_SET: u8 = 0b11101001;
-const BYTE_TAG_SONG_PROPERTY_UNSET: u8 = 0b11101010;
-const BYTE_TAG_ALBUM_PROPERTY_SET: u8 = 0b11101011;
-const BYTE_TAG_ALBUM_PROPERTY_UNSET: u8 = 0b11101100;
-const BYTE_TAG_ARTIST_PROPERTY_SET: u8 = 0b11101110;
-const BYTE_TAG_ARTIST_PROPERTY_UNSET: u8 = 0b11101111;
+const BYTE_INIT_COMPLETE: u8 = 0b01_010_000;
+const BYTE_SET_SONG_DURATION: u8 = 0b01_010_001;
+const BYTE_SAVE: u8 = 0b01_010_010;
+const BYTE_ERRORINFO: u8 = 0b01_100_010;
 
-const BYTE_SET_SONG_DURATION: u8 = 0b11111000;
+const BYTE_QUEUE_UPDATE: u8 = 0b10_000_000;
+const BYTE_QUEUE_ADD: u8 = 0b10_000_001;
+const BYTE_QUEUE_INSERT: u8 = 0b10_000_010;
+const BYTE_QUEUE_REMOVE: u8 = 0b10_000_100;
+const BYTE_QUEUE_GOTO: u8 = 0b10_001_000;
+const BYTE_QUEUE_ACTION: u8 = 0b10_100;
+const SUBBYTE_ACTION_SHUFFLE: u8 = 0b01_000_001;
+const SUBBYTE_ACTION_SET_SHUFFLE: u8 = 0b01_000_010;
+const SUBBYTE_ACTION_UNSHUFFLE: u8 = 0b01_000_100;
 
-const BYTE_INIT_COMPLETE: u8 = 0b00110001;
-const BYTE_SAVE: u8 = 0b11110011;
-const BYTE_ERRORINFO: u8 = 0b11011011;
+const BYTE_SYNC_DATABASE: u8 = 0b10_010_100;
+
+const BYTE_LIB_ADD: u8 = 0b10_100_000;
+const BYTE_LIB_MODIFY: u8 = 0b10_100_001;
+const BYTE_LIB_REMOVE: u8 = 0b10_100_010;
+const BYTE_LIB_TAG: u8 = 0b10_100_100;
+const SUBBYTE_SONG: u8 = 0b10_001_000;
+const SUBBYTE_ALBUM: u8 = 0b10_001_001;
+const SUBBYTE_ARTIST: u8 = 0b10_001_010;
+const SUBBYTE_COVER: u8 = 0b10_001_100;
+const SUBBYTE_TAG_SONG_FLAG_SET: u8 = 0b10_001_000;
+const SUBBYTE_TAG_SONG_FLAG_UNSET: u8 = 0b10_001_001;
+const SUBBYTE_TAG_ALBUM_FLAG_SET: u8 = 0b10_001_010;
+const SUBBYTE_TAG_ALBUM_FLAG_UNSET: u8 = 0b10_001_100;
+const SUBBYTE_TAG_ARTIST_FLAG_SET: u8 = 0b10_010_000;
+const SUBBYTE_TAG_ARTIST_FLAG_UNSET: u8 = 0b10_010_001;
+const SUBBYTE_TAG_SONG_PROPERTY_SET: u8 = 0b10_010_010;
+const SUBBYTE_TAG_SONG_PROPERTY_UNSET: u8 = 0b10_010_100;
+const SUBBYTE_TAG_ALBUM_PROPERTY_SET: u8 = 0b10_100_000;
+const SUBBYTE_TAG_ALBUM_PROPERTY_UNSET: u8 = 0b10_100_001;
+const SUBBYTE_TAG_ARTIST_PROPERTY_SET: u8 = 0b10_100_010;
+const SUBBYTE_TAG_ARTIST_PROPERTY_UNSET: u8 = 0b10_100_100;
 
 impl ToFromBytes for Command {
     fn to_bytes<T>(&self, s: &mut T) -> Result<(), std::io::Error>
@@ -338,111 +352,144 @@ impl ToFromBytes for Command {
                 s.write_all(&[BYTE_QUEUE_GOTO])?;
                 index.to_bytes(s)?;
             }
+            Self::QueueShuffle(path) => {
+                s.write_all(&[BYTE_QUEUE_ACTION])?;
+                s.write_all(&[SUBBYTE_ACTION_SHUFFLE])?;
+                path.to_bytes(s)?;
+            }
             Self::QueueSetShuffle(path, map) => {
-                s.write_all(&[BYTE_QUEUE_SET_SHUFFLE])?;
+                s.write_all(&[BYTE_QUEUE_ACTION])?;
+                s.write_all(&[SUBBYTE_ACTION_SET_SHUFFLE])?;
                 path.to_bytes(s)?;
                 map.to_bytes(s)?;
             }
+            Self::QueueUnshuffle(path) => {
+                s.write_all(&[BYTE_QUEUE_ACTION])?;
+                s.write_all(&[SUBBYTE_ACTION_UNSHUFFLE])?;
+                path.to_bytes(s)?;
+            }
             Self::AddSong(song) => {
-                s.write_all(&[BYTE_ADD_SONG])?;
+                s.write_all(&[BYTE_LIB_ADD])?;
+                s.write_all(&[SUBBYTE_SONG])?;
                 song.to_bytes(s)?;
             }
             Self::AddAlbum(album) => {
-                s.write_all(&[BYTE_ADD_ALBUM])?;
+                s.write_all(&[BYTE_LIB_ADD])?;
+                s.write_all(&[SUBBYTE_ALBUM])?;
                 album.to_bytes(s)?;
             }
             Self::AddArtist(artist) => {
-                s.write_all(&[BYTE_ADD_ARTIST])?;
+                s.write_all(&[BYTE_LIB_ADD])?;
+                s.write_all(&[SUBBYTE_ARTIST])?;
                 artist.to_bytes(s)?;
             }
             Self::AddCover(cover) => {
-                s.write_all(&[BYTE_ADD_COVER])?;
+                s.write_all(&[BYTE_LIB_ADD])?;
+                s.write_all(&[SUBBYTE_COVER])?;
                 cover.to_bytes(s)?;
             }
             Self::ModifySong(song) => {
-                s.write_all(&[BYTE_MODIFY_SONG])?;
+                s.write_all(&[BYTE_LIB_MODIFY])?;
+                s.write_all(&[SUBBYTE_SONG])?;
                 song.to_bytes(s)?;
             }
             Self::ModifyAlbum(album) => {
-                s.write_all(&[BYTE_MODIFY_ALBUM])?;
+                s.write_all(&[BYTE_LIB_MODIFY])?;
+                s.write_all(&[SUBBYTE_ALBUM])?;
                 album.to_bytes(s)?;
             }
             Self::ModifyArtist(artist) => {
-                s.write_all(&[BYTE_MODIFY_ARTIST])?;
+                s.write_all(&[BYTE_LIB_MODIFY])?;
+                s.write_all(&[SUBBYTE_ARTIST])?;
                 artist.to_bytes(s)?;
             }
             Self::RemoveSong(song) => {
-                s.write_all(&[BYTE_REMOVE_SONG])?;
+                s.write_all(&[BYTE_LIB_REMOVE])?;
+                s.write_all(&[SUBBYTE_SONG])?;
                 song.to_bytes(s)?;
             }
             Self::RemoveAlbum(album) => {
-                s.write_all(&[BYTE_REMOVE_ALBUM])?;
+                s.write_all(&[BYTE_LIB_REMOVE])?;
+                s.write_all(&[SUBBYTE_ALBUM])?;
                 album.to_bytes(s)?;
             }
             Self::RemoveArtist(artist) => {
-                s.write_all(&[BYTE_REMOVE_ARTIST])?;
+                s.write_all(&[BYTE_LIB_REMOVE])?;
+                s.write_all(&[SUBBYTE_ARTIST])?;
                 artist.to_bytes(s)?;
             }
             Self::TagSongFlagSet(id, tag) => {
-                s.write_all(&[BYTE_TAG_SONG_FLAG_SET])?;
+                s.write_all(&[BYTE_LIB_TAG])?;
+                s.write_all(&[SUBBYTE_TAG_SONG_FLAG_SET])?;
                 id.to_bytes(s)?;
                 tag.to_bytes(s)?;
             }
             Self::TagSongFlagUnset(id, tag) => {
-                s.write_all(&[BYTE_TAG_SONG_FLAG_UNSET])?;
+                s.write_all(&[BYTE_LIB_TAG])?;
+                s.write_all(&[SUBBYTE_TAG_SONG_FLAG_UNSET])?;
                 id.to_bytes(s)?;
                 tag.to_bytes(s)?;
             }
             Self::TagAlbumFlagSet(id, tag) => {
-                s.write_all(&[BYTE_TAG_ALBUM_FLAG_SET])?;
+                s.write_all(&[BYTE_LIB_TAG])?;
+                s.write_all(&[SUBBYTE_TAG_ALBUM_FLAG_SET])?;
                 id.to_bytes(s)?;
                 tag.to_bytes(s)?;
             }
             Self::TagAlbumFlagUnset(id, tag) => {
-                s.write_all(&[BYTE_TAG_ALBUM_FLAG_UNSET])?;
+                s.write_all(&[BYTE_LIB_TAG])?;
+                s.write_all(&[SUBBYTE_TAG_ALBUM_FLAG_UNSET])?;
                 id.to_bytes(s)?;
                 tag.to_bytes(s)?;
             }
             Self::TagArtistFlagSet(id, tag) => {
-                s.write_all(&[BYTE_TAG_ARTIST_FLAG_SET])?;
+                s.write_all(&[BYTE_LIB_TAG])?;
+                s.write_all(&[SUBBYTE_TAG_ARTIST_FLAG_SET])?;
                 id.to_bytes(s)?;
                 tag.to_bytes(s)?;
             }
             Self::TagArtistFlagUnset(id, tag) => {
-                s.write_all(&[BYTE_TAG_ARTIST_FLAG_UNSET])?;
+                s.write_all(&[BYTE_LIB_TAG])?;
+                s.write_all(&[SUBBYTE_TAG_ARTIST_FLAG_UNSET])?;
                 id.to_bytes(s)?;
                 tag.to_bytes(s)?;
             }
             Self::TagSongPropertySet(id, key, val) => {
-                s.write_all(&[BYTE_TAG_SONG_PROPERTY_SET])?;
+                s.write_all(&[BYTE_LIB_TAG])?;
+                s.write_all(&[SUBBYTE_TAG_SONG_PROPERTY_SET])?;
                 id.to_bytes(s)?;
                 key.to_bytes(s)?;
                 val.to_bytes(s)?;
             }
             Self::TagSongPropertyUnset(id, key) => {
-                s.write_all(&[BYTE_TAG_SONG_PROPERTY_UNSET])?;
+                s.write_all(&[BYTE_LIB_TAG])?;
+                s.write_all(&[SUBBYTE_TAG_SONG_PROPERTY_UNSET])?;
                 id.to_bytes(s)?;
                 key.to_bytes(s)?;
             }
             Self::TagAlbumPropertySet(id, key, val) => {
-                s.write_all(&[BYTE_TAG_ALBUM_PROPERTY_SET])?;
+                s.write_all(&[BYTE_LIB_TAG])?;
+                s.write_all(&[SUBBYTE_TAG_ALBUM_PROPERTY_SET])?;
                 id.to_bytes(s)?;
                 key.to_bytes(s)?;
                 val.to_bytes(s)?;
             }
             Self::TagAlbumPropertyUnset(id, key) => {
-                s.write_all(&[BYTE_TAG_ALBUM_PROPERTY_UNSET])?;
+                s.write_all(&[BYTE_LIB_TAG])?;
+                s.write_all(&[SUBBYTE_TAG_ALBUM_PROPERTY_UNSET])?;
                 id.to_bytes(s)?;
                 key.to_bytes(s)?;
             }
             Self::TagArtistPropertySet(id, key, val) => {
-                s.write_all(&[BYTE_TAG_ARTIST_PROPERTY_SET])?;
+                s.write_all(&[BYTE_LIB_TAG])?;
+                s.write_all(&[SUBBYTE_TAG_ARTIST_PROPERTY_SET])?;
                 id.to_bytes(s)?;
                 key.to_bytes(s)?;
                 val.to_bytes(s)?;
             }
             Self::TagArtistPropertyUnset(id, key) => {
-                s.write_all(&[BYTE_TAG_ARTIST_PROPERTY_UNSET])?;
+                s.write_all(&[BYTE_LIB_TAG])?;
+                s.write_all(&[SUBBYTE_TAG_ARTIST_PROPERTY_UNSET])?;
                 id.to_bytes(s)?;
                 key.to_bytes(s)?;
             }
@@ -467,14 +514,12 @@ impl ToFromBytes for Command {
     where
         T: std::io::Read,
     {
-        let mut kind = [0];
-        s.read_exact(&mut kind)?;
         macro_rules! from_bytes {
             () => {
                 ToFromBytes::from_bytes(s)?
             };
         }
-        Ok(match kind[0] {
+        Ok(match s.read_byte()? {
             BYTE_RESUME => Self::Resume,
             BYTE_PAUSE => Self::Pause,
             BYTE_STOP => Self::Stop,
@@ -485,42 +530,93 @@ impl ToFromBytes for Command {
             BYTE_QUEUE_INSERT => Self::QueueInsert(from_bytes!(), from_bytes!(), from_bytes!()),
             BYTE_QUEUE_REMOVE => Self::QueueRemove(from_bytes!()),
             BYTE_QUEUE_GOTO => Self::QueueGoto(from_bytes!()),
-            BYTE_QUEUE_SET_SHUFFLE => Self::QueueSetShuffle(from_bytes!(), from_bytes!()),
-            BYTE_ADD_SONG => Self::AddSong(from_bytes!()),
-            BYTE_ADD_ALBUM => Self::AddAlbum(from_bytes!()),
-            BYTE_ADD_ARTIST => Self::AddArtist(from_bytes!()),
-            BYTE_MODIFY_SONG => Self::ModifySong(from_bytes!()),
-            BYTE_MODIFY_ALBUM => Self::ModifyAlbum(from_bytes!()),
-            BYTE_MODIFY_ARTIST => Self::ModifyArtist(from_bytes!()),
-            BYTE_REMOVE_SONG => Self::RemoveSong(from_bytes!()),
-            BYTE_REMOVE_ALBUM => Self::RemoveAlbum(from_bytes!()),
-            BYTE_REMOVE_ARTIST => Self::RemoveArtist(from_bytes!()),
-            BYTE_TAG_SONG_FLAG_SET => Self::TagSongFlagSet(from_bytes!(), from_bytes!()),
-            BYTE_TAG_SONG_FLAG_UNSET => Self::TagSongFlagUnset(from_bytes!(), from_bytes!()),
-            BYTE_TAG_ALBUM_FLAG_SET => Self::TagAlbumFlagSet(from_bytes!(), from_bytes!()),
-            BYTE_TAG_ALBUM_FLAG_UNSET => Self::TagAlbumFlagUnset(from_bytes!(), from_bytes!()),
-            BYTE_TAG_ARTIST_FLAG_SET => Self::TagArtistFlagSet(from_bytes!(), from_bytes!()),
-            BYTE_TAG_ARTIST_FLAG_UNSET => Self::TagArtistFlagUnset(from_bytes!(), from_bytes!()),
-            BYTE_TAG_SONG_PROPERTY_SET => {
-                Self::TagSongPropertySet(from_bytes!(), from_bytes!(), from_bytes!())
-            }
-            BYTE_TAG_SONG_PROPERTY_UNSET => {
-                Self::TagSongPropertyUnset(from_bytes!(), from_bytes!())
-            }
-            BYTE_TAG_ALBUM_PROPERTY_SET => {
-                Self::TagAlbumPropertySet(from_bytes!(), from_bytes!(), from_bytes!())
-            }
-            BYTE_TAG_ALBUM_PROPERTY_UNSET => {
-                Self::TagAlbumPropertyUnset(from_bytes!(), from_bytes!())
-            }
-            BYTE_TAG_ARTIST_PROPERTY_SET => {
-                Self::TagArtistPropertySet(from_bytes!(), from_bytes!(), from_bytes!())
-            }
-            BYTE_TAG_ARTIST_PROPERTY_UNSET => {
-                Self::TagArtistPropertyUnset(from_bytes!(), from_bytes!())
-            }
+            BYTE_QUEUE_ACTION => match s.read_byte()? {
+                SUBBYTE_ACTION_SHUFFLE => Self::QueueShuffle(from_bytes!()),
+                SUBBYTE_ACTION_SET_SHUFFLE => Self::QueueSetShuffle(from_bytes!(), from_bytes!()),
+                SUBBYTE_ACTION_UNSHUFFLE => Self::QueueUnshuffle(from_bytes!()),
+                _ => {
+                    eprintln!(
+                        "[{}] unexpected byte when reading command:queueAction; stopping playback.",
+                        "WARN".yellow()
+                    );
+                    Self::Stop
+                }
+            },
+            BYTE_LIB_ADD => match s.read_byte()? {
+                SUBBYTE_SONG => Self::AddSong(from_bytes!()),
+                SUBBYTE_ALBUM => Self::AddAlbum(from_bytes!()),
+                SUBBYTE_ARTIST => Self::AddArtist(from_bytes!()),
+                SUBBYTE_COVER => Self::AddCover(from_bytes!()),
+                _ => {
+                    eprintln!(
+                        "[{}] unexpected byte when reading command:libAdd; stopping playback.",
+                        "WARN".yellow()
+                    );
+                    Self::Stop
+                }
+            },
+            BYTE_LIB_MODIFY => match s.read_byte()? {
+                SUBBYTE_SONG => Self::ModifySong(from_bytes!()),
+                SUBBYTE_ALBUM => Self::ModifyAlbum(from_bytes!()),
+                SUBBYTE_ARTIST => Self::ModifyArtist(from_bytes!()),
+                _ => {
+                    eprintln!(
+                        "[{}] unexpected byte when reading command:libModify; stopping playback.",
+                        "WARN".yellow()
+                    );
+                    Self::Stop
+                }
+            },
+            BYTE_LIB_REMOVE => match s.read_byte()? {
+                SUBBYTE_SONG => Self::RemoveSong(from_bytes!()),
+                SUBBYTE_ALBUM => Self::RemoveAlbum(from_bytes!()),
+                SUBBYTE_ARTIST => Self::RemoveArtist(from_bytes!()),
+                _ => {
+                    eprintln!(
+                        "[{}] unexpected byte when reading command:libRemove; stopping playback.",
+                        "WARN".yellow()
+                    );
+                    Self::Stop
+                }
+            },
+            BYTE_LIB_TAG => match s.read_byte()? {
+                SUBBYTE_TAG_SONG_FLAG_SET => Self::TagSongFlagSet(from_bytes!(), from_bytes!()),
+                SUBBYTE_TAG_SONG_FLAG_UNSET => Self::TagSongFlagUnset(from_bytes!(), from_bytes!()),
+                SUBBYTE_TAG_ALBUM_FLAG_SET => Self::TagAlbumFlagSet(from_bytes!(), from_bytes!()),
+                SUBBYTE_TAG_ALBUM_FLAG_UNSET => {
+                    Self::TagAlbumFlagUnset(from_bytes!(), from_bytes!())
+                }
+                SUBBYTE_TAG_ARTIST_FLAG_SET => Self::TagArtistFlagSet(from_bytes!(), from_bytes!()),
+                SUBBYTE_TAG_ARTIST_FLAG_UNSET => {
+                    Self::TagArtistFlagUnset(from_bytes!(), from_bytes!())
+                }
+                SUBBYTE_TAG_SONG_PROPERTY_SET => {
+                    Self::TagSongPropertySet(from_bytes!(), from_bytes!(), from_bytes!())
+                }
+                SUBBYTE_TAG_SONG_PROPERTY_UNSET => {
+                    Self::TagSongPropertyUnset(from_bytes!(), from_bytes!())
+                }
+                SUBBYTE_TAG_ALBUM_PROPERTY_SET => {
+                    Self::TagAlbumPropertySet(from_bytes!(), from_bytes!(), from_bytes!())
+                }
+                SUBBYTE_TAG_ALBUM_PROPERTY_UNSET => {
+                    Self::TagAlbumPropertyUnset(from_bytes!(), from_bytes!())
+                }
+                SUBBYTE_TAG_ARTIST_PROPERTY_SET => {
+                    Self::TagArtistPropertySet(from_bytes!(), from_bytes!(), from_bytes!())
+                }
+                SUBBYTE_TAG_ARTIST_PROPERTY_UNSET => {
+                    Self::TagArtistPropertyUnset(from_bytes!(), from_bytes!())
+                }
+                _ => {
+                    eprintln!(
+                        "[{}] unexpected byte when reading command:libTag; stopping playback.",
+                        "WARN".yellow()
+                    );
+                    Self::Stop
+                }
+            },
             BYTE_SET_SONG_DURATION => Self::SetSongDuration(from_bytes!(), from_bytes!()),
-            BYTE_ADD_COVER => Self::AddCover(from_bytes!()),
             BYTE_INIT_COMPLETE => Self::InitComplete,
             BYTE_SAVE => Self::Save,
             BYTE_ERRORINFO => Self::ErrorInfo(from_bytes!(), from_bytes!()),
@@ -532,5 +628,16 @@ impl ToFromBytes for Command {
                 Self::Stop
             }
         })
+    }
+}
+
+trait ReadByte {
+    fn read_byte(&mut self) -> std::io::Result<u8>;
+}
+impl<T: Read> ReadByte for T {
+    fn read_byte(&mut self) -> std::io::Result<u8> {
+        let mut b = [0];
+        self.read_exact(&mut b)?;
+        Ok(b[0])
     }
 }

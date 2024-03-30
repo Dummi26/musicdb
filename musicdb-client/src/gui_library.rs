@@ -2082,6 +2082,8 @@ impl FilterType {
 }
 
 mod selected {
+    use musicdb_lib::data::queue::QueueFolder;
+
     use super::*;
     #[derive(Clone)]
     pub struct Selected(
@@ -2187,28 +2189,30 @@ mod selected {
                     }
                     if album_selected {
                         local_artist.push(
-                            QueueContent::Folder(
-                                0,
-                                local_album_owned,
-                                match db.albums().get(album) {
+                            QueueContent::Folder(QueueFolder {
+                                index: 0,
+                                content: local_album_owned,
+                                name: match db.albums().get(album) {
                                     Some(v) => v.name.clone(),
                                     None => "< unknown album >".to_owned(),
                                 },
-                            )
+                                order: None,
+                            })
                             .into(),
                         );
                     }
                 }
                 if artist_selected {
                     out.push(
-                        QueueContent::Folder(
-                            0,
-                            local_artist_owned,
-                            match db.artists().get(artist) {
+                        QueueContent::Folder(QueueFolder {
+                            index: 0,
+                            content: local_artist_owned,
+                            name: match db.artists().get(artist) {
                                 Some(v) => v.name.to_owned(),
                                 None => "< unknown artist >".to_owned(),
                             },
-                        )
+                            order: None,
+                        })
                         .into(),
                     );
                 }

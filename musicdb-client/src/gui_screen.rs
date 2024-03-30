@@ -1,6 +1,9 @@
 use std::time::Instant;
 
-use musicdb_lib::{data::queue::QueueContent, server::Command};
+use musicdb_lib::{
+    data::queue::{QueueContent, QueueFolder},
+    server::Command,
+};
 use speedy2d::{color::Color, dimen::Vec2, shape::Rectangle, window::VirtualKeyCode, Graphics2D};
 
 use crate::{
@@ -117,9 +120,7 @@ impl GuiScreen {
                                 musicdb_lib::server::Command::QueueUpdate(
                                     vec![],
                                     musicdb_lib::data::queue::QueueContent::Folder(
-                                        0,
-                                        vec![],
-                                        String::new(),
+                                        musicdb_lib::data::queue::QueueFolder::default(),
                                     )
                                     .into(),
                                 ),
@@ -337,7 +338,7 @@ impl GuiElem for GuiScreen {
             self.not_idle();
         }
         if !(!info.database.playing
-            || matches!(info.database.queue.content(), QueueContent::Folder(_, v, _) if v.is_empty()))
+            || matches!(info.database.queue.content(), QueueContent::Folder(QueueFolder { content: v, .. }) if v.is_empty()))
         {
             // skip idle_check if paused or queue is empty
             self.idle_check();

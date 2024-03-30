@@ -118,7 +118,7 @@ where
         match self {
             None => s.write_all(&[0b11001100]),
             Some(v) => {
-                s.write_all(&[0b00111010])?;
+                s.write_all(&[0b00110011])?;
                 v.to_bytes(s)
             }
         }
@@ -129,10 +129,11 @@ where
     {
         let mut b = [0u8];
         s.read_exact(&mut b)?;
-        match b[0] {
-            0b00111010 => Ok(Some(ToFromBytes::from_bytes(s)?)),
-            _ => Ok(None),
-        }
+        Ok(if (b[0] ^ 0b11001100).count_ones() > 4 {
+            Some(ToFromBytes::from_bytes(s)?)
+        } else {
+            None
+        })
     }
 }
 impl<K, V> ToFromBytes for HashMap<K, V>

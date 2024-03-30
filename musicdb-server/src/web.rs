@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::convert::Infallible;
 use std::mem;
 use std::net::SocketAddr;
@@ -12,7 +13,7 @@ use axum::routing::{get, post};
 use axum::{Router, TypedHeader};
 use futures::{stream, Stream};
 use musicdb_lib::data::database::{Database, UpdateEndpoint};
-use musicdb_lib::data::queue::{Queue, QueueContent};
+use musicdb_lib::data::queue::{Queue, QueueContent, QueueFolder};
 use musicdb_lib::server::Command;
 use tokio_stream::StreamExt as _;
 
@@ -75,8 +76,10 @@ pub struct AppHtml {
     /// can use: path, title
     queue_song_current: Vec<HtmlPart>,
     /// can use: path, content, name
+    /// can use in `\?key?then\;else\;`: `shuffled`
     queue_folder: Vec<HtmlPart>,
     /// can use: path, content, name
+    /// can use in `\?key?then\;else\;`: `shuffled`
     queue_folder_current: Vec<HtmlPart>,
     /// can use: path, total, current, inner
     queue_loop: Vec<HtmlPart>,
@@ -86,14 +89,6 @@ pub struct AppHtml {
     queue_loopinf: Vec<HtmlPart>,
     /// can use: path, current, inner
     queue_loopinf_current: Vec<HtmlPart>,
-    /// can use: path, content
-    queue_random: Vec<HtmlPart>,
-    /// can use: path, content
-    queue_random_current: Vec<HtmlPart>,
-    /// can use: path, content
-    queue_shuffle: Vec<HtmlPart>,
-    /// can use: path, content
-    queue_shuffle_current: Vec<HtmlPart>,
 }
 impl AppHtml {
     pub fn from_dir<P: AsRef<std::path::Path>>(dir: P) -> std::io::Result<Self> {
@@ -123,22 +118,24 @@ impl AppHtml {
             queue_loopinf_current: Self::parse(&std::fs::read_to_string(
                 dir.join("queue_loopinf_current.html"),
             )?),
-            queue_random: Self::parse(&std::fs::read_to_string(dir.join("queue_random.html"))?),
-            queue_random_current: Self::parse(&std::fs::read_to_string(
-                dir.join("queue_random_current.html"),
-            )?),
-            queue_shuffle: Self::parse(&std::fs::read_to_string(dir.join("queue_shuffle.html"))?),
-            queue_shuffle_current: Self::parse(&std::fs::read_to_string(
-                dir.join("queue_shuffle_current.html"),
-            )?),
         })
     }
     pub fn parse(s: &str) -> Vec<HtmlPart> {
+        Self::parsei(&mut s.chars().peekable())
+    }
+    pub fn parsei(chars: &mut std::iter::Peekable<impl Iterator<Item = char>>) -> Vec<HtmlPart> {
         let mut o = Vec::new();
         let mut c = String::new();
-        let mut chars = s.chars().peekable();
         loop {
-            if let Some(ch) = chars.next() {
+            // if there is a char (iter not empty) and it is not `\;`. If it is `\;`, consume both chars.
+            if let Some(ch) = chars.next().filter(|ch| {
+                if *ch == '\\' && chars.peek().copied() == Some(';') {
+                    chars.next();
+                    false
+                } else {
+                    true
+                }
+            }) {
                 if ch == '\\' && chars.peek().is_some_and(|ch| *ch == ':') {
                     chars.next();
                     o.push(HtmlPart::Plain(mem::replace(&mut c, String::new())));
@@ -158,6 +155,20 @@ impl AppHtml {
                             return o;
                         }
                     }
+                } else if ch == '\\' && chars.peek().is_some_and(|ch| *ch == '?') {
+                    chars.next();
+                    o.push(HtmlPart::Plain(mem::replace(&mut c, String::new())));
+                    let mut key = String::new();
+                    while let Some(ch) = chars.next() {
+                        if ch != '?' {
+                            key.push(ch);
+                        }
+                    }
+                    o.push(HtmlPart::IfElse(
+                        key,
+                        Self::parsei(chars),
+                        Self::parsei(chars),
+                    ));
                 } else {
                     c.push(ch);
                 }
@@ -176,6 +187,8 @@ pub enum HtmlPart {
     Plain(String),
     /// insert some value depending on context and key
     Insert(String),
+    /// If the key exists, use the first one, else use the second one.
+    IfElse(String, Vec<Self>, Vec<Self>),
 }
 
 pub async fn main(db: Arc<Mutex<Database>>, sender: mpsc::Sender<Command>, addr: SocketAddr) {
@@ -210,6 +223,7 @@ pub async fn main(db: Arc<Mutex<Database>>, sender: mpsc::Sender<Command>, addr:
                         .map(|v| match v {
                             HtmlPart::Plain(v) => v,
                             HtmlPart::Insert(_) => "",
+                            HtmlPart::IfElse(_, _, _) => "",
                         })
                         .collect::<String>(),
                 )
@@ -250,7 +264,7 @@ pub async fn main(db: Arc<Mutex<Database>>, sender: mpsc::Sender<Command>, addr:
             post(move || async move {
                 _ = s5.send(Command::QueueUpdate(
                     vec![],
-                    QueueContent::Folder(0, vec![], String::new()).into(),
+                    QueueContent::Folder(QueueFolder::default()).into(),
                 ));
             }),
         )
@@ -297,15 +311,16 @@ pub async fn main(db: Arc<Mutex<Database>>, sender: mpsc::Sender<Command>, addr:
                 if let Some(album) = db1.lock().unwrap().albums().get(&album_id) {
                     _ = s7.send(Command::QueueAdd(
                         vec![],
-                        vec![QueueContent::Folder(
-                            0,
-                            album
+                        vec![QueueContent::Folder(QueueFolder {
+                            index: 0,
+                            content: album
                                 .songs
                                 .iter()
                                 .map(|id| QueueContent::Song(*id).into())
                                 .collect(),
-                            album.name.clone(),
-                        )
+                            name: album.name.clone(),
+                            order: None,
+                        })
                         .into()],
                     ));
                 }
@@ -371,17 +386,26 @@ async fn sse_handler(
                     let mut a = db.artists().iter().collect::<Vec<_>>();
                     a.sort_unstable_by_key(|(_id, artist)| &artist.name);
                     let mut artists = String::new();
-                    for (id, artist) in a {
-                        for v in &state.html.artists_one {
-                            match v {
-                                HtmlPart::Plain(v) => artists.push_str(v),
-                                HtmlPart::Insert(key) => match key.as_str() {
-                                    "id" => artists.push_str(&id.to_string()),
-                                    "name" => artists.push_str(&artist.name),
-                                    _ => {}
-                                },
+                    for &(id, artist) in &a {
+                        fn gen(
+                            id: &u64,
+                            artist: &musicdb_lib::data::artist::Artist,
+                            v: &Vec<HtmlPart>,
+                            arts: &mut String,
+                        ) {
+                            for v in v {
+                                match v {
+                                    HtmlPart::Plain(v) => arts.push_str(v),
+                                    HtmlPart::Insert(key) => match key.as_str() {
+                                        "id" => arts.push_str(&id.to_string()),
+                                        "name" => arts.push_str(&artist.name),
+                                        _ => {}
+                                    },
+                                    HtmlPart::IfElse(_, _, e) => gen(id, artist, e, arts),
+                                }
                             }
                         }
+                        gen(id, artist, &state.html.artists_one, &mut artists);
                     }
                     state
                         .html
@@ -393,6 +417,7 @@ async fn sse_handler(
                                 "artists" => &artists,
                                 _ => "",
                             },
+                            HtmlPart::IfElse(_, _, _) => "",
                         })
                         .collect::<String>()
                 }),
@@ -402,7 +427,9 @@ async fn sse_handler(
                 | Command::QueueInsert(..)
                 | Command::QueueRemove(..)
                 | Command::QueueGoto(..)
-                | Command::QueueSetShuffle(..) => {
+                | Command::QueueShuffle(..)
+                | Command::QueueSetShuffle(..)
+                | Command::QueueUnshuffle(..) => {
                     let db = state.db.lock().unwrap();
                     let current = db
                         .queue
@@ -422,34 +449,48 @@ async fn sse_handler(
                         true,
                         false,
                     );
-                    Event::default().event("queue").data(
-                        state
-                            .html
-                            .queue
-                            .iter()
-                            .map(|v| match v {
-                                HtmlPart::Plain(v) => v,
-                                HtmlPart::Insert(key) => match key.as_str() {
-                                    "currentTitle" => {
-                                        if let Some(s) = current {
-                                            &s.title
+                    Event::default().event("queue").data({
+                        fn gen(
+                            v: &Vec<HtmlPart>,
+                            current: Option<&musicdb_lib::data::song::Song>,
+                            next: Option<&musicdb_lib::data::song::Song>,
+                            content: &str,
+                        ) -> String {
+                            v.iter()
+                                .map(|v| match v {
+                                    HtmlPart::Plain(v) => Cow::Borrowed(v.as_str()),
+                                    HtmlPart::Insert(key) => match key.as_str() {
+                                        "currentTitle" => {
+                                            if let Some(s) = current {
+                                                Cow::Borrowed(s.title.as_str())
+                                            } else {
+                                                Cow::Borrowed("")
+                                            }
+                                        }
+                                        "nextTitle" => {
+                                            if let Some(s) = next {
+                                                Cow::Borrowed(s.title.as_str())
+                                            } else {
+                                                Cow::Borrowed("")
+                                            }
+                                        }
+                                        "content" => Cow::Borrowed(content),
+                                        _ => Cow::Borrowed(""),
+                                    },
+                                    HtmlPart::IfElse(k, t, e) => {
+                                        if (k == "current" && current.is_some())
+                                            || (k == "next" && next.is_some())
+                                        {
+                                            Cow::Owned(gen(t, current, next, content))
                                         } else {
-                                            ""
+                                            Cow::Owned(gen(e, current, next, content))
                                         }
                                     }
-                                    "nextTitle" => {
-                                        if let Some(s) = next {
-                                            &s.title
-                                        } else {
-                                            ""
-                                        }
-                                    }
-                                    "content" => &content,
-                                    _ => "",
-                                },
-                            })
-                            .collect::<String>(),
-                    )
+                                })
+                                .collect::<String>()
+                        }
+                        gen(&state.html.queue, current, next, content.as_str())
+                    })
                 }
                 Command::Save | Command::InitComplete | Command::ErrorInfo(..) => {
                     return Poll::Pending
@@ -483,6 +524,7 @@ async fn artist_view_handler(
                             "name" => albums.push_str(&album.name),
                             _ => {}
                         },
+                        HtmlPart::IfElse(_, _, _) => (),
                     }
                 }
             }
@@ -501,6 +543,7 @@ async fn artist_view_handler(
                         "albums" => &albums,
                         _ => "",
                     },
+                    HtmlPart::IfElse(_, _, _) => "",
                 })
                 .collect(),
         )
@@ -528,6 +571,7 @@ async fn album_view_handler(
                             "title" => songs.push_str(&song.title),
                             _ => {}
                         },
+                        HtmlPart::IfElse(_, _, _) => (),
                     }
                 }
             }
@@ -546,6 +590,7 @@ async fn album_view_handler(
                         "songs" => &songs,
                         _ => "",
                     },
+                    HtmlPart::IfElse(_, _, _) => "",
                 })
                 .collect(),
         )
@@ -582,45 +627,72 @@ fn build_queue_content_build(
                                 "title" => html.push_str(&song.title),
                                 _ => {}
                             },
+                            HtmlPart::IfElse(_, _, _) => (),
                         }
                     }
                 }
             }
-            QueueContent::Folder(ci, c, name) => {
+            QueueContent::Folder(folder) => {
                 if skip_folder || path.is_empty() {
-                    for (i, c) in c.iter().enumerate() {
-                        let current = current && *ci == i;
+                    for (i, c) in folder.iter().enumerate() {
+                        let current = current && folder.index == i;
                         build_queue_content_build(db, state, html, c, i.to_string(), current, false)
                     }
                 } else {
-                    for v in if current {
-                        &state.html.queue_folder_current
-                    } else {
-                        &state.html.queue_folder
-                    } {
-                        match v {
-                            HtmlPart::Plain(v) => html.push_str(v),
-                            HtmlPart::Insert(key) => match key.as_str() {
-                                "path" => html.push_str(&path),
-                                "name" => html.push_str(name),
-                                "content" => {
-                                    for (i, c) in c.iter().enumerate() {
-                                        let current = current && *ci == i;
-                                        build_queue_content_build(
-                                            db,
-                                            state,
-                                            html,
-                                            c,
-                                            format!("{path}-{i}"),
-                                            current,
-                                            false,
-                                        )
+                    fn gen(
+                        v: &Vec<HtmlPart>,
+                        folder: &QueueFolder,
+                        db: &Database,
+                        state: &AppState,
+                        html: &mut String,
+                        path: &str,
+                        current: bool,
+                    ) {
+                        for v in v {
+                            match v {
+                                HtmlPart::Plain(v) => html.push_str(v),
+                                HtmlPart::Insert(key) => match key.as_str() {
+                                    "path" => html.push_str(&path),
+                                    "name" => html.push_str(&folder.name),
+                                    "content" => {
+                                        for (i, c) in folder.iter().enumerate() {
+                                            let current = current && folder.index == i;
+                                            build_queue_content_build(
+                                                db,
+                                                state,
+                                                html,
+                                                c,
+                                                format!("{path}-{i}"),
+                                                current,
+                                                false,
+                                            )
+                                        }
+                                    }
+                                    _ => {}
+                                },
+                                HtmlPart::IfElse(i, t, e) => {
+                                    if i == "shuffled" && folder.order.is_some() {
+                                        gen(t, folder, db, state, html, path, current)
+                                    } else {
+                                        gen(e, folder, db, state, html, path, current)
                                     }
                                 }
-                                _ => {}
-                            },
+                            }
                         }
                     }
+                    gen(
+                        if current {
+                            &state.html.queue_folder_current
+                        } else {
+                            &state.html.queue_folder
+                        },
+                        folder,
+                        db,
+                        state,
+                        html,
+                        &path,
+                        current,
+                    )
                 }
             }
             QueueContent::Loop(total, cur, inner) => {
@@ -647,58 +719,7 @@ fn build_queue_content_build(
                             ),
                             _ => {}
                         },
-                    }
-                }
-            }
-            QueueContent::Random(q) => {
-                for v in if current {
-                    &state.html.queue_random_current
-                } else {
-                    &state.html.queue_random
-                } {
-                    match v {
-                        HtmlPart::Plain(v) => html.push_str(v),
-                        HtmlPart::Insert(key) => match key.as_str() {
-                            "path" => html.push_str(&path),
-                            "content" => {
-                                for (i, v) in q.iter().enumerate() {
-                                    build_queue_content_build(
-                                        db,
-                                        state,
-                                        html,
-                                        &v,
-                                        format!("{path}-0"),
-                                        current && i == q.len().saturating_sub(2),
-                                        true,
-                                    )
-                                }
-                            }
-                            _ => {}
-                        },
-                    }
-                }
-            }
-            QueueContent::Shuffle { inner, state: _ } => {
-                for v in if current {
-                    &state.html.queue_shuffle_current
-                } else {
-                    &state.html.queue_shuffle
-                } {
-                    match v {
-                        HtmlPart::Plain(v) => html.push_str(v),
-                        HtmlPart::Insert(key) => match key.as_str() {
-                            "path" => html.push_str(&path),
-                            "content" => build_queue_content_build(
-                                db,
-                                state,
-                                html,
-                                &inner,
-                                format!("{path}-0"),
-                                current,
-                                true,
-                            ),
-                            _ => {}
-                        },
+                        HtmlPart::IfElse(_, _, _) => (),
                     }
                 }
             }

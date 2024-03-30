@@ -1,9 +1,7 @@
-use std::collections::VecDeque;
-
 use musicdb_lib::{
     data::{
         database::Database,
-        queue::{Queue, QueueContent, QueueDuration, ShuffleState},
+        queue::{Queue, QueueContent, QueueDuration},
         song::Song,
         AlbumId, ArtistId,
     },
@@ -18,8 +16,8 @@ use speedy2d::{
 
 use crate::{
     gui::{Dragging, DrawInfo, GuiAction, GuiElem, GuiElemCfg},
-    gui_base::{Panel, ScrollBox},
-    gui_text::{self, AdvancedLabel, Label},
+    gui_base::{Button, Panel, ScrollBox, ScrollBoxSizeUnit},
+    gui_text::{self, AdvancedLabel, Label, TextField},
 };
 
 /*
@@ -35,9 +33,13 @@ pub struct QueueViewer {
     config: GuiElemCfg,
     c_scroll_box: ScrollBox<Vec<Box<dyn GuiElem>>>,
     c_empty_space_drag_handler: QueueEmptySpaceDragHandler,
-    c_control_flow_elements: Panel<(QueueLoop, QueueLoop, QueueRandom, QueueShuffle)>,
+    c_control_flow_elements: Panel<(QueueLoop, QueueLoop, QueueFolder, TextField)>,
     c_duration: AdvancedLabel,
+    recv: std::sync::mpsc::Receiver<QVMsg>,
     queue_updated: bool,
+}
+pub enum QVMsg {
+    ControlFlowElementsSetFolderName(String),
 }
 const QP_QUEUE1: f32 = 0.0;
 const QP_QUEUE2: f32 = 0.95;
@@ -45,6 +47,7 @@ const QP_INV1: f32 = QP_QUEUE2;
 const QP_INV2: f32 = 1.0;
 impl QueueViewer {
     pub fn new(config: GuiElemCfg) -> Self {
+        let (sender, recv) = std::sync::mpsc::channel();
         let control_flow_elements = (
             QueueLoop::new(
                 GuiElemCfg::at(Rectangle::from_tuples((0.0, 0.0), (0.5, 0.5))).w_mouse(),
@@ -52,7 +55,15 @@ impl QueueViewer {
                 QueueContent::Loop(
                     0,
                     0,
-                    Box::new(QueueContent::Folder(0, vec![], "in loop".to_string()).into()),
+                    Box::new(
+                        QueueContent::Folder(musicdb_lib::data::queue::QueueFolder {
+                            index: 0,
+                            content: vec![],
+                            name: "in loop".to_string(),
+                            order: None,
+                        })
+                        .into(),
+                    ),
                 )
                 .into(),
                 false,
@@ -64,30 +75,46 @@ impl QueueViewer {
                 QueueContent::Loop(
                     2,
                     0,
-                    Box::new(QueueContent::Folder(0, vec![], "in loop".to_string()).into()),
+                    Box::new(
+                        QueueContent::Folder(musicdb_lib::data::queue::QueueFolder {
+                            index: 0,
+                            content: vec![],
+                            name: "in loop".to_string(),
+                            order: None,
+                        })
+                        .into(),
+                    ),
                 )
                 .into(),
                 false,
             )
             .alwayscopy(),
-            QueueRandom::new(
+            QueueFolder::new(
                 GuiElemCfg::at(Rectangle::from_tuples((0.5, 0.0), (1.0, 0.5))).w_mouse(),
                 vec![],
-                QueueContent::Random(VecDeque::new()).into(),
+                musicdb_lib::data::queue::QueueFolder {
+                    index: 0,
+                    content: vec![],
+                    name: format!("folder name"),
+                    order: None,
+                },
                 false,
             )
             .alwayscopy(),
-            QueueShuffle::new(
-                GuiElemCfg::at(Rectangle::from_tuples((0.5, 0.5), (1.0, 1.0))).w_mouse(),
-                vec![],
-                QueueContent::Shuffle {
-                    inner: Box::new(QueueContent::Folder(0, vec![], String::new()).into()),
-                    state: ShuffleState::NotShuffled,
-                }
-                .into(),
-                false,
-            )
-            .alwayscopy(),
+            {
+                let mut tf = TextField::new(
+                    GuiElemCfg::at(Rectangle::from_tuples((0.5, 0.5), (1.0, 1.0))),
+                    format!("folder name"),
+                    Color::from_rgb(0.0, 0.33, 0.0),
+                    Color::from_rgb(0.0, 0.67, 0.0),
+                );
+                tf.on_changed = Some(Box::new(move |folder_name| {
+                    _ = sender.send(QVMsg::ControlFlowElementsSetFolderName(
+                        folder_name.to_owned(),
+                    ));
+                }));
+                tf
+            },
         );
         Self {
             config,
@@ -111,6 +138,7 @@ impl QueueViewer {
                 vec![],
             ),
             queue_updated: false,
+            recv,
         }
     }
 }
@@ -145,6 +173,20 @@ impl GuiElem for QueueViewer {
         self
     }
     fn draw(&mut self, info: &mut DrawInfo, _g: &mut speedy2d::Graphics2D) {
+        while let Ok(msg) = self.recv.try_recv() {
+            match msg {
+                QVMsg::ControlFlowElementsSetFolderName(name) => {
+                    *self
+                        .c_control_flow_elements
+                        .children
+                        .2
+                        .c_name
+                        .content
+                        .text() = name.clone();
+                    self.c_control_flow_elements.children.2.queue.name = name;
+                }
+            }
+        }
         if self.queue_updated {
             self.queue_updated = false;
             let label = &mut self.c_duration;
@@ -254,17 +296,23 @@ fn queue_gui(
                 target_h.push(line_height * 1.75);
             }
         }
-        QueueContent::Folder(ia, q, _) => {
+        QueueContent::Folder(qf) => {
+            let musicdb_lib::data::queue::QueueFolder {
+                index: ia,
+                content: _,
+                name: _,
+                order: _,
+            } = qf;
             if !skip_folder {
                 target.push(Box::new(QueueFolder::new(
                     cfg.clone(),
                     path.clone(),
-                    queue.clone(),
+                    qf.clone(),
                     current,
                 )));
                 target_h.push(line_height * 0.8);
             }
-            for (i, q) in q.iter().enumerate() {
+            for (i, q) in qf.iter().enumerate() {
                 let mut p = path.clone();
                 p.push(i);
                 queue_gui(
@@ -311,62 +359,6 @@ fn queue_gui(
                 current,
                 true,
             );
-            target.push(Box::new(QueueIndentEnd::new(cfg, (p1, p2))));
-            target_h.push(line_height * 0.4);
-        }
-        QueueContent::Random(q) => {
-            target.push(Box::new(QueueRandom::new(
-                cfg.clone(),
-                path.clone(),
-                queue.clone(),
-                current,
-            )));
-            target_h.push(line_height);
-            for (i, inner) in q.iter().enumerate() {
-                let mut p = path.clone();
-                p.push(i);
-                queue_gui(
-                    inner,
-                    db,
-                    depth + depth_inc_by,
-                    depth_inc_by,
-                    line_height,
-                    target,
-                    target_h,
-                    p,
-                    current && i == q.len().saturating_sub(2),
-                    false,
-                );
-            }
-            let mut p1 = path.clone();
-            let p2 = p1.pop().unwrap_or(0) + 1;
-            target.push(Box::new(QueueIndentEnd::new(cfg, (p1, p2))));
-            target_h.push(line_height * 0.4);
-        }
-        QueueContent::Shuffle { inner, state: _ } => {
-            target.push(Box::new(QueueShuffle::new(
-                cfg.clone(),
-                path.clone(),
-                queue.clone(),
-                current,
-            )));
-            target_h.push(line_height * 0.8);
-            let mut p = path.clone();
-            p.push(0);
-            queue_gui(
-                inner,
-                db,
-                depth + depth_inc_by,
-                depth_inc_by,
-                line_height,
-                target,
-                target_h,
-                p,
-                current,
-                true,
-            );
-            let mut p1 = path.clone();
-            let p2 = p1.pop().unwrap_or(0) + 1;
             target.push(Box::new(QueueIndentEnd::new(cfg, (p1, p2))));
             target_h.push(line_height * 0.4);
         }
@@ -638,9 +630,9 @@ impl GuiElem for QueueSong {
 
 struct QueueFolder {
     config: GuiElemCfg,
-    children: Vec<Box<dyn GuiElem>>,
+    c_name: Label,
     path: Vec<usize>,
-    queue: Queue,
+    queue: musicdb_lib::data::queue::QueueFolder,
     current: bool,
     insert_into: bool,
     mouse: bool,
@@ -650,7 +642,18 @@ struct QueueFolder {
     copy_on_mouse_down: bool,
 }
 impl QueueFolder {
-    pub fn new(config: GuiElemCfg, path: Vec<usize>, queue: Queue, current: bool) -> Self {
+    pub fn new(
+        config: GuiElemCfg,
+        path: Vec<usize>,
+        queue: musicdb_lib::data::queue::QueueFolder,
+        current: bool,
+    ) -> Self {
+        let musicdb_lib::data::queue::QueueFolder {
+            index: _,
+            content,
+            name,
+            order,
+        } = &queue;
         Self {
             config: if path.is_empty() {
                 config
@@ -658,24 +661,22 @@ impl QueueFolder {
                 config.w_mouse().w_keyboard_watch()
             }
             .w_drag_target(),
-            children: vec![Box::new(Label::new(
+            c_name: Label::new(
                 GuiElemCfg::default(),
-                match queue.content() {
-                    QueueContent::Folder(_, q, n) => format!(
-                        "{}  ({})",
-                        if path.is_empty() && n.is_empty() {
-                            "Queue"
-                        } else {
-                            n
-                        },
-                        q.len()
-                    ),
-                    _ => "[???]".to_string(),
-                },
+                format!(
+                    "{}  ({}){}",
+                    if path.is_empty() && name.is_empty() {
+                        "Queue"
+                    } else {
+                        name
+                    },
+                    content.len(),
+                    if order.is_some() { " [shuffled]" } else { "" },
+                ),
                 Color::from_int_rgb(52, 132, 50),
                 None,
                 Vec2::new(0.0, 0.5),
-            ))],
+            ),
             path,
             queue,
             current,
@@ -687,6 +688,12 @@ impl QueueFolder {
             copy_on_mouse_down: false,
         }
     }
+    fn alwayscopy(mut self) -> Self {
+        self.always_copy = true;
+        self.copy = true;
+        self.config.scroll_events = true;
+        self
+    }
 }
 impl GuiElem for QueueFolder {
     fn config(&self) -> &GuiElemCfg {
@@ -696,7 +703,7 @@ impl GuiElem for QueueFolder {
         &mut self.config
     }
     fn children(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElem> + '_> {
-        Box::new(self.children.iter_mut().map(|v| v.elem_mut()))
+        Box::new([self.c_name.elem_mut()].into_iter())
     }
     fn any(&self) -> &dyn std::any::Any {
         self
@@ -742,7 +749,7 @@ impl GuiElem for QueueFolder {
         }
         if generic_queue_draw(info, &self.path, &mut self.mouse, self.copy_on_mouse_down) {
             info.actions.push(GuiAction::SetDragging(Some((
-                Dragging::Queue(self.queue.clone()),
+                Dragging::Queue(QueueContent::Folder(self.queue.clone()).into()),
                 None,
             ))));
         }
@@ -751,6 +758,15 @@ impl GuiElem for QueueFolder {
         if button == MouseButton::Left {
             self.mouse = true;
             self.copy_on_mouse_down = self.copy;
+        } else if button == MouseButton::Right {
+            // return vec![GuiAction::ContextMenu(Some(vec![Box::new(
+            //     Panel::with_background(GuiElemCfg::default(), (), Color::DARK_GRAY),
+            // )]))];
+            return vec![GuiAction::SendToServer(if self.queue.order.is_some() {
+                Command::QueueUnshuffle(self.path.clone())
+            } else {
+                Command::QueueShuffle(self.path.clone())
+            })];
         }
         vec![]
     }
@@ -1007,259 +1023,6 @@ impl GuiElem for QueueLoop {
     }
 }
 
-struct QueueRandom {
-    config: GuiElemCfg,
-    children: Vec<Box<dyn GuiElem>>,
-    path: Vec<usize>,
-    queue: Queue,
-    current: bool,
-    mouse: bool,
-    mouse_pos: Vec2,
-    copy: bool,
-    always_copy: bool,
-    copy_on_mouse_down: bool,
-}
-impl QueueRandom {
-    pub fn new(config: GuiElemCfg, path: Vec<usize>, queue: Queue, current: bool) -> Self {
-        Self {
-            config: if path.is_empty() {
-                config
-            } else {
-                config.w_mouse().w_keyboard_watch()
-            }
-            .w_drag_target(),
-            children: vec![Box::new(Label::new(
-                GuiElemCfg::default(),
-                match queue.content() {
-                    QueueContent::Random(_) => {
-                        format!("random")
-                    }
-                    _ => "[???]".to_string(),
-                },
-                Color::from_int_rgb(32, 27, 179),
-                None,
-                Vec2::new(0.0, 0.5),
-            ))],
-            path,
-            queue,
-            current,
-            mouse: false,
-            mouse_pos: Vec2::ZERO,
-            copy: false,
-            always_copy: false,
-            copy_on_mouse_down: false,
-        }
-    }
-    fn alwayscopy(mut self) -> Self {
-        self.always_copy = true;
-        self.copy = true;
-        self
-    }
-}
-impl GuiElem for QueueRandom {
-    fn config(&self) -> &GuiElemCfg {
-        &self.config
-    }
-    fn config_mut(&mut self) -> &mut GuiElemCfg {
-        &mut self.config
-    }
-    fn children(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElem> + '_> {
-        Box::new(self.children.iter_mut().map(|v| v.elem_mut()))
-    }
-    fn any(&self) -> &dyn std::any::Any {
-        self
-    }
-    fn any_mut(&mut self) -> &mut dyn std::any::Any {
-        self
-    }
-    fn elem(&self) -> &dyn GuiElem {
-        self
-    }
-    fn elem_mut(&mut self) -> &mut dyn GuiElem {
-        self
-    }
-    fn draw(&mut self, info: &mut DrawInfo, _g: &mut speedy2d::Graphics2D) {
-        if !self.mouse {
-            self.mouse_pos = Vec2::new(
-                info.mouse_pos.x - self.config.pixel_pos.top_left().x,
-                info.mouse_pos.y - self.config.pixel_pos.top_left().y,
-            );
-        }
-        if generic_queue_draw(info, &self.path, &mut self.mouse, self.copy_on_mouse_down) {
-            info.actions.push(GuiAction::SetDragging(Some((
-                Dragging::Queue(self.queue.clone()),
-                None,
-            ))));
-        }
-    }
-    fn mouse_down(&mut self, button: MouseButton) -> Vec<GuiAction> {
-        if button == MouseButton::Left {
-            self.mouse = true;
-            self.copy_on_mouse_down = self.copy;
-        }
-        vec![]
-    }
-    fn mouse_up(&mut self, button: MouseButton) -> Vec<GuiAction> {
-        if self.mouse && button == MouseButton::Left {
-            self.mouse = false;
-            if !self.always_copy {
-                vec![GuiAction::SendToServer(Command::QueueGoto(
-                    self.path.clone(),
-                ))]
-            } else {
-                vec![]
-            }
-        } else {
-            vec![]
-        }
-    }
-    fn key_watch(
-        &mut self,
-        modifiers: ModifiersState,
-        _down: bool,
-        _key: Option<VirtualKeyCode>,
-        _scan: speedy2d::window::KeyScancode,
-    ) -> Vec<GuiAction> {
-        self.copy = modifiers.ctrl();
-        vec![]
-    }
-    fn dragged(&mut self, dragged: Dragging) -> Vec<GuiAction> {
-        if !self.always_copy {
-            let p = self.path.clone();
-            dragged_add_to_queue(dragged, move |q| Command::QueueAdd(p.clone(), q))
-        } else {
-            vec![]
-        }
-    }
-}
-
-struct QueueShuffle {
-    config: GuiElemCfg,
-    children: Vec<Box<dyn GuiElem>>,
-    path: Vec<usize>,
-    queue: Queue,
-    current: bool,
-    mouse: bool,
-    mouse_pos: Vec2,
-    copy: bool,
-    always_copy: bool,
-    copy_on_mouse_down: bool,
-}
-impl QueueShuffle {
-    pub fn new(config: GuiElemCfg, path: Vec<usize>, queue: Queue, current: bool) -> Self {
-        Self {
-            config: if path.is_empty() {
-                config
-            } else {
-                config.w_mouse().w_keyboard_watch()
-            }
-            .w_drag_target(),
-            children: vec![Box::new(Label::new(
-                GuiElemCfg::default(),
-                match queue.content() {
-                    QueueContent::Shuffle { .. } => {
-                        format!("shuffle")
-                    }
-                    _ => "[???]".to_string(),
-                },
-                Color::from_int_rgb(92, 52, 194),
-                None,
-                Vec2::new(0.0, 0.5),
-            ))],
-            path,
-            queue,
-            current,
-            mouse: false,
-            mouse_pos: Vec2::ZERO,
-            copy: false,
-            always_copy: false,
-            copy_on_mouse_down: false,
-        }
-    }
-    fn alwayscopy(mut self) -> Self {
-        self.always_copy = true;
-        self.copy = true;
-        self
-    }
-}
-impl GuiElem for QueueShuffle {
-    fn config(&self) -> &GuiElemCfg {
-        &self.config
-    }
-    fn config_mut(&mut self) -> &mut GuiElemCfg {
-        &mut self.config
-    }
-    fn children(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElem> + '_> {
-        Box::new(self.children.iter_mut().map(|v| v.elem_mut()))
-    }
-    fn any(&self) -> &dyn std::any::Any {
-        self
-    }
-    fn any_mut(&mut self) -> &mut dyn std::any::Any {
-        self
-    }
-    fn elem(&self) -> &dyn GuiElem {
-        self
-    }
-    fn elem_mut(&mut self) -> &mut dyn GuiElem {
-        self
-    }
-    fn draw(&mut self, info: &mut DrawInfo, _g: &mut speedy2d::Graphics2D) {
-        if !self.mouse {
-            self.mouse_pos = Vec2::new(
-                info.mouse_pos.x - self.config.pixel_pos.top_left().x,
-                info.mouse_pos.y - self.config.pixel_pos.top_left().y,
-            );
-        }
-        if generic_queue_draw(info, &self.path, &mut self.mouse, self.copy_on_mouse_down) {
-            info.actions.push(GuiAction::SetDragging(Some((
-                Dragging::Queue(self.queue.clone()),
-                None,
-            ))));
-        }
-    }
-    fn mouse_down(&mut self, button: MouseButton) -> Vec<GuiAction> {
-        if button == MouseButton::Left {
-            self.mouse = true;
-            self.copy_on_mouse_down = self.copy;
-        }
-        vec![]
-    }
-    fn mouse_up(&mut self, button: MouseButton) -> Vec<GuiAction> {
-        if self.mouse && button == MouseButton::Left {
-            self.mouse = false;
-            if !self.always_copy {
-                vec![GuiAction::SendToServer(Command::QueueGoto(
-                    self.path.clone(),
-                ))]
-            } else {
-                vec![]
-            }
-        } else {
-            vec![]
-        }
-    }
-    fn key_watch(
-        &mut self,
-        modifiers: ModifiersState,
-        _down: bool,
-        _key: Option<VirtualKeyCode>,
-        _scan: speedy2d::window::KeyScancode,
-    ) -> Vec<GuiAction> {
-        self.copy = modifiers.ctrl();
-        vec![]
-    }
-    fn dragged(&mut self, dragged: Dragging) -> Vec<GuiAction> {
-        if !self.always_copy {
-            let mut p = self.path.clone();
-            p.push(0);
-            dragged_add_to_queue(dragged, move |q| Command::QueueAdd(p.clone(), q))
-        } else {
-            vec![]
-        }
-    }
-}
-
 fn dragged_add_to_queue<F: FnOnce(Vec<Queue>) -> Command + 'static>(
     dragged: Dragging,
     f: F,
@@ -1297,15 +1060,16 @@ fn dragged_add_to_queue<F: FnOnce(Vec<Queue>) -> Command + 'static>(
 fn add_to_queue_album_by_id(id: AlbumId, db: &Database) -> Option<Queue> {
     if let Some(album) = db.albums().get(&id) {
         Some(
-            QueueContent::Folder(
-                0,
-                album
+            QueueContent::Folder(musicdb_lib::data::queue::QueueFolder {
+                index: 0,
+                content: album
                     .songs
                     .iter()
                     .map(|id| QueueContent::Song(*id).into())
                     .collect(),
-                album.name.clone(),
-            )
+                name: album.name.clone(),
+                order: None,
+            })
             .into(),
         )
     } else {
@@ -1315,9 +1079,9 @@ fn add_to_queue_album_by_id(id: AlbumId, db: &Database) -> Option<Queue> {
 fn add_to_queue_artist_by_id(id: ArtistId, db: &Database) -> Option<Queue> {
     if let Some(artist) = db.artists().get(&id) {
         Some(
-            QueueContent::Folder(
-                0,
-                artist
+            QueueContent::Folder(musicdb_lib::data::queue::QueueFolder {
+                index: 0,
+                content: artist
                     .singles
                     .iter()
                     .map(|id| QueueContent::Song(*id).into())
@@ -1328,8 +1092,9 @@ fn add_to_queue_artist_by_id(id: ArtistId, db: &Database) -> Option<Queue> {
                             .filter_map(|id| add_to_queue_album_by_id(*id, db)),
                     )
                     .collect(),
-                artist.name.clone(),
-            )
+                name: artist.name.clone(),
+                order: None,
+            })
             .into(),
         )
     } else {

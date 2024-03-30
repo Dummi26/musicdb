@@ -24,7 +24,7 @@ default = ["gui", "mers", "merscfg"]
 # mers:
 #   enables the run-mers mode
 # playback:
-#   enables Symcplayer modes, where the client mirrors the server's playback
+#   enables syncplayer modes, where the client mirrors the server's playback
 gui = ["speedy2d"]
 merscfg = ["mers_lib", "musicdb-mers", "speedy2d"]
 mers = ["mers_lib", "musicdb-mers"]

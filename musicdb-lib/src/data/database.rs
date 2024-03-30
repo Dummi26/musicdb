@@ -1,3 +1,4 @@
+use rand::prelude::SliceRandom;
 use std::{
     collections::{BTreeSet, HashMap},
     fs::{self, File},
@@ -8,13 +9,14 @@ use std::{
 };
 
 use colorize::AnsiColor;
+use rand::thread_rng;
 
 use crate::{load::ToFromBytes, server::Command};
 
 use super::{
     album::Album,
     artist::Artist,
-    queue::{Queue, QueueContent, ShuffleState},
+    queue::{Queue, QueueContent, QueueFolder},
     song::Song,
     AlbumId, ArtistId, CoverId, DatabaseLocation, SongId,
 };
@@ -515,8 +517,13 @@ impl Database {
                 t.clear();
             }
         }
-        // since db.update_endpoints is empty for clients, this won't cause unwanted back and forth
-        self.broadcast_update(&command);
+        // some commands shouldn't be broadcast. these will broadcast a different command in their specific implementation.
+        match &command {
+            // Will broadcast `QueueSetShuffle`
+            Command::QueueShuffle(_) => (),
+            // since db.update_endpoints is empty for clients, this won't cause unwanted back and forth
+            _ => self.broadcast_update(&command),
+        }
         match command {
             Command::Resume => self.playing = true,
             Command::Pause => self.playing = false,
@@ -525,9 +532,7 @@ impl Database {
                 if !Queue::advance_index_db(self) {
                     // end of queue
                     self.apply_command(Command::Pause);
-                    let mut actions = Vec::new();
-                    self.queue.init(vec![], &mut actions);
-                    Queue::handle_actions(self, actions);
+                    self.queue.init();
                 }
             }
             Command::Save => {
@@ -537,51 +542,67 @@ impl Database {
             }
             Command::SyncDatabase(a, b, c) => self.sync(a, b, c),
             Command::QueueUpdate(index, new_data) => {
-                let mut actions = vec![];
-                if let Some(v) = self.queue.get_item_at_index_mut(&index, 0, &mut actions) {
+                if let Some(v) = self.queue.get_item_at_index_mut(&index, 0) {
                     *v = new_data;
                 }
-                Queue::handle_actions(self, actions);
             }
             Command::QueueAdd(index, new_data) => {
-                let mut actions = vec![];
-                if let Some(v) = self.queue.get_item_at_index_mut(&index, 0, &mut actions) {
-                    v.add_to_end(new_data, index, &mut actions);
+                if let Some(v) = self.queue.get_item_at_index_mut(&index, 0) {
+                    v.add_to_end(new_data);
                 }
-                Queue::handle_actions(self, actions);
             }
             Command::QueueInsert(index, pos, new_data) => {
-                let mut actions = vec![];
-                if let Some(v) = self.queue.get_item_at_index_mut(&index, 0, &mut actions) {
-                    v.insert(new_data, pos, index, &mut actions);
+                if let Some(v) = self.queue.get_item_at_index_mut(&index, 0) {
+                    v.insert(new_data, pos);
                 }
-                Queue::handle_actions(self, actions);
             }
             Command::QueueRemove(index) => {
                 self.queue.remove_by_index(&index, 0);
             }
             Command::QueueGoto(index) => Queue::set_index_db(self, &index),
-            Command::QueueSetShuffle(path, order) => {
-                let mut actions = vec![];
-                if let Some(elem) = self.queue.get_item_at_index_mut(&path, 0, &mut actions) {
-                    if let QueueContent::Shuffle { inner, state } = elem.content_mut() {
-                        if let QueueContent::Folder(_, v, _) = inner.content_mut() {
-                            let mut o = std::mem::replace(v, vec![])
-                                .into_iter()
-                                .map(|v| Some(v))
-                                .collect::<Vec<_>>();
-                            for &i in order.iter() {
-                                if let Some(a) = o.get_mut(i).and_then(Option::take) {
-                                    v.push(a);
-                                } else {
-                                    eprintln!("[{}] Can't properly apply requested order to Queue/Shuffle: no element at index {i}. Index may be out of bounds or used twice. Len: {}, Order: {order:?}.", "WARN".yellow(), v.len());
-                                }
+            Command::QueueShuffle(path) => {
+                if let Some(elem) = self.queue.get_item_at_index_mut(&path, 0) {
+                    if let QueueContent::Folder(QueueFolder {
+                        index: _,
+                        content,
+                        name: _,
+                        order: _,
+                    }) = elem.content_mut()
+                    {
+                        let mut ord: Vec<usize> = (0..content.len()).collect();
+                        ord.shuffle(&mut thread_rng());
+                        self.apply_command(Command::QueueSetShuffle(path, ord));
+                    } else {
+                        eprintln!("(QueueShuffle) QueueElement at {path:?} not a folder!");
+                    }
+                } else {
+                    eprintln!("(QueueShuffle) No QueueElement at {path:?}");
+                }
+            }
+            Command::QueueSetShuffle(path, ord) => {
+                if let Some(elem) = self.queue.get_item_at_index_mut(&path, 0) {
+                    if let QueueContent::Folder(QueueFolder {
+                        index,
+                        content,
+                        name: _,
+                        order,
+                    }) = elem.content_mut()
+                    {
+                        if ord.len() == content.len() {
+                            if let Some(ni) = ord.iter().position(|v| *v == *index) {
+                                *index = ni;
                             }
+                            *order = Some(ord);
+                        } else {
+                            eprintln!(
+                                "[warn] can't QueueSetShuffle - length of new ord ({}) is not the same as length of content ({})!",
+                                ord.len(),
+                                content.len()
+                            );
                         }
-                        *state = ShuffleState::Shuffled;
                     } else {
                         eprintln!(
-                            "[warn] can't QueueSetShuffle - element at path {path:?} isn't Shuffle"
+                            "[warn] can't QueueSetShuffle - element at path {path:?} isn't a folder"
                         );
                     }
                 } else {
@@ -590,7 +611,22 @@ impl Database {
                         "WARN".yellow()
                     );
                 }
-                Queue::handle_actions(self, actions);
+            }
+            Command::QueueUnshuffle(path) => {
+                if let Some(elem) = self.queue.get_item_at_index_mut(&path, 0) {
+                    if let QueueContent::Folder(QueueFolder {
+                        index,
+                        content: _,
+                        name: _,
+                        order,
+                    }) = elem.content_mut()
+                    {
+                        if let Some(ni) = order.as_ref().and_then(|v| v.get(*index).copied()) {
+                            *index = ni;
+                        }
+                        *order = None;
+                    }
+                }
             }
             Command::AddSong(song) => {
                 self.add_song_new(song);
@@ -745,7 +781,7 @@ impl Database {
             songs: HashMap::new(),
             covers: HashMap::new(),
             custom_files: None,
-            queue: QueueContent::Folder(0, vec![], String::new()).into(),
+            queue: QueueContent::Folder(QueueFolder::default()).into(),
             update_endpoints: vec![],
             playing: false,
             command_sender: None,
@@ -765,7 +801,7 @@ impl Database {
             songs: HashMap::new(),
             covers: HashMap::new(),
             custom_files: None,
-            queue: QueueContent::Folder(0, vec![], String::new()).into(),
+            queue: QueueContent::Folder(QueueFolder::default()).into(),
             update_endpoints: vec![],
             playing: false,
             command_sender: None,
@@ -790,7 +826,7 @@ impl Database {
             songs: ToFromBytes::from_bytes(&mut file)?,
             covers: ToFromBytes::from_bytes(&mut file)?,
             custom_files: None,
-            queue: QueueContent::Folder(0, vec![], String::new()).into(),
+            queue: QueueContent::Folder(QueueFolder::default()).into(),
             update_endpoints: vec![],
             playing: false,
             command_sender: None,

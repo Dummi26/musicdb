@@ -366,7 +366,9 @@ impl Gui {
                 | Command::QueueInsert(..)
                 | Command::QueueRemove(..)
                 | Command::QueueGoto(..)
-                | Command::QueueSetShuffle(..) => {
+                | Command::QueueShuffle(..)
+                | Command::QueueSetShuffle(..)
+                | Command::QueueUnshuffle(..) => {
                     if let Some(s) = &*event_sender_arc.lock().unwrap() {
                         _ = s.send_event(GuiEvent::UpdatedQueue);
                     }

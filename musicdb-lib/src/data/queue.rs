@@ -1,8 +1,6 @@
-use std::{collections::VecDeque, ops::AddAssign};
+use std::ops::AddAssign;
 
-use rand::seq::{IteratorRandom, SliceRandom};
-
-use crate::{load::ToFromBytes, server::Command};
+use crate::load::ToFromBytes;
 
 use super::{database::Database, SongId};
 
@@ -14,25 +12,15 @@ pub struct Queue {
 #[derive(Clone, Debug)]
 pub enum QueueContent {
     Song(SongId),
-    Folder(usize, Vec<Queue>, String),
+    Folder(QueueFolder),
     Loop(usize, usize, Box<Queue>),
-    Random(VecDeque<Queue>),
-    Shuffle {
-        inner: Box<Queue>,
-        state: ShuffleState,
-    },
 }
-#[derive(Clone, Copy, Debug)]
-pub enum ShuffleState {
-    NotShuffled,
-    Modified,
-    Shuffled,
-}
-
-pub enum QueueAction {
-    AddRandomSong(Vec<usize>),
-    /// `partial: bool`, if true, indicates that we only shuffle what is beyond the current index
-    SetShuffle(Vec<usize>, bool),
+#[derive(Clone, Debug, Default)]
+pub struct QueueFolder {
+    pub index: usize,
+    pub content: Vec<Queue>,
+    pub name: String,
+    pub order: Option<Vec<usize>>,
 }
 
 impl Queue {
@@ -46,72 +34,18 @@ impl Queue {
         &mut self.content
     }
 
-    pub fn add_to_end(
-        &mut self,
-        v: Vec<Self>,
-        mut path: Vec<usize>,
-        actions: &mut Vec<QueueAction>,
-    ) -> Option<usize> {
+    pub fn add_to_end(&mut self, v: Vec<Self>) -> Option<usize> {
         match &mut self.content {
             QueueContent::Song(_) => None,
-            QueueContent::Folder(_, vec, _) => {
-                let len = vec.len();
-                for (i, mut v) in v.into_iter().enumerate() {
-                    path.push(len + i);
-                    v.init(path.clone(), actions);
-                    vec.push(v);
-                    path.pop();
-                }
-                Some(len)
-            }
+            QueueContent::Folder(folder) => folder.add_to_end(v),
             QueueContent::Loop(..) => None,
-            QueueContent::Random(q) => {
-                // insert new elements
-                let len = q.len();
-                for (i, mut v) in v.into_iter().enumerate() {
-                    path.push(len + i);
-                    v.init(path.clone(), actions);
-                    q.push_back(v);
-                    path.pop();
-                }
-                Some(len)
-            }
-            QueueContent::Shuffle { .. } => None,
         }
     }
-    pub fn insert(
-        &mut self,
-        v: Vec<Self>,
-        index: usize,
-        mut path: Vec<usize>,
-        actions: &mut Vec<QueueAction>,
-    ) -> bool {
+    pub fn insert(&mut self, v: Vec<Self>, index: usize) -> bool {
         match &mut self.content {
             QueueContent::Song(_) => false,
-            QueueContent::Folder(current, vec, _) => {
-                if index <= vec.len() {
-                    if *current >= index {
-                        *current += v.len();
-                    }
-                    // remove the elements starting at the insertion point
-                    let end = vec.split_off(index);
-                    // insert new elements
-                    for (i, mut v) in v.into_iter().enumerate() {
-                        path.push(index + i);
-                        v.init(path.clone(), actions);
-                        vec.push(v);
-                        path.pop();
-                    }
-                    // re-add previously removed elements
-                    vec.extend(end);
-                    true
-                } else {
-                    false
-                }
-            }
-            QueueContent::Loop(..) | QueueContent::Random(..) | QueueContent::Shuffle { .. } => {
-                false
-            }
+            QueueContent::Folder(folder) => folder.insert(v, index),
+            QueueContent::Loop(..) => false,
         }
     }
 
@@ -121,16 +55,14 @@ impl Queue {
         }
         match &self.content {
             QueueContent::Song(_) => 1,
-            QueueContent::Folder(_, v, _) => v.iter().map(|v| v.len()).sum(),
-            QueueContent::Random(v) => v.iter().map(|v| v.len()).sum(),
+            QueueContent::Folder(folder) => folder.len(),
             QueueContent::Loop(total, _done, inner) => {
                 if *total == 0 {
                     inner.len()
                 } else {
-                    *total * inner.len()
+                    total.saturating_mul(inner.len())
                 }
             }
-            QueueContent::Shuffle { inner, state: _ } => inner.len(),
         }
     }
     pub fn duration_total(&self, db: &Database) -> QueueDuration {
@@ -150,9 +82,14 @@ impl Queue {
                 QueueContent::Song(v) => {
                     dur.millis += db.get_song(v).map(|s| s.duration_millis).unwrap_or(0)
                 }
-                QueueContent::Folder(c, inner, _) => {
-                    for (i, inner) in inner.iter().enumerate() {
-                        if dur.include_past || i >= *c {
+                QueueContent::Folder(QueueFolder {
+                    index,
+                    content,
+                    name: _,
+                    order: _,
+                }) => {
+                    for (i, inner) in content.iter().enumerate() {
+                        if dur.include_past || i >= *index {
                             inner.add_duration(dur, db);
                         }
                     }
@@ -175,15 +112,6 @@ impl Queue {
                         }
                     }
                 }
-                QueueContent::Random(q) => {
-                    if let Some(el) = q.iter().next() {
-                        dur.random_known_millis += el.duration_total(db).millis;
-                    }
-                    dur.random_counter += 1;
-                }
-                QueueContent::Shuffle { inner, state: _ } => {
-                    inner.add_duration(dur, db);
-                }
             }
         }
     }
@@ -192,17 +120,8 @@ impl Queue {
     pub fn get_current(&self) -> Option<&Self> {
         match &self.content {
             QueueContent::Song(_) => Some(self),
-            QueueContent::Folder(i, v, _) => {
-                let i = *i;
-                if let Some(v) = v.get(i) {
-                    v.get_current()
-                } else {
-                    None
-                }
-            }
+            QueueContent::Folder(folder) => folder.get_current_immut()?.get_current(),
             QueueContent::Loop(_, _, inner) => inner.get_current(),
-            QueueContent::Random(v) => v.get(v.len().saturating_sub(2))?.get_current(),
-            QueueContent::Shuffle { inner, state: _ } => inner.get_current(),
         }
     }
     pub fn get_current_song(&self) -> Option<&SongId> {
@@ -222,22 +141,7 @@ impl Queue {
     pub fn get_next(&self) -> Option<&Self> {
         match &self.content {
             QueueContent::Song(_) => None,
-            QueueContent::Folder(i, vec, _) => {
-                let i = *i;
-                if let Some(v) = vec.get(i) {
-                    if let Some(v) = v.get_next() {
-                        Some(v)
-                    } else {
-                        if let Some(v) = vec.get(i + 1) {
-                            v.get_current()
-                        } else {
-                            None
-                        }
-                    }
-                } else {
-                    None
-                }
-            }
+            QueueContent::Folder(folder) => folder.get_next(),
             QueueContent::Loop(total, current, inner) => {
                 if let Some(v) = inner.get_next() {
                     Some(v)
@@ -247,156 +151,43 @@ impl Queue {
                     None
                 }
             }
-            QueueContent::Random(v) => v.get(v.len().saturating_sub(1))?.get_current(),
-            QueueContent::Shuffle { inner, state: _ } => inner.get_next(),
         }
     }
     pub fn get_first(&self) -> Option<&Self> {
         match &self.content {
             QueueContent::Song(..) => Some(self),
-            QueueContent::Folder(_, v, _) => v.first(),
+            QueueContent::Folder(folder) => folder.get_first(),
             QueueContent::Loop(_, _, q) => q.get_first(),
-            QueueContent::Random(q) => q.front(),
-            QueueContent::Shuffle { inner, state: _ } => inner.get_first(),
         }
     }
 
     pub fn advance_index_db(db: &mut Database) -> bool {
-        let mut actions = vec![];
-        let o = db.queue.advance_index_inner(vec![], &mut actions);
-        Self::handle_actions(db, actions);
+        let o = db.queue.advance_index_inner();
         o
     }
-    pub fn init(&mut self, path: Vec<usize>, actions: &mut Vec<QueueAction>) {
+    pub fn init(&mut self) {
         match &mut self.content {
             QueueContent::Song(..) => {}
-            QueueContent::Folder(i, v, _) => {
-                *i = 0;
-                if let Some(v) = v.first_mut() {
-                    v.init(
-                        {
-                            let mut p = path.clone();
-                            p.push(0);
-                            p
-                        },
-                        actions,
-                    );
+            QueueContent::Folder(folder) => {
+                folder.index = 0;
+                for v in &mut folder.content {
+                    v.init();
                 }
             }
-            QueueContent::Loop(_, _, inner) => inner.init(
-                {
-                    let mut p = path.clone();
-                    p.push(0);
-                    p
-                },
-                actions,
-            ),
-            QueueContent::Random(q) => {
-                if q.len() == 0 {
-                    actions.push(QueueAction::AddRandomSong(path.clone()));
-                    actions.push(QueueAction::AddRandomSong(path.clone()));
-                }
-                if let Some(q) = q.get_mut(q.len().saturating_sub(2)) {
-                    q.init(path, actions)
-                }
-            }
-            QueueContent::Shuffle { inner, state } => {
-                let mut p = path.clone();
-                p.push(0);
-                if inner.len() == 0 {
-                    *state = ShuffleState::NotShuffled;
-                } else if matches!(state, ShuffleState::NotShuffled | ShuffleState::Modified) {
-                    actions.push(QueueAction::SetShuffle(
-                        path,
-                        matches!(state, ShuffleState::Modified),
-                    ));
-                    *state = ShuffleState::Shuffled;
-                }
-                inner.init(p, actions);
-            }
+            QueueContent::Loop(_, _, inner) => inner.init(),
         }
     }
-    pub fn handle_actions(db: &mut Database, actions: Vec<QueueAction>) {
-        for action in actions {
-            match action {
-                QueueAction::AddRandomSong(path) => {
-                    if !db.is_client() {
-                        if let Some(song) = db.songs().keys().choose(&mut rand::thread_rng()) {
-                            db.apply_command(Command::QueueAdd(
-                                path,
-                                vec![QueueContent::Song(*song).into()],
-                            ));
-                        }
-                    }
-                }
-                QueueAction::SetShuffle(path, partial) => {
-                    if !db.is_client() {
-                        let mut actions = vec![];
-                        if let Some(QueueContent::Shuffle { inner, state: _ }) = db
-                            .queue
-                            .get_item_at_index_mut(&path, 0, &mut actions)
-                            .map(|v| v.content_mut())
-                        {
-                            if let QueueContent::Folder(i, v, _) = inner.content_mut() {
-                                let mut order = (0..v.len()).collect::<Vec<usize>>();
-                                if partial && *i + 1 < v.len() {
-                                    // shuffle only elements after the current one
-                                    order[*i + 1..].shuffle(&mut rand::thread_rng());
-                                } else {
-                                    order.shuffle(&mut rand::thread_rng());
-                                }
-                                db.apply_command(Command::QueueSetShuffle(path, order));
-                            }
-                        }
-                        Queue::handle_actions(db, actions);
-                    }
-                }
-            }
-        }
-    }
-    pub fn advance_index_inner(
-        &mut self,
-        mut path: Vec<usize>,
-        actions: &mut Vec<QueueAction>,
-    ) -> bool {
+    pub fn advance_index_inner(&mut self) -> bool {
         match &mut self.content {
             QueueContent::Song(_) => false,
-            QueueContent::Folder(index, contents, _) => {
-                if let Some(c) = contents.get_mut(*index) {
-                    let mut p = path.clone();
-                    p.push(*index);
-                    if c.advance_index_inner(p, actions) {
-                        // inner value could advance index, do nothing.
-                        true
-                    } else {
-                        loop {
-                            if *index + 1 < contents.len() {
-                                // can advance
-                                *index += 1;
-                                if contents[*index].enabled {
-                                    contents[*index].init(path, actions);
-                                    break true;
-                                }
-                            } else {
-                                // can't advance: index would be out of bounds
-                                *index = 0;
-                                break false;
-                            }
-                        }
-                    }
-                } else {
-                    *index = 0;
-                    false
-                }
-            }
+            QueueContent::Folder(folder) => folder.advance_index_inner(),
             QueueContent::Loop(total, current, inner) => {
-                path.push(0);
-                if inner.advance_index_inner(path.clone(), actions) {
+                if inner.advance_index_inner() {
                     true
                 } else {
                     *current += 1;
                     if *total == 0 || *current < *total {
-                        inner.init(path, actions);
+                        inner.init();
                         true
                     } else {
                         *current = 0;
@@ -404,56 +195,18 @@ impl Queue {
                     }
                 }
             }
-            QueueContent::Random(q) => {
-                let i = q.len().saturating_sub(2);
-                let mut p = path.clone();
-                p.push(i);
-                if q.get_mut(i)
-                    .is_some_and(|inner| inner.advance_index_inner(p, actions))
-                {
-                    true
-                } else {
-                    if q.len() >= 2 {
-                        q.pop_front();
-                    }
-                    // only sub 1 here because this is before the next random song is added
-                    let i2 = q.len().saturating_sub(1);
-                    if let Some(q) = q.get_mut(i2) {
-                        let mut p = path.clone();
-                        p.push(i2);
-                        q.init(p, actions);
-                    }
-                    actions.push(QueueAction::AddRandomSong(path));
-                    false
-                }
-            }
-            QueueContent::Shuffle { inner, state } => {
-                let mut p = path.clone();
-                p.push(0);
-                if !inner.advance_index_inner(p, actions) {
-                    // end of inner Folder element, reshuffle for next time
-                    *state = ShuffleState::Shuffled;
-                    actions.push(QueueAction::SetShuffle(path, false));
-                    false
-                } else {
-                    true
-                }
-            }
         }
     }
 
     pub fn set_index_db(db: &mut Database, index: &Vec<usize>) {
-        let mut actions = vec![];
         db.queue.reset_index();
-        db.queue.set_index_inner(index, 0, vec![], &mut actions);
-        Self::handle_actions(db, actions);
+        db.queue.set_index_inner(index, 0, vec![]);
     }
     pub fn set_index_inner(
         &mut self,
         index: &Vec<usize>,
         depth: usize,
         mut build_index: Vec<usize>,
-        actions: &mut Vec<QueueAction>,
     ) {
         let i = if let Some(i) = index.get(depth) {
             *i
@@ -463,42 +216,31 @@ impl Queue {
         build_index.push(i);
         match &mut self.content {
             QueueContent::Song(_) => {}
-            QueueContent::Folder(idx, contents, _) => {
-                if i != *idx {
-                    *idx = i;
-                }
-                if let Some(c) = contents.get_mut(i) {
-                    c.init(build_index.clone(), actions);
-                    c.set_index_inner(index, depth + 1, build_index, actions);
+            QueueContent::Folder(folder) => {
+                folder.index = i;
+                if let Some(c) = folder.get_current_mut() {
+                    c.init();
+                    c.set_index_inner(index, depth + 1, build_index);
                 }
             }
             QueueContent::Loop(_, _, inner) => {
-                inner.init(build_index.clone(), actions);
-                inner.set_index_inner(index, depth + 1, build_index, actions)
-            }
-            QueueContent::Random(_) => {}
-            QueueContent::Shuffle { inner, state: _ } => {
-                inner.init(build_index.clone(), actions);
-                inner.set_index_inner(index, depth + 1, build_index, actions)
+                inner.init();
+                inner.set_index_inner(index, depth + 1, build_index)
             }
         }
     }
     pub fn reset_index(&mut self) {
         match self.content_mut() {
             QueueContent::Song(_) => {}
-            QueueContent::Folder(i, v, _) => {
-                *i = 0;
-                for v in v {
+            QueueContent::Folder(folder) => {
+                folder.index = 0;
+                for v in &mut folder.content {
                     v.reset_index();
                 }
             }
             QueueContent::Loop(_, done, i) => {
                 *done = 0;
                 i.reset_index();
-            }
-            QueueContent::Random(_) => {}
-            QueueContent::Shuffle { inner, state: _ } => {
-                inner.reset_index();
             }
         }
     }
@@ -507,61 +249,31 @@ impl Queue {
         if let Some(i) = index.get(depth) {
             match &self.content {
                 QueueContent::Song(_) => None,
-                QueueContent::Folder(_, v, _) => {
-                    if let Some(v) = v.get(*i) {
+                QueueContent::Folder(folder) => {
+                    if let Some(v) = folder.get_at(*i) {
                         v.get_item_at_index(index, depth + 1)
                     } else {
                         None
                     }
                 }
                 QueueContent::Loop(_, _, inner) => inner.get_item_at_index(index, depth + 1),
-                QueueContent::Random(vec) => vec.get(*i)?.get_item_at_index(index, depth + 1),
-                QueueContent::Shuffle { inner, state: _ } => {
-                    inner.get_item_at_index(index, depth + 1)
-                }
             }
         } else {
             Some(self)
         }
     }
-    pub fn get_item_at_index_mut(
-        &mut self,
-        index: &Vec<usize>,
-        depth: usize,
-        actions: &mut Vec<QueueAction>,
-    ) -> Option<&mut Self> {
+    pub fn get_item_at_index_mut(&mut self, index: &Vec<usize>, depth: usize) -> Option<&mut Self> {
         if let Some(i) = index.get(depth) {
             match &mut self.content {
                 QueueContent::Song(_) => None,
-                QueueContent::Folder(_, v, _) => {
-                    if let Some(v) = v.get_mut(*i) {
-                        v.get_item_at_index_mut(index, depth + 1, actions)
+                QueueContent::Folder(folder) => {
+                    if let Some(v) = folder.get_mut_at(*i) {
+                        v.get_item_at_index_mut(index, depth + 1)
                     } else {
                         None
                     }
                 }
-                QueueContent::Loop(_, _, inner) => {
-                    inner.get_item_at_index_mut(index, depth + 1, actions)
-                }
-                QueueContent::Random(vec) => {
-                    vec.get_mut(*i)?
-                        .get_item_at_index_mut(index, depth + 1, actions)
-                }
-                QueueContent::Shuffle { inner, state } => {
-                    // if getting a mutable reference to the Folder that holds our songs,
-                    // it may have been modified
-                    if depth + 1 == index.len() && matches!(state, ShuffleState::Shuffled) {
-                        *state = ShuffleState::Modified;
-                    }
-                    if matches!(state, ShuffleState::NotShuffled | ShuffleState::Modified) {
-                        actions.push(QueueAction::SetShuffle(
-                            index[0..depth].to_vec(),
-                            matches!(state, ShuffleState::Modified),
-                        ));
-                        *state = ShuffleState::Shuffled;
-                    }
-                    inner.get_item_at_index_mut(index, depth + 1, actions)
-                }
+                QueueContent::Loop(_, _, inner) => inner.get_item_at_index_mut(index, depth + 1),
             }
         } else {
             Some(self)
@@ -572,21 +284,33 @@ impl Queue {
         if let Some(i) = index.get(depth) {
             match &mut self.content {
                 QueueContent::Song(_) => None,
-                QueueContent::Folder(ci, v, _) => {
+                QueueContent::Folder(folder) => {
                     if depth + 1 < index.len() {
-                        if let Some(v) = v.get_mut(*i) {
+                        if let Some(v) = folder.get_mut_at(*i) {
                             v.remove_by_index(index, depth + 1)
                         } else {
                             None
                         }
                     } else {
-                        if *i < v.len() {
+                        if *i < folder.content.len() {
                             // if current playback is past this point,
                             // reduce the index by 1 so that it still points to the same element
-                            if *ci > *i {
-                                *ci -= 1;
+                            if folder.index > *i {
+                                folder.index -= 1;
                             }
-                            Some(v.remove(*i))
+                            let idx = if let Some(order) = &mut folder.order {
+                                let idx = order.remove(*i);
+                                // compensate for removal of element from .content
+                                for o in order {
+                                    if *o > idx {
+                                        *o -= 1;
+                                    }
+                                }
+                                idx
+                            } else {
+                                *i
+                            };
+                            Some(folder.content.remove(idx))
                         } else {
                             None
                         }
@@ -599,11 +323,144 @@ impl Queue {
                         None
                     }
                 }
-                QueueContent::Random(v) => v.remove(*i),
-                QueueContent::Shuffle { inner, state: _ } => {
-                    inner.remove_by_index(index, depth + 1)
+            }
+        } else {
+            None
+        }
+    }
+}
+
+impl QueueFolder {
+    pub fn iter(&self) -> QueueFolderIter {
+        QueueFolderIter {
+            folder: self,
+            index: 0,
+        }
+    }
+    pub fn add_to_end(&mut self, v: Vec<Queue>) -> Option<usize> {
+        let add_len = v.len();
+        let len = self.content.len();
+        for mut v in v.into_iter() {
+            v.init();
+            self.content.push(v);
+        }
+        if let Some(order) = &mut self.order {
+            for i in 0..add_len {
+                order.push(len + i);
+            }
+        }
+        Some(len)
+    }
+    pub fn insert(&mut self, v: Vec<Queue>, index: usize) -> bool {
+        if index <= self.content.len() {
+            if self.index >= index {
+                self.index += v.len();
+            }
+            fn insert_multiple<T>(index: usize, vec: &mut Vec<T>, v: impl IntoIterator<Item = T>) {
+                // remove the elements starting at the insertion point
+                let end = vec.split_off(index);
+                // insert new elements
+                for v in v {
+                    vec.push(v);
+                }
+                // re-add previously removed elements
+                vec.extend(end);
+            }
+            let mapfunc = |mut v: Queue| {
+                v.init();
+                v
+            };
+            if let Some(order) = &mut self.order {
+                insert_multiple(index, order, (0..v.len()).map(|i| self.content.len() + i));
+                self.content.extend(v.into_iter().map(mapfunc));
+            } else {
+                insert_multiple(index, &mut self.content, v.into_iter().map(mapfunc));
+            }
+            true
+        } else {
+            false
+        }
+    }
+    pub fn len(&self) -> usize {
+        self.content.iter().map(|v| v.len()).sum()
+    }
+    pub fn get_at(&self, mut i: usize) -> Option<&Queue> {
+        if let Some(order) = &self.order {
+            i = *order.get(i)?;
+        }
+        self.content.get(i)
+    }
+    pub fn get_mut_at(&mut self, mut i: usize) -> Option<&mut Queue> {
+        if let Some(order) = &self.order {
+            i = *order.get(i)?;
+        }
+        self.content.get_mut(i)
+    }
+    pub fn get_current_immut(&self) -> Option<&Queue> {
+        self.get_at(self.index)
+    }
+    pub fn get_current_mut(&mut self) -> Option<&mut Queue> {
+        self.get_mut_at(self.index)
+    }
+    pub fn get_next(&self) -> Option<&Queue> {
+        if let Some(v) = self.get_current_immut() {
+            if let Some(v) = v.get_next() {
+                Some(v)
+            } else {
+                if let Some(v) = self.get_at(self.index + 1) {
+                    v.get_current()
+                } else {
+                    None
                 }
             }
+        } else {
+            None
+        }
+    }
+    pub fn get_first(&self) -> Option<&Queue> {
+        if let Some(order) = &self.order {
+            self.content.get(*order.first()?)
+        } else {
+            self.content.first()
+        }
+    }
+    pub fn advance_index_inner(&mut self) -> bool {
+        if let Some(c) = self.get_current_mut() {
+            if c.advance_index_inner() {
+                // inner value could advance index, do nothing.
+                true
+            } else {
+                loop {
+                    if self.index + 1 < self.content.len() {
+                        // can advance
+                        self.index += 1;
+                        if self.content[self.index].enabled {
+                            self.content[self.index].init();
+                            break true;
+                        }
+                    } else {
+                        // can't advance: index would be out of bounds
+                        self.index = 0;
+                        break false;
+                    }
+                }
+            }
+        } else {
+            self.index = 0;
+            false
+        }
+    }
+}
+pub struct QueueFolderIter<'a> {
+    folder: &'a QueueFolder,
+    index: usize,
+}
+impl<'a> Iterator for QueueFolderIter<'a> {
+    type Item = &'a Queue;
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(v) = self.folder.get_at(self.index) {
+            self.index += 1;
+            Some(v)
         } else {
             None
         }
@@ -651,26 +508,15 @@ impl ToFromBytes for QueueContent {
                 s.write_all(&[0b11111111])?;
                 id.to_bytes(s)?;
             }
-            Self::Folder(index, contents, name) => {
+            Self::Folder(folder) => {
                 s.write_all(&[0b00000000])?;
-                index.to_bytes(s)?;
-                contents.to_bytes(s)?;
-                name.to_bytes(s)?;
+                ToFromBytes::to_bytes(folder, s)?;
             }
             Self::Loop(total, current, inner) => {
                 s.write_all(&[0b11000000])?;
                 total.to_bytes(s)?;
                 current.to_bytes(s)?;
                 inner.to_bytes(s)?;
-            }
-            Self::Random(q) => {
-                s.write_all(&[0b00110000])?;
-                q.to_bytes(s)?;
-            }
-            Self::Shuffle { inner, state } => {
-                s.write_all(&[0b00001100])?;
-                inner.to_bytes(s)?;
-                state.to_bytes(s)?;
             }
         }
         Ok(())
@@ -683,54 +529,43 @@ impl ToFromBytes for QueueContent {
         s.read_exact(&mut switch_on)?;
         Ok(match switch_on[0] {
             0b11111111 => Self::Song(ToFromBytes::from_bytes(s)?),
-            0b00000000 => Self::Folder(
-                ToFromBytes::from_bytes(s)?,
-                ToFromBytes::from_bytes(s)?,
-                ToFromBytes::from_bytes(s)?,
-            ),
+            0b00000000 => Self::Folder(ToFromBytes::from_bytes(s)?),
             0b11000000 => Self::Loop(
                 ToFromBytes::from_bytes(s)?,
                 ToFromBytes::from_bytes(s)?,
                 Box::new(ToFromBytes::from_bytes(s)?),
             ),
-            0b00110000 => Self::Random(ToFromBytes::from_bytes(s)?),
-            0b00001100 => Self::Shuffle {
-                inner: Box::new(ToFromBytes::from_bytes(s)?),
-                state: ToFromBytes::from_bytes(s)?,
-            },
-            _ => Self::Folder(0, vec![], "<invalid byte received>".to_string()),
+            _ => Self::Folder(QueueFolder {
+                index: 0,
+                content: vec![],
+                name: "<invalid byte received>".to_string(),
+                order: None,
+            }),
         })
     }
 }
-impl ToFromBytes for ShuffleState {
+impl ToFromBytes for QueueFolder {
     fn to_bytes<T>(&self, s: &mut T) -> Result<(), std::io::Error>
     where
-        T: std::io::Write,
+        T: std::io::prelude::Write,
     {
-        s.write_all(&[match self {
-            Self::NotShuffled => 1,
-            Self::Modified => 2,
-            Self::Shuffled => 4,
-        }])
+        ToFromBytes::to_bytes(&self.index, s)?;
+        ToFromBytes::to_bytes(&self.content, s)?;
+        ToFromBytes::to_bytes(&self.name, s)?;
+        ToFromBytes::to_bytes(&self.order, s)?;
+        Ok(())
     }
     fn from_bytes<T>(s: &mut T) -> Result<Self, std::io::Error>
     where
-        T: std::io::Read,
+        T: std::io::prelude::Read,
     {
-        let mut b = [0];
-        s.read_exact(&mut b)?;
-        Ok(match b[0] {
-            1 => Self::NotShuffled,
-            2 => Self::Modified,
-            4 => Self::Shuffled,
-            _ => {
-                eprintln!(
-                    "[warn] received {} as ShuffleState, which is invalid. defaulting to Shuffled.",
-                    b[0]
-                );
-                Self::Shuffled
-            }
-        })
+        let v = Self {
+            index: ToFromBytes::from_bytes(s)?,
+            content: ToFromBytes::from_bytes(s)?,
+            name: ToFromBytes::from_bytes(s)?,
+            order: ToFromBytes::from_bytes(s)?,
+        };
+        Ok(v)
     }
 }
 

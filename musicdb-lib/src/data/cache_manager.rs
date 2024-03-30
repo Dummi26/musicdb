@@ -19,6 +19,7 @@ pub struct CacheManager {
     /// Amount of bytes. If free system memory is greater than this number, consider caching more songs.
     pub max_avail_mem: Arc<AtomicU64>,
     pub songs_to_cache: Arc<AtomicU32>,
+    #[allow(unused)]
     thread: Arc<JoinHandle<()>>,
 }
 
@@ -82,15 +83,9 @@ impl CacheManager {
                     } else {
                         let mut queue = db.queue.clone();
 
-                        let mut actions = vec![];
-
                         let queue_current_song = queue.get_current_song().copied();
-                        queue.advance_index_inner(vec![], &mut actions);
-                        let queue_next_song = if actions.is_empty() {
-                            queue.get_current_song().copied()
-                        } else {
-                            None
-                        };
+                        queue.advance_index_inner();
+                        let queue_next_song = queue.get_current_song().copied();
 
                         let mut ids_to_cache = queue_current_song
                             .into_iter()
@@ -98,10 +93,7 @@ impl CacheManager {
                             .collect::<Vec<_>>();
 
                         for _ in 2..songs_to_cache {
-                            queue.advance_index_inner(vec![], &mut actions);
-                            if !actions.is_empty() {
-                                break;
-                            }
+                            queue.advance_index_inner();
                             if let Some(id) = queue.get_current_song() {
                                 if !ids_to_cache.contains(id) {
                                     ids_to_cache.push(*id);

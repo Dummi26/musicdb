@@ -13,7 +13,7 @@ use musicdb_lib::{
         album::Album,
         artist::Artist,
         database::Database,
-        queue::{Queue, QueueContent},
+        queue::{Queue, QueueContent, QueueFolder},
         song::Song,
     },
     server::Command,
@@ -88,7 +88,9 @@ pub fn add(
                 | Command::QueueInsert(..)
                 | Command::QueueRemove(..)
                 | Command::QueueGoto(..)
-                | Command::QueueSetShuffle(..) => {
+                | Command::QueueShuffle(..)
+                | Command::QueueSetShuffle(..)
+                | Command::QueueUnshuffle(..) => {
                     handle(&handler_queue_changed, move || (Data::empty_tuple(), ()));
                 }
                 Command::AddSong(_)
@@ -409,7 +411,7 @@ pub fn add(
                 move |_, _| {
                     cmd(Command::QueueUpdate(
                         vec![],
-                        QueueContent::Folder(0, vec![], String::new()).into(),
+                        QueueContent::Folder(QueueFolder::default()).into(),
                     ));
                     Data::empty_tuple()
                 }
@@ -479,7 +481,7 @@ pub fn add(
                         vec![QueueContent::Loop(
                             repeat_count.max(0) as _,
                             0,
-                            Box::new(QueueContent::Folder(0, vec![], String::new()).into()),
+                            Box::new(QueueContent::Folder(QueueFolder::default()).into()),
                         )
                         .into()],
                     ));
@@ -518,60 +520,12 @@ pub fn add(
                         .clone();
                     cmd(Command::QueueAdd(
                         path,
-                        vec![QueueContent::Folder(0, vec![], name).into()],
-                    ));
-                    Data::empty_tuple()
-                }
-            }
-        ),
-    )
-    .add_var(
-        "queue_add_random".to_owned(),
-        func!(
-            |a, _| {
-                if a.is_included_in(&mers_lib::program::configs::with_list::ListT(Type::new(
-                    data::int::IntT,
-                ))) {
-                    Ok(Type::empty_tuple())
-                } else {
-                    Err(format!("Function argument must be `List<Int>`.").into())
-                }
-            },
-            {
-                let cmd = Arc::clone(cmd);
-                move |a, _| {
-                    let path = int_list_to_usize_vec(&a);
-                    cmd(Command::QueueAdd(
-                        path,
-                        vec![QueueContent::Random(Default::default()).into()],
-                    ));
-                    Data::empty_tuple()
-                }
-            }
-        ),
-    )
-    .add_var(
-        "queue_add_shuffle".to_owned(),
-        func!(
-            |a, _| {
-                if a.is_included_in(&mers_lib::program::configs::with_list::ListT(Type::new(
-                    data::int::IntT,
-                ))) {
-                    Ok(Type::empty_tuple())
-                } else {
-                    Err(format!("Function argument must be `List<Int>`.").into())
-                }
-            },
-            {
-                let cmd = Arc::clone(cmd);
-                move |a, _| {
-                    let path = int_list_to_usize_vec(&a);
-                    cmd(Command::QueueAdd(
-                        path,
-                        vec![QueueContent::Shuffle {
-                            inner: Box::new(QueueContent::Folder(0, vec![], String::new()).into()),
-                            state: musicdb_lib::data::queue::ShuffleState::NotShuffled,
-                        }
+                        vec![QueueContent::Folder(QueueFolder {
+                            index: 0,
+                            content: vec![],
+                            name,
+                            order: None,
+                        })
                         .into()],
                     ));
                     Data::empty_tuple()
@@ -1007,24 +961,23 @@ fn gen_queue_elem(queue_elem: &Queue) -> Data {
                     ("done".to_owned(), Data::new(data::int::Int(*done as _))),
                 ])),
             ),
-            QueueContent::Random(_) => ("random".to_owned(), Data::empty_tuple()),
-            QueueContent::Folder(index, inner, name) => (
+            QueueContent::Folder(folder) => (
                 "folder".to_owned(),
                 Data::new(data::object::Object(vec![
-                    ("index".to_owned(), Data::new(data::int::Int(*index as _))),
+                    (
+                        "index".to_owned(),
+                        Data::new(data::int::Int(folder.index as _)),
+                    ),
                     (
                         "length".to_owned(),
-                        Data::new(data::int::Int(inner.len() as _)),
+                        Data::new(data::int::Int(folder.content.len() as _)),
                     ),
                     (
                         "name".to_owned(),
-                        Data::new(data::string::String(name.clone())),
+                        Data::new(data::string::String(folder.name.clone())),
                     ),
                 ])),
             ),
-            QueueContent::Shuffle { inner: _, state: _ } => {
-                ("shuffle".to_owned(), Data::empty_tuple())
-            }
         },
     ]))
 }
