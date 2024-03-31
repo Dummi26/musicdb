@@ -87,6 +87,8 @@ pub fn add(
                 | Command::QueueAdd(..)
                 | Command::QueueInsert(..)
                 | Command::QueueRemove(..)
+                | Command::QueueMove(..)
+                | Command::QueueMoveInto(..)
                 | Command::QueueGoto(..)
                 | Command::QueueShuffle(..)
                 | Command::QueueSetShuffle(..)

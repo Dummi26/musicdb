@@ -16,7 +16,7 @@ use speedy2d::{
 
 use crate::{
     gui::{Dragging, DrawInfo, GuiAction, GuiElem, GuiElemCfg},
-    gui_base::{Button, Panel, ScrollBox, ScrollBoxSizeUnit},
+    gui_base::{Panel, ScrollBox},
     gui_text::{self, AdvancedLabel, Label, TextField},
 };
 
@@ -400,25 +400,33 @@ impl GuiElem for QueueEmptySpaceDragHandler {
         self
     }
     fn dragged(&mut self, dragged: Dragging) -> Vec<GuiAction> {
-        dragged_add_to_queue(dragged, |q| Command::QueueAdd(vec![], q))
+        dragged_add_to_queue(
+            dragged,
+            (),
+            |_, q| Command::QueueAdd(vec![], q),
+            |_, q| Command::QueueMoveInto(q, vec![]),
+        )
     }
 }
 
 fn generic_queue_draw(
     info: &mut DrawInfo,
     path: &Vec<usize>,
+    queue: impl FnOnce() -> Queue,
     mouse: &mut bool,
     copy_on_mouse_down: bool,
-) -> bool {
+) {
     if *mouse && !info.pos.contains(info.mouse_pos) {
+        // mouse left our element
         *mouse = false;
-        if !copy_on_mouse_down {
-            info.actions
-                .push(GuiAction::SendToServer(Command::QueueRemove(path.clone())));
-        }
-        true
-    } else {
-        false
+        info.actions.push(GuiAction::SetDragging(Some((
+            Dragging::Queue(if copy_on_mouse_down {
+                Ok(queue())
+            } else {
+                Err(path.clone())
+            }),
+            None,
+        ))));
     }
 }
 
@@ -594,12 +602,13 @@ impl GuiElem for QueueSong {
                 info.mouse_pos.y - self.config.pixel_pos.top_left().y,
             );
         }
-        if generic_queue_draw(info, &self.path, &mut self.mouse, self.copy_on_mouse_down) {
-            info.actions.push(GuiAction::SetDragging(Some((
-                Dragging::Queue(QueueContent::Song(self.song.id).into()),
-                None,
-            ))));
-        }
+        generic_queue_draw(
+            info,
+            &self.path,
+            || QueueContent::Song(self.song.id).into(),
+            &mut self.mouse,
+            self.copy_on_mouse_down,
+        );
     }
     fn key_watch(
         &mut self,
@@ -613,15 +622,26 @@ impl GuiElem for QueueSong {
     }
     fn dragged(&mut self, dragged: Dragging) -> Vec<GuiAction> {
         if !self.always_copy {
-            let mut p = self.path.clone();
             let insert_below = self.insert_below;
-            dragged_add_to_queue(dragged, move |q| {
-                if let Some(j) = p.pop() {
-                    Command::QueueInsert(p.clone(), if insert_below { j + 1 } else { j }, q)
-                } else {
-                    Command::QueueAdd(p.clone(), q)
-                }
-            })
+            dragged_add_to_queue(
+                dragged,
+                self.path.clone(),
+                move |mut p: Vec<usize>, q| {
+                    if let Some(j) = p.pop() {
+                        Command::QueueInsert(p, if insert_below { j + 1 } else { j }, q)
+                    } else {
+                        Command::QueueAdd(p, q)
+                    }
+                },
+                move |mut p, q| {
+                    if insert_below {
+                        if let Some(l) = p.last_mut() {
+                            *l += 1;
+                        }
+                    }
+                    Command::QueueMove(q, p)
+                },
+            )
         } else {
             vec![]
         }
@@ -747,12 +767,13 @@ impl GuiElem for QueueFolder {
                 info.mouse_pos.y - self.config.pixel_pos.top_left().y,
             );
         }
-        if generic_queue_draw(info, &self.path, &mut self.mouse, self.copy_on_mouse_down) {
-            info.actions.push(GuiAction::SetDragging(Some((
-                Dragging::Queue(QueueContent::Folder(self.queue.clone()).into()),
-                None,
-            ))));
-        }
+        generic_queue_draw(
+            info,
+            &self.path,
+            || QueueContent::Folder(self.queue.clone()).into(),
+            &mut self.mouse,
+            self.copy_on_mouse_down,
+        );
     }
     fn mouse_down(&mut self, button: MouseButton) -> Vec<GuiAction> {
         if button == MouseButton::Left {
@@ -797,12 +818,22 @@ impl GuiElem for QueueFolder {
     fn dragged(&mut self, dragged: Dragging) -> Vec<GuiAction> {
         if !self.always_copy {
             if self.insert_into {
-                let p = self.path.clone();
-                dragged_add_to_queue(dragged, move |q| Command::QueueAdd(p.clone(), q))
+                dragged_add_to_queue(
+                    dragged,
+                    self.path.clone(),
+                    |p, q| Command::QueueAdd(p, q),
+                    |p, q| Command::QueueMoveInto(q, p),
+                )
             } else {
-                let mut p = self.path.clone();
-                let j = p.pop().unwrap_or(0);
-                dragged_add_to_queue(dragged, move |q| Command::QueueInsert(p.clone(), j, q))
+                dragged_add_to_queue(
+                    dragged,
+                    self.path.clone(),
+                    |mut p, q| {
+                        let j = p.pop().unwrap_or(0);
+                        Command::QueueInsert(p, j, q)
+                    },
+                    |p, q| Command::QueueMove(q, p),
+                )
             }
         } else {
             vec![]
@@ -863,8 +894,15 @@ impl GuiElem for QueueIndentEnd {
         }
     }
     fn dragged(&mut self, dragged: Dragging) -> Vec<GuiAction> {
-        let (p, j) = self.path_insert.clone();
-        dragged_add_to_queue(dragged, move |q| Command::QueueInsert(p.clone(), j, q))
+        dragged_add_to_queue(
+            dragged,
+            self.path_insert.clone(),
+            |(p, j), q| Command::QueueInsert(p, j, q),
+            |(mut p, j), q| {
+                p.push(j);
+                Command::QueueMove(q, p)
+            },
+        )
     }
 }
 
@@ -974,12 +1012,13 @@ impl GuiElem for QueueLoop {
                 info.mouse_pos.y - self.config.pixel_pos.top_left().y,
             );
         }
-        if generic_queue_draw(info, &self.path, &mut self.mouse, self.copy_on_mouse_down) {
-            info.actions.push(GuiAction::SetDragging(Some((
-                Dragging::Queue(self.queue.clone()),
-                None,
-            ))));
-        }
+        generic_queue_draw(
+            info,
+            &self.path,
+            || self.queue.clone(),
+            &mut self.mouse,
+            self.copy_on_mouse_down,
+        );
     }
     fn mouse_down(&mut self, button: MouseButton) -> Vec<GuiAction> {
         if button == MouseButton::Left {
@@ -1016,22 +1055,29 @@ impl GuiElem for QueueLoop {
         if !self.always_copy {
             let mut p = self.path.clone();
             p.push(0);
-            dragged_add_to_queue(dragged, move |q| Command::QueueAdd(p.clone(), q))
+            dragged_add_to_queue(
+                dragged,
+                p,
+                |p, q| Command::QueueAdd(p, q),
+                |p, q| Command::QueueMoveInto(q, p),
+            )
         } else {
             vec![]
         }
     }
 }
 
-fn dragged_add_to_queue<F: FnOnce(Vec<Queue>) -> Command + 'static>(
+fn dragged_add_to_queue<T: 'static>(
     dragged: Dragging,
-    f: F,
+    data: T,
+    f_queues: impl FnOnce(T, Vec<Queue>) -> Command + 'static,
+    f_queue_by_path: impl FnOnce(T, Vec<usize>) -> Command + 'static,
 ) -> Vec<GuiAction> {
     match dragged {
         Dragging::Artist(id) => {
             vec![GuiAction::Build(Box::new(move |db| {
                 if let Some(q) = add_to_queue_artist_by_id(id, db) {
-                    vec![GuiAction::SendToServer(f(vec![q]))]
+                    vec![GuiAction::SendToServer(f_queues(data, vec![q]))]
                 } else {
                     vec![]
                 }
@@ -1040,7 +1086,7 @@ fn dragged_add_to_queue<F: FnOnce(Vec<Queue>) -> Command + 'static>(
         Dragging::Album(id) => {
             vec![GuiAction::Build(Box::new(move |db| {
                 if let Some(q) = add_to_queue_album_by_id(id, db) {
-                    vec![GuiAction::SendToServer(f(vec![q]))]
+                    vec![GuiAction::SendToServer(f_queues(data, vec![q]))]
                 } else {
                     vec![]
                 }
@@ -1048,12 +1094,13 @@ fn dragged_add_to_queue<F: FnOnce(Vec<Queue>) -> Command + 'static>(
         }
         Dragging::Song(id) => {
             let q = QueueContent::Song(id).into();
-            vec![GuiAction::SendToServer(f(vec![q]))]
+            vec![GuiAction::SendToServer(f_queues(data, vec![q]))]
         }
-        Dragging::Queue(q) => {
-            vec![GuiAction::SendToServer(f(vec![q]))]
-        }
-        Dragging::Queues(q) => vec![GuiAction::SendToServer(f(q))],
+        Dragging::Queue(q) => vec![GuiAction::SendToServer(match q {
+            Ok(q) => f_queues(data, vec![q]),
+            Err(p) => f_queue_by_path(data, p),
+        })],
+        Dragging::Queues(q) => vec![GuiAction::SendToServer(f_queues(data, q))],
     }
 }
 

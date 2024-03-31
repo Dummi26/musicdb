@@ -39,6 +39,10 @@ pub enum Command {
     QueueAdd(Vec<usize>, Vec<Queue>),
     QueueInsert(Vec<usize>, usize, Vec<Queue>),
     QueueRemove(Vec<usize>),
+    /// Move an element from A to B
+    QueueMove(Vec<usize>, Vec<usize>),
+    /// Take an element from A and add it to the end of the folder B
+    QueueMoveInto(Vec<usize>, Vec<usize>),
     QueueGoto(Vec<usize>),
     // sent by clients when they want to shuffle a folder
     QueueShuffle(Vec<usize>),
@@ -283,8 +287,10 @@ const BYTE_QUEUE_UPDATE: u8 = 0b10_000_000;
 const BYTE_QUEUE_ADD: u8 = 0b10_000_001;
 const BYTE_QUEUE_INSERT: u8 = 0b10_000_010;
 const BYTE_QUEUE_REMOVE: u8 = 0b10_000_100;
-const BYTE_QUEUE_GOTO: u8 = 0b10_001_000;
-const BYTE_QUEUE_ACTION: u8 = 0b10_100;
+const BYTE_QUEUE_MOVE: u8 = 0b10_001_000;
+const BYTE_QUEUE_MOVE_INTO: u8 = 0b10_001_001;
+const BYTE_QUEUE_GOTO: u8 = 0b10_001_010;
+const BYTE_QUEUE_ACTION: u8 = 0b10_001_100;
 const SUBBYTE_ACTION_SHUFFLE: u8 = 0b01_000_001;
 const SUBBYTE_ACTION_SET_SHUFFLE: u8 = 0b01_000_010;
 const SUBBYTE_ACTION_UNSHUFFLE: u8 = 0b01_000_100;
@@ -347,6 +353,16 @@ impl ToFromBytes for Command {
             Self::QueueRemove(index) => {
                 s.write_all(&[BYTE_QUEUE_REMOVE])?;
                 index.to_bytes(s)?;
+            }
+            Self::QueueMove(a, b) => {
+                s.write_all(&[BYTE_QUEUE_MOVE])?;
+                a.to_bytes(s)?;
+                b.to_bytes(s)?;
+            }
+            Self::QueueMoveInto(a, b) => {
+                s.write_all(&[BYTE_QUEUE_MOVE_INTO])?;
+                a.to_bytes(s)?;
+                b.to_bytes(s)?;
             }
             Self::QueueGoto(index) => {
                 s.write_all(&[BYTE_QUEUE_GOTO])?;
@@ -529,6 +545,8 @@ impl ToFromBytes for Command {
             BYTE_QUEUE_ADD => Self::QueueAdd(from_bytes!(), from_bytes!()),
             BYTE_QUEUE_INSERT => Self::QueueInsert(from_bytes!(), from_bytes!(), from_bytes!()),
             BYTE_QUEUE_REMOVE => Self::QueueRemove(from_bytes!()),
+            BYTE_QUEUE_MOVE => Self::QueueMove(from_bytes!(), from_bytes!()),
+            BYTE_QUEUE_MOVE_INTO => Self::QueueMoveInto(from_bytes!(), from_bytes!()),
             BYTE_QUEUE_GOTO => Self::QueueGoto(from_bytes!()),
             BYTE_QUEUE_ACTION => match s.read_byte()? {
                 SUBBYTE_ACTION_SHUFFLE => Self::QueueShuffle(from_bytes!()),

@@ -559,6 +559,71 @@ impl Database {
             Command::QueueRemove(index) => {
                 self.queue.remove_by_index(&index, 0);
             }
+            Command::QueueMove(index_from, mut index_to) => 'queue_move: {
+                if index_to.len() == 0 || index_to.starts_with(&index_from) {
+                    break 'queue_move;
+                }
+                // if same parent path, perform folder move operation instead
+                if index_from[0..index_from.len() - 1] == index_to[0..index_to.len() - 1] {
+                    if let Some(parent) = self
+                        .queue
+                        .get_item_at_index_mut(&index_from[0..index_from.len() - 1], 0)
+                    {
+                        if let QueueContent::Folder(folder) = parent.content_mut() {
+                            let i1 = index_from[index_from.len() - 1];
+                            let mut i2 = index_to[index_to.len() - 1];
+                            if i2 > i1 {
+                                i2 -= 1;
+                            }
+                            // this preserves "is currently active queue element" status
+                            folder.move_elem(i1, i2);
+                            break 'queue_move;
+                        }
+                    }
+                }
+                // otherwise, remove then insert
+                let was_current = self.queue.is_current(&index_from);
+                if let Some(elem) = self.queue.remove_by_index(&index_from, 0) {
+                    if index_to.len() >= index_from.len()
+                        && index_to.starts_with(&index_from[0..index_from.len() - 1])
+                        && index_to[index_from.len() - 1] > index_from[index_from.len() - 1]
+                    {
+                        index_to[index_from.len() - 1] -= 1;
+                    }
+                    if let Some(parent) = self
+                        .queue
+                        .get_item_at_index_mut(&index_to[0..index_to.len() - 1], 0)
+                    {
+                        parent.insert(vec![elem], index_to[index_to.len() - 1]);
+                        if was_current {
+                            self.queue.set_index_inner(&index_to, 0, vec![]);
+                        }
+                    }
+                }
+            }
+            Command::QueueMoveInto(index_from, mut parent_to) => 'queue_move_into: {
+                if parent_to.starts_with(&index_from) {
+                    break 'queue_move_into;
+                }
+                // remove then insert
+                let was_current = self.queue.is_current(&index_from);
+                if let Some(elem) = self.queue.remove_by_index(&index_from, 0) {
+                    if parent_to.len() >= index_from.len()
+                        && parent_to.starts_with(&index_from[0..index_from.len() - 1])
+                        && parent_to[index_from.len() - 1] > index_from[index_from.len() - 1]
+                    {
+                        parent_to[index_from.len() - 1] -= 1;
+                    }
+                    if let Some(parent) = self.queue.get_item_at_index_mut(&parent_to, 0) {
+                        if let Some(i) = parent.add_to_end(vec![elem]) {
+                            if was_current {
+                                parent_to.push(i);
+                                self.queue.set_index_inner(&parent_to, 0, vec![]);
+                            }
+                        }
+                    }
+                }
+            }
             Command::QueueGoto(index) => Queue::set_index_db(self, &index),
             Command::QueueShuffle(path) => {
                 if let Some(elem) = self.queue.get_item_at_index_mut(&path, 0) {

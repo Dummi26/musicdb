@@ -41,6 +41,21 @@ impl Queue {
             QueueContent::Loop(..) => None,
         }
     }
+    pub fn is_current(&self, index: &[usize]) -> bool {
+        if index.is_empty() {
+            return true;
+        }
+        match self.content() {
+            QueueContent::Song(_) => true,
+            QueueContent::Folder(folder) => {
+                folder.index == index[0]
+                    && folder
+                        .get_current_immut()
+                        .is_some_and(|c| c.is_current(&index[1..]))
+            }
+            QueueContent::Loop(_, _, inner) => index[0] == 0 && inner.is_current(&index[1..]),
+        }
+    }
     pub fn insert(&mut self, v: Vec<Self>, index: usize) -> bool {
         match &mut self.content {
             QueueContent::Song(_) => false,
@@ -198,16 +213,11 @@ impl Queue {
         }
     }
 
-    pub fn set_index_db(db: &mut Database, index: &Vec<usize>) {
+    pub fn set_index_db(db: &mut Database, index: &[usize]) {
         db.queue.reset_index();
         db.queue.set_index_inner(index, 0, vec![]);
     }
-    pub fn set_index_inner(
-        &mut self,
-        index: &Vec<usize>,
-        depth: usize,
-        mut build_index: Vec<usize>,
-    ) {
+    pub fn set_index_inner(&mut self, index: &[usize], depth: usize, mut build_index: Vec<usize>) {
         let i = if let Some(i) = index.get(depth) {
             *i
         } else {
@@ -245,7 +255,7 @@ impl Queue {
         }
     }
 
-    pub fn get_item_at_index(&self, index: &Vec<usize>, depth: usize) -> Option<&Self> {
+    pub fn get_item_at_index(&self, index: &[usize], depth: usize) -> Option<&Self> {
         if let Some(i) = index.get(depth) {
             match &self.content {
                 QueueContent::Song(_) => None,
@@ -262,7 +272,7 @@ impl Queue {
             Some(self)
         }
     }
-    pub fn get_item_at_index_mut(&mut self, index: &Vec<usize>, depth: usize) -> Option<&mut Self> {
+    pub fn get_item_at_index_mut(&mut self, index: &[usize], depth: usize) -> Option<&mut Self> {
         if let Some(i) = index.get(depth) {
             match &mut self.content {
                 QueueContent::Song(_) => None,
@@ -280,7 +290,7 @@ impl Queue {
         }
     }
 
-    pub fn remove_by_index(&mut self, index: &Vec<usize>, depth: usize) -> Option<Self> {
+    pub fn remove_by_index(&mut self, index: &[usize], depth: usize) -> Option<Self> {
         if let Some(i) = index.get(depth) {
             match &mut self.content {
                 QueueContent::Song(_) => None,
@@ -448,6 +458,46 @@ impl QueueFolder {
         } else {
             self.index = 0;
             false
+        }
+    }
+
+    pub fn move_elem(&mut self, index_from: usize, index_to: usize) -> bool {
+        fn vec_move<T>(vec: &mut Vec<T>, from: usize, to: usize) -> bool {
+            if from < vec.len() && to < vec.len() {
+                if from == to {
+                    return true;
+                }
+                unsafe {
+                    if from < to {
+                        let elem = vec.as_mut_ptr().add(from).read();
+                        for i in from..to {
+                            vec[i] = vec.as_mut_ptr().add(i + 1).read();
+                        }
+                        vec[to] = elem;
+                    } else {
+                        let elem = vec.as_mut_ptr().add(from).read();
+                        for i in (to..from).rev() {
+                            vec[i + 1] = vec.as_mut_ptr().add(i).read();
+                        }
+                        vec[to] = elem;
+                    }
+                }
+                true
+            } else {
+                false
+            }
+        }
+        if self.index == index_from {
+            self.index = index_to;
+        } else if index_from < self.index && self.index <= index_to {
+            self.index -= 1;
+        } else if index_to <= self.index && self.index < index_from {
+            self.index += 1;
+        }
+        if let Some(order) = &mut self.order {
+            vec_move(order, index_from, index_to)
+        } else {
+            vec_move(&mut self.content, index_from, index_to)
         }
     }
 }

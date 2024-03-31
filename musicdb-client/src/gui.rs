@@ -365,6 +365,8 @@ impl Gui {
                 | Command::QueueAdd(..)
                 | Command::QueueInsert(..)
                 | Command::QueueRemove(..)
+                | Command::QueueMove(..)
+                | Command::QueueMoveInto(..)
                 | Command::QueueGoto(..)
                 | Command::QueueShuffle(..)
                 | Command::QueueSetShuffle(..)
@@ -1130,7 +1132,7 @@ pub enum Dragging {
     Artist(ArtistId),
     Album(AlbumId),
     Song(SongId),
-    Queue(Queue),
+    Queue(Result<Queue, Vec<usize>>),
     Queues(Vec<Queue>),
 }
 pub enum SpecificGuiElem {
@@ -1430,12 +1432,23 @@ impl WindowHandler<GuiEvent> for Gui {
     }
     fn on_mouse_button_up(&mut self, helper: &mut WindowHelper<GuiEvent>, button: MouseButton) {
         if self.dragging.is_some() {
-            if let Some(a) = self.gui._release_drag(
-                &mut self.dragging.take().map(|v| v.0),
-                self.mouse_pos.clone(),
-            ) {
+            let (dr, _) = self.dragging.take().unwrap();
+            let mut opt = Some(dr);
+            if let Some(a) = self.gui._release_drag(&mut opt, self.mouse_pos.clone()) {
                 for a in a {
                     self.exec_gui_action(a)
+                }
+            }
+            if let Some(dr) = opt {
+                match dr {
+                    Dragging::Artist(_)
+                    | Dragging::Album(_)
+                    | Dragging::Song(_)
+                    | Dragging::Queue(Ok(_))
+                    | Dragging::Queues(_) => (),
+                    Dragging::Queue(Err(path)) => {
+                        self.exec_gui_action(GuiAction::SendToServer(Command::QueueRemove(path)))
+                    }
                 }
             }
         }
