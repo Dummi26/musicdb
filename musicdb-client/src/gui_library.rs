@@ -837,7 +837,7 @@ impl LibraryBrowser {
     }
 }
 
-enum ListElement {
+pub enum ListElement {
     Artist(ListArtist),
     Album(ListAlbum),
     Song(ListSong),
@@ -859,7 +859,7 @@ impl GuiElemWrapper for ListElement {
     }
 }
 
-struct ListArtist {
+pub struct ListArtist {
     config: GuiElemCfg,
     id: ArtistId,
     children: Vec<Box<dyn GuiElem>>,
@@ -982,7 +982,7 @@ impl GuiElem for ListArtist {
     }
 }
 
-struct ListAlbum {
+pub struct ListAlbum {
     config: GuiElemCfg,
     id: AlbumId,
     children: Vec<Box<dyn GuiElem>>,
@@ -1126,7 +1126,7 @@ impl GuiElem for ListAlbum {
     }
 }
 
-struct ListSong {
+pub struct ListSong {
     config: GuiElemCfg,
     id: SongId,
     children: Vec<Box<dyn GuiElem>>,
@@ -1292,7 +1292,7 @@ impl GuiElem for ListSong {
     }
 }
 
-struct FilterPanel {
+pub struct FilterPanel {
     config: GuiElemCfg,
     c_tab_main: ScrollBox<(
         Button<[Label; 1]>,
