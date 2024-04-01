@@ -467,21 +467,8 @@ impl QueueFolder {
                 if from == to {
                     return true;
                 }
-                unsafe {
-                    if from < to {
-                        let elem = vec.as_mut_ptr().add(from).read();
-                        for i in from..to {
-                            vec[i] = vec.as_mut_ptr().add(i + 1).read();
-                        }
-                        vec[to] = elem;
-                    } else {
-                        let elem = vec.as_mut_ptr().add(from).read();
-                        for i in (to..from).rev() {
-                            vec[i + 1] = vec.as_mut_ptr().add(i).read();
-                        }
-                        vec[to] = elem;
-                    }
-                }
+                let elem = vec.remove(from);
+                vec.insert(to, elem);
                 true
             } else {
                 false
