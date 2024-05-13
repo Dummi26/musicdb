@@ -99,6 +99,7 @@ pub struct KeybindInput {
     id: KeyActionId,
     changing: bool,
     keybinds_should_be_updated: Arc<AtomicBool>,
+    has_keyboard_focus: bool,
 }
 impl KeybindInput {
     pub fn new(
@@ -131,14 +132,19 @@ impl KeybindInput {
             id,
             changing: false,
             keybinds_should_be_updated,
+            has_keyboard_focus: false,
         }
     }
 }
 impl GuiElem for KeybindInput {
     fn mouse_pressed(&mut self, button: MouseButton) -> Vec<GuiAction> {
         if let MouseButton::Left = button {
-            self.changing = true;
-            self.config.request_keyboard_focus = true;
+            if !self.has_keyboard_focus {
+                self.changing = true;
+                self.config.request_keyboard_focus = true;
+            } else {
+                self.changing = false;
+            }
             vec![GuiAction::ResetKeyboardFocus]
         } else {
             vec![]
@@ -183,6 +189,7 @@ impl GuiElem for KeybindInput {
         }
     }
     fn draw(&mut self, info: &mut DrawInfo, g: &mut Graphics2D) {
+        self.has_keyboard_focus = info.has_keyboard_focus;
         if info.has_keyboard_focus && self.changing {
             let half_width = 2.0;
             let thickness = 2.0 * half_width;
