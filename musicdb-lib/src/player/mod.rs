@@ -1,58 +1,86 @@
-use std::{
-    collections::HashSet,
-    sync::{atomic::AtomicBool, Arc},
-};
+pub mod rodio;
 
-use awedio::{
-    backends::CpalBackend,
-    manager::Manager,
-    sounds::wrappers::{AsyncCompletionNotifier, Controller, Pausable},
-    Sound,
-};
-use colorize::AnsiColor;
-use rc_u8_reader::ArcU8Reader;
+use std::{collections::HashMap, ffi::OsStr, sync::Arc};
 
 use crate::{
-    data::{database::Database, SongId},
+    data::{database::Database, song::CachedData, SongId},
     server::Command,
 };
 
-pub struct Player {
-    /// can be unused, but must be present otherwise audio playback breaks
-    #[allow(unused)]
-    backend: CpalBackend,
-    source: Option<(
-        Controller<AsyncCompletionNotifier<Pausable<Box<dyn Sound>>>>,
-        Arc<AtomicBool>,
-    )>,
-    manager: Manager,
-    current_song_id: SongOpt,
-    cached: HashSet<SongId>,
-    allow_sending_commands: bool,
+pub struct Player<T: PlayerBackend<SongCustomData>> {
+    cached: HashMap<SongId, CachedData>,
+    pub backend: T,
 }
 
-pub enum SongOpt {
-    None,
-    Some(SongId),
-    /// Will be set to Some or None once handeled
-    New(Option<SongId>),
+pub struct SongCustomData {
+    load_duration: bool,
+}
+pub trait PlayerBackend<T> {
+    /// load the next song from its bytes
+    fn load_next_song(
+        &mut self,
+        id: SongId,
+        filename: &OsStr,
+        bytes: Arc<Vec<u8>>,
+        load_duration: bool,
+        custom_data: T,
+    );
+
+    /// pause playback. if `resume` is called, resume the song where it was paused.
+    fn pause(&mut self);
+    /// stop playback. if `resume` is called, restart the song.
+    fn stop(&mut self);
+    /// used after pause or stop.
+    /// does nothing if no song was playing, song was cleared, or a song is already playing.
+    fn resume(&mut self);
+
+    /// stop and discard the currently playing song, then set the next song as the current one.
+    /// `play` decides whether the next song should start playing or not.
+    fn next(&mut self, play: bool, load_duration: bool);
+    /// stop and discard the currently playing and next song.
+    /// calling `resume` after this was called but before a new song was loaded does nothing.
+    fn clear(&mut self);
+
+    /// Should be `true` after calling `resume()` or `next(true)` if `current_song().is_some()`
+    fn playing(&self) -> bool;
+
+    /// - `None` before a song is loaded or after `clear` was called,
+    /// - `Some((id, false))` while loading (if loading is done on a separate thread),
+    /// - `Some((id, true))` if a song is loaded and ready to be played (or loading failed)
+    /// performance notes: must be fast, as it is called repeatedly
+    fn current_song(&self) -> Option<(SongId, bool, &T)>;
+    /// like `has_current_song`.
+    /// performance notes: must be fast, as it is called repeatedly
+    fn next_song(&self) -> Option<(SongId, bool, &T)>;
+
+    fn gen_data_mut(&mut self) -> (Option<&mut T>, Option<&mut T>);
+
+    // if true, call `song_finished` more often. if false, song_finished may also be a constant `false`, but events should be sent directly to the server instead.
+    // this **must be constant**: it cannot change after the backend was constructed
+    fn song_finished_polling(&self) -> bool;
+
+    /// true if the currently playing song has finished playing.
+    /// this may return a constant `false` if the playback thread automatically sends a `NextSong` command to the database when this happens.
+    /// performance notes: must be fast, as it is called repeatedly
+    fn song_finished(&self) -> bool;
+
+    /// If possible, return the current song's duration in milliseconds.
+    /// It could also just return `None`.
+    /// If `load_duration` was `false` in either `load_next_song` or `next`, for performance reasons,
+    /// this should probably return `None` (unless getting the duration is virtually free).
+    /// `load_duration` can be ignored if you don't want to load the duration anyway, it's just there to prevent you from loading the duration if it won't be used anyway
+    fn current_song_duration(&self) -> Option<u64>;
+
+    /// If known, get the current playback position in the song, in milliseconds.
+    fn current_song_playback_position(&self) -> Option<u64>;
 }
 
-impl Player {
-    pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
-        let (manager, backend) = awedio::start()?;
-        Ok(Self {
-            manager,
+impl<T: PlayerBackend<SongCustomData>> Player<T> {
+    pub fn new(backend: T) -> Self {
+        Self {
+            cached: HashMap::new(),
             backend,
-            source: None,
-            current_song_id: SongOpt::None,
-            cached: HashSet::new(),
-            allow_sending_commands: true,
-        })
-    }
-    pub fn without_sending_commands(mut self) -> Self {
-        self.allow_sending_commands = false;
-        self
+        }
     }
     pub fn handle_command(&mut self, command: &Command) {
         match command {
@@ -63,189 +91,136 @@ impl Player {
         }
     }
     pub fn pause(&mut self) {
-        if let Some((source, _notif)) = &mut self.source {
-            source.set_paused(true);
-        }
+        self.backend.pause();
     }
     pub fn resume(&mut self) {
-        if let Some((source, _notif)) = &mut self.source {
-            source.set_paused(false);
-        } else if let SongOpt::Some(id) = &self.current_song_id {
-            // there is no source to resume playback on, but there is a current song
-            self.current_song_id = SongOpt::New(Some(*id));
-        }
+        self.backend.resume();
     }
     pub fn stop(&mut self) {
-        if let Some((source, _notif)) = &mut self.source {
-            source.set_paused(true);
-        }
-        if let SongOpt::Some(id) | SongOpt::New(Some(id)) = self.current_song_id {
-            self.current_song_id = SongOpt::New(Some(id));
-        } else {
-            self.current_song_id = SongOpt::New(None);
-        }
+        self.backend.stop();
     }
-    pub fn update(
-        &mut self,
-        db: &mut Database,
-        command_sender: &Arc<impl Fn(Command) + Send + Sync + 'static>,
-    ) {
-        self.update_uncache_opt(db, command_sender, true)
+
+    pub fn update(&mut self, db: &mut Database) {
+        self.update_uncache_opt(db, true)
     }
     /// never uncache songs (this is something the CacheManager has to do if you decide to use this function)
-    pub fn update_dont_uncache(
-        &mut self,
-        db: &mut Database,
-        command_sender: &Arc<impl Fn(Command) + Send + Sync + 'static>,
-    ) {
-        self.update_uncache_opt(db, command_sender, false)
+    pub fn update_dont_uncache(&mut self, db: &mut Database) {
+        self.update_uncache_opt(db, false)
     }
-    pub fn update_uncache_opt(
-        &mut self,
-        db: &mut Database,
-        command_sender: &Arc<impl Fn(Command) + Send + Sync + 'static>,
-        allow_uncaching: bool,
-    ) {
-        macro_rules! apply_command {
-            ($cmd:expr) => {
-                if self.allow_sending_commands {
-                    db.apply_command($cmd);
-                }
-            };
-        }
-        if db.playing && self.source.is_none() {
-            if let Some(song) = db.queue.get_current_song() {
-                // db playing, but no source - initialize a source (via SongOpt::New)
-                self.current_song_id = SongOpt::New(Some(*song));
-            } else {
-                // db.playing, but no song in queue...
-                apply_command!(Command::Stop);
-            }
-        } else if let Some((_source, notif)) = &mut self.source {
-            if notif.load(std::sync::atomic::Ordering::Relaxed) {
-                // song has finished playing
-                self.current_song_id = SongOpt::New(db.queue.get_current_song().cloned());
-            }
+    pub fn update_uncache_opt(&mut self, db: &mut Database, allow_uncaching: bool) {
+        if self.backend.song_finished() {
+            db.apply_command(Command::NextSong);
         }
 
-        // check the queue's current index
-        if let SongOpt::None = self.current_song_id {
-            if let Some(id) = db.queue.get_current_song() {
-                self.current_song_id = SongOpt::New(Some(*id));
-            }
-        } else if let SongOpt::Some(l_id) = &self.current_song_id {
-            if let Some(id) = db.queue.get_current_song() {
-                if *id != *l_id {
-                    self.current_song_id = SongOpt::New(Some(*id));
-                }
-            } else {
-                self.current_song_id = SongOpt::New(None);
-            }
-        }
+        let queue_current_song = db.queue.get_current_song().copied();
+        let queue_next_song = db.queue.get_next_song().copied();
 
-        // new current song
-        if let SongOpt::New(song_opt) = &self.current_song_id {
-            // stop playback
-            // eprintln!("[play] stopping playback");
-            self.manager.clear();
-            if let Some(song_id) = song_opt {
-                // start playback again
-                if let Some(song) = db.get_song(song_id) {
-                    // eprintln!("[play] starting playback...");
-                    // add our song
-                    let ext = match &song.location.rel_path.extension() {
-                        Some(s) => s.to_str().unwrap_or(""),
-                        None => "",
-                    };
-                    if db.playing {
-                        if let Some(bytes) = song.cached_data_now(db) {
-                            self.cached.insert(song.id);
-                            match Self::sound_from_bytes(ext, bytes) {
-                                Ok(v) => {
-                                    let (sound, notif) =
-                                        v.pausable().with_async_completion_notifier();
-                                    // add it
-                                    let (sound, controller) = sound.controllable();
-                                    let finished = Arc::new(AtomicBool::new(false));
-                                    let fin = Arc::clone(&finished);
-                                    let command_sender = Arc::clone(command_sender);
-                                    std::thread::spawn(move || {
-                                        // `blocking_recv` returns `Err(_)` when the sound is dropped, so the thread won't linger forever
-                                        if let Ok(_v) = notif.blocking_recv() {
-                                            fin.store(true, std::sync::atomic::Ordering::Relaxed);
-                                            command_sender(Command::NextSong);
-                                        }
-                                    });
-                                    self.source = Some((controller, finished));
-                                    // and play it
-                                    self.manager.play(Box::new(sound));
-                                }
-                                Err(e) => {
-                                    eprintln!(
-                                        "[{}] [player] Can't play, skipping! {e}",
-                                        "INFO".blue()
-                                    );
-                                    apply_command!(Command::NextSong);
-                                }
+        match (self.backend.current_song().map(|v| v.0), queue_current_song) {
+            (None, None) => (),
+            (Some(a), Some(b)) if a == b => (),
+            (_, Some(id)) => {
+                if self.backend.next_song().map(|v| v.0) == queue_current_song {
+                    let load_duration = self
+                        .backend
+                        .next_song()
+                        .is_some_and(|(_, _, t)| t.load_duration);
+                    self.backend.next(db.playing, load_duration);
+                    if load_duration {
+                        if let Some(dur) = self.backend.current_song_duration() {
+                            db.apply_command(Command::SetSongDuration(id, dur))
+                        }
+                    }
+                } else if let Some(song) = db.get_song(&id) {
+                    self.cached.insert(id, song.cached_data().clone());
+                    if let Some(bytes) = song
+                        .cached_data()
+                        .get_data_or_maybe_start_thread(db, song)
+                        .or_else(|| song.cached_data().cached_data_await())
+                    {
+                        let load_duration = song.duration_millis == 0;
+                        self.backend.load_next_song(
+                            id,
+                            song.location
+                                .rel_path
+                                .file_name()
+                                .unwrap_or_else(|| OsStr::new("")),
+                            bytes,
+                            load_duration,
+                            SongCustomData { load_duration },
+                        );
+                        self.backend.next(db.playing, load_duration);
+                        if load_duration {
+                            if let Some(dur) = self.backend.current_song_duration() {
+                                db.apply_command(Command::SetSongDuration(id, dur))
                             }
-                        } else {
-                            // couldn't load song bytes
-                            db.broadcast_update(&Command::ErrorInfo(
-                                "NoSongData".to_owned(),
-                                format!("Couldn't load song #{}\n({})", song.id, song.title),
-                            ));
-                            apply_command!(Command::NextSong);
                         }
                     } else {
-                        self.source = None;
-                        song.cache_data_start_thread(&db);
-                        self.cached.insert(song.id);
+                        // only show an error if the user tries to play the song.
+                        // otherwise, the error might be spammed.
+                        if db.playing {
+                            db.apply_command(Command::ErrorInfo(
+                                format!("Couldn't load bytes for song {id}"),
+                                format!(
+                                    "Song: {}\nby {:?} on {:?}",
+                                    song.title, song.artist, song.album
+                                ),
+                            ));
+                            db.apply_command(Command::NextSong);
+                        }
+                        self.backend.clear();
                     }
                 } else {
-                    panic!("invalid song ID: current_song_id not found in DB!");
+                    self.backend.clear();
                 }
-                self.current_song_id = SongOpt::Some(*song_id);
-            } else {
-                self.current_song_id = SongOpt::None;
             }
-            let next_song = db.queue.get_next_song().and_then(|v| db.get_song(v));
-            if allow_uncaching {
-                for &id in &self.cached {
-                    if Some(id) != next_song.map(|v| v.id)
-                        && !matches!(self.current_song_id, SongOpt::Some(v) if v == id)
+            (Some(_), None) => self.backend.clear(),
+        }
+        match (self.backend.next_song().map(|v| v.0), queue_next_song) {
+            (None, None) => (),
+            (Some(a), Some(b)) if a == b => (),
+            (_, Some(id)) => {
+                if let Some(song) = db.get_song(&id) {
+                    self.cached.insert(id, song.cached_data().clone());
+                    if let Some(bytes) =
+                        song.cached_data().get_data_or_maybe_start_thread(&db, song)
                     {
-                        if let Some(song) = db.songs().get(&id) {
-                            if let Ok(_) = song.uncache_data() {
-                                self.cached.remove(&id);
-                                break;
-                            }
-                        } else {
-                            self.cached.remove(&id);
-                            break;
-                        }
+                        let load_duration = song.duration_millis == 0;
+                        self.backend.load_next_song(
+                            id,
+                            song.location
+                                .rel_path
+                                .file_name()
+                                .unwrap_or_else(|| OsStr::new("")),
+                            bytes,
+                            load_duration,
+                            SongCustomData { load_duration },
+                        );
                     }
                 }
             }
-            if let Some(song) = next_song {
-                song.cache_data_start_thread(&db);
-                self.cached.insert(song.id);
+            (Some(_), None) => (),
+        }
+        if db.playing != self.backend.playing() {
+            if db.playing {
+                self.backend.resume();
+                // if we can't resume (i.e. there is no song), send `Pause` command
+                if !self.backend.playing() {
+                    db.apply_command(Command::Pause);
+                }
+            } else {
+                self.backend.pause();
             }
         }
-    }
 
-    /// partly identical to awedio/src/sounds/open_file.rs open_file_with_reader(), which is a private function I can't access
-    fn sound_from_bytes(
-        extension: &str,
-        bytes: Arc<Vec<u8>>,
-    ) -> Result<Box<dyn Sound>, std::io::Error> {
-        let reader = ArcU8Reader::new(bytes);
-        Ok(match extension {
-            "wav" => Box::new(
-                awedio::sounds::decoders::WavDecoder::new(reader)
-                    .map_err(|_e| std::io::Error::from(std::io::ErrorKind::InvalidData))?,
-            ),
-            "mp3" => Box::new(awedio::sounds::decoders::Mp3Decoder::new(reader)),
-            _ => return Err(std::io::Error::from(std::io::ErrorKind::Unsupported)),
-        })
+        if allow_uncaching {
+            for (&id, cd) in &self.cached {
+                if Some(id) != queue_current_song && Some(id) != queue_next_song {
+                    if let Ok(_) = cd.uncache_data() {
+                        self.cached.remove(&id);
+                        break;
+                    }
+                }
+            }
+        }
     }
 }

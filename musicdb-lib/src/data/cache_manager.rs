@@ -115,7 +115,7 @@ impl CacheManager {
                         let mut found = false;
                         for (id, song) in db.songs().iter() {
                             if !ids_to_cache.contains(id) {
-                                if let Ok(true) = song.uncache_data() {
+                                if let Ok(true) = song.cached_data().uncache_data() {
                                     eprintln!(
                                         "[{}] CacheManager :: Uncached bytes for song '{}' (memory limit).",
                                         "INFO".cyan(),
@@ -133,7 +133,7 @@ impl CacheManager {
                                     || queue_next_song.is_some_and(|i| i == *id))
                                 {
                                     if let Some(song) = db.get_song(id) {
-                                        if let Ok(true) = song.uncache_data() {
+                                        if let Ok(true) = song.cached_data().uncache_data() {
                                             eprintln!(
                                                 "[{}] CacheManager :: Uncached bytes for song '{}' (memory limit).",
                                                 "INFO".cyan(),
@@ -154,7 +154,10 @@ impl CacheManager {
                         // we have some memory left, maybe cache a song (or cache multiple if we know their byte-sizes)
                         for song in &ids_to_cache {
                             if let Some(song) = db.get_song(song) {
-                                match song.cache_data_start_thread_or_say_already_running(&db) {
+                                match song
+                                    .cached_data()
+                                    .cache_data_start_thread_or_say_already_running(&db, song)
+                                {
                                     Err(false) => (),
                                     // thread already running, don't start a second one (otherwise we may load too many songs, using too much memory, causing a cache-uncache-cycle)
                                     Err(true) => {
@@ -176,7 +179,7 @@ impl CacheManager {
 
                     if let Some(song_id) = queue_next_song {
                         if let Some(song) = db.get_song(&song_id) {
-                            if song.cache_data_start_thread(&db) {
+                            if song.cached_data().cache_data_start_thread(&db, song) {
                                 eprintln!(
                                     "[{}] CacheManager :: Start caching bytes for next song, '{}'.",
                                     "INFO".cyan(),
@@ -192,9 +195,9 @@ impl CacheManager {
                     } else {
                         cleanup_countdown = cleanup_max;
                         for (id, song) in db.songs() {
-                            if let Some(_size) = song.has_cached_data() {
+                            if let Some(_size) = song.cached_data().has_cached_data() {
                                 if !is_in_queue(*id, &db.queue) {
-                                    if let Ok(true) = song.uncache_data() {
+                                    if let Ok(true) = song.cached_data().uncache_data() {
                                         eprintln!(
                                             "[{}] CacheManager :: Uncached bytes for song '{}' (not in queue).",
                                             "INFO".cyan(),

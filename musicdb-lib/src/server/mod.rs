@@ -134,9 +134,16 @@ pub fn run_server_caching_thread_opt(
 ) {
     use std::time::Instant;
 
-    use crate::data::cache_manager::CacheManager;
+    use crate::{
+        data::cache_manager::CacheManager,
+        player::{rodio::PlayerBackendRodio, PlayerBackend},
+    };
 
-    let mut player = Player::new().unwrap();
+    // commands sent to this will be handeled later in this function in an infinite loop.
+    // these commands are sent to the database asap.
+    let (command_sender, command_receiver) = mpsc::channel();
+
+    let mut player = Player::new(PlayerBackendRodio::new(command_sender.clone()).unwrap());
     let cache_manager = if let Some(func) = caching_thread {
         let mut cm = CacheManager::new(Arc::clone(&database));
         func(&mut cm);
@@ -144,9 +151,6 @@ pub fn run_server_caching_thread_opt(
     } else {
         None
     };
-    // commands sent to this will be handeled later in this function in an infinite loop.
-    // these commands are sent to the database asap.
-    let (command_sender, command_receiver) = mpsc::channel();
     if let Some(s) = sender_sender {
         s.blocking_send(command_sender.clone()).unwrap();
     }
@@ -199,19 +203,26 @@ pub fn run_server_caching_thread_opt(
             }
         }
     }
-    let dur = Duration::from_secs(10);
-    let command_sender = Arc::new(move |cmd| {
-        _ = command_sender.send(cmd);
-    });
+    let song_done_polling = player.backend.song_finished_polling();
+    let (dur, check_every) = if song_done_polling {
+        (Duration::from_millis(50), 200)
+    } else {
+        (Duration::from_secs(10), 0)
+    };
+    let mut check = 0;
+    let mut checkf = true;
     loop {
-        {
+        check += 1;
+        if check >= check_every || checkf || player.backend.song_finished() {
+            check = 0;
+            checkf = false;
             // at the start and once after every command sent to the server,
             let mut db = database.lock().unwrap();
             // update the player
             if cache_manager.is_some() {
-                player.update_dont_uncache(&mut db, &command_sender);
+                player.update_dont_uncache(&mut db);
             } else {
-                player.update(&mut db, &command_sender);
+                player.update(&mut db);
             }
             // autosave if necessary
             if let Some((first, last)) = db.times_data_modified {
@@ -224,6 +235,7 @@ pub fn run_server_caching_thread_opt(
             }
         }
         if let Ok(command) = command_receiver.recv_timeout(dur) {
+            checkf = true;
             player.handle_command(&command);
             database.lock().unwrap().apply_command(command);
         }

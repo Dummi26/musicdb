@@ -199,7 +199,20 @@ pub fn handle_one_connection_as_get(
                                 .and_then(|id| id.parse().ok())
                                 .and_then(|id| {
                                     let db = db.lock().unwrap();
-                                    db.get_song(&id).and_then(|song| song.cached_data_now(&db))
+                                    if let Some(song) = db.get_song(&id) {
+                                        let cd = song.cached_data();
+                                        if let Some(data) =
+                                            cd.get_data_or_maybe_start_thread(&db, song)
+                                        {
+                                            Some(data)
+                                        } else {
+                                            let cd = cd.clone();
+                                            drop(db);
+                                            cd.cached_data_await()
+                                        }
+                                    } else {
+                                        None
+                                    }
                                 })
                         {
                             writeln!(connection.get_mut(), "len: {}", bytes.len())?;

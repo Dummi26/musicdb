@@ -1,9 +1,11 @@
 use std::{
     fmt::Display,
     io::{Read, Write},
+    mem::replace,
     path::PathBuf,
     sync::{Arc, Mutex},
     thread::JoinHandle,
+    time::Instant,
 };
 
 use colorize::AnsiColor;
@@ -55,56 +57,113 @@ impl Song {
             file_size,
             duration_millis,
             general: GeneralData::default(),
-            cached_data: CachedData(Arc::new(Mutex::new((None, None)))),
+            cached_data: CachedData(Arc::new(Mutex::new((Err(None), None)))),
         }
     }
+
+    pub fn cached_data(&self) -> &CachedData {
+        &self.cached_data
+    }
+}
+impl CachedData {
     pub fn uncache_data(&self) -> Result<bool, ()> {
-        let mut cached = self.cached_data.0.lock().unwrap();
-        match cached.0.take() {
-            Some(Ok(_data)) => Ok(true),
-            Some(Err(thread)) => {
+        let mut cached = self.0.lock().unwrap();
+        match replace(&mut cached.0, Err(None)) {
+            Ok(Ok(_data)) => Ok(true),
+            Ok(Err(thread)) => {
                 if thread.is_finished() {
                     // get value from thread and drop it
                     _ = thread.join();
                     Ok(true)
                 } else {
                     // thread is still running...
-                    cached.0 = Some(Err(thread));
+                    cached.0 = Ok(Err(thread));
                     Err(())
                 }
             }
-            None => Ok(false),
+            Err(e) => {
+                cached.0 = Err(e);
+                Ok(false)
+            }
         }
     }
     /// If no data is cached yet and no caching thread is running, starts a thread to cache the data.
-    pub fn cache_data_start_thread(&self, db: &Database) -> bool {
-        self.cache_data_start_thread_or_say_already_running(db)
+    pub fn cache_data_start_thread(&self, db: &Database, song: &Song) -> bool {
+        self.cache_data_start_thread_or_say_already_running(db, song)
             .is_ok()
     }
     pub fn cache_data_start_thread_or_say_already_running(
         &self,
         db: &Database,
+        song: &Song,
     ) -> Result<(), bool> {
-        let mut cd = self.cached_data.0.lock().unwrap();
-        match cd.0.as_ref() {
-            None => (),
-            Some(Err(t)) => return Err(!t.is_finished()),
-            Some(Ok(_)) => return Err(false),
+        self.get_data_or_start_thread_and_say_already_running(db, |_| (), || (), song)
+    }
+    /// gets the data if available, or, if no thread is running, starts a thread to get the data.
+    /// if a thread is running, was started, or recently encountered an error, `None` is returned, otherwise `Some(data)`.
+    pub fn get_data_or_maybe_start_thread(
+        &self,
+        db: &Database,
+        song: &Song,
+    ) -> Option<Arc<Vec<u8>>> {
+        self.get_data_or_start_thread_and_say_already_running(
+            db,
+            |data| Some(Arc::clone(data)),
+            || None,
+            song,
+        )
+        .ok()
+        .and_then(|v| v)
+    }
+    /// `Err(true)` if a thread is already running,
+    /// `Ok(get_data(data))` if there is data,
+    /// `Ok(started())` if a thread was started,
+    /// `Err(false)` otherwise (i.e. loading data failed recently, 60 second cooldown between retries is active).
+    pub fn get_data_or_start_thread_and_say_already_running<T>(
+        &self,
+        db: &Database,
+        get_data: impl FnOnce(&Arc<Vec<u8>>) -> T,
+        started: impl FnOnce() -> T,
+        song: &Song,
+    ) -> Result<T, bool> {
+        let mut cd = self.0.lock().unwrap();
+        match cd.0.as_mut() {
+            Err(Some(i)) if i.elapsed().as_secs_f32() > 60.0 => return Err(false),
+            Err(_) => (),
+            Ok(Err(t)) => {
+                if t.is_finished() {
+                    if let Some(bytes) = replace(&mut cd.0, Err(None))
+                        .unwrap()
+                        .unwrap_err()
+                        .join()
+                        .unwrap()
+                    {
+                        cd.0 = Ok(Ok(bytes));
+                        return Ok(get_data(cd.0.as_ref().unwrap().as_ref().unwrap()));
+                    } else {
+                        cd.0 = Err(Some(Instant::now()));
+                        return Err(false);
+                    }
+                } else {
+                    return Err(true);
+                }
+            }
+            Ok(Ok(bytes)) => return Ok(get_data(&*bytes)),
         };
         let src = if let Some(dlcon) = &db.remote_server_as_song_file_source {
-            Err((self.id, Arc::clone(dlcon)))
+            Err((song.id, Arc::clone(dlcon)))
         } else {
-            Ok(db.get_path(&self.location))
+            Ok(db.get_path(&song.location))
         };
-        cd.0 = Some(Err(std::thread::spawn(move || {
+        cd.0 = Ok(Err(std::thread::spawn(move || {
             let data = Self::load_data(src)?;
             Some(Arc::new(data))
         })));
-        Ok(())
+        Ok(started())
     }
     /// If the song's data is cached, returns the number of bytes.
     pub fn has_cached_data(&self) -> Option<usize> {
-        if let Some(Ok(v)) = self.cached_data.0.lock().unwrap().0.as_ref() {
+        if let Ok(Ok(v)) = self.0.lock().unwrap().0.as_ref() {
             Some(v.len())
         } else {
             None
@@ -114,43 +173,30 @@ impl Song {
     /// If a thread is running to load the data, it is not awaited.
     /// This function doesn't block.
     pub fn cached_data(&self) -> Option<Arc<Vec<u8>>> {
-        if let Some(Ok(v)) = self.cached_data.0.lock().unwrap().0.as_ref() {
+        if let Ok(Ok(v)) = self.0.lock().unwrap().0.as_ref() {
             Some(Arc::clone(v))
         } else {
             None
         }
     }
-    /// Gets or loads the cached data.
-    /// If a thread is running to load the data, it *is* awaited.
-    /// This function will block until the data is loaded.
-    /// If it still returns none, some error must have occured.
-    pub fn cached_data_now(&self, db: &Database) -> Option<Arc<Vec<u8>>> {
-        let mut cd = self.cached_data.0.lock().unwrap();
-        cd.0 = match cd.0.take() {
-            None => {
-                let src = if let Some(dlcon) = &db.remote_server_as_song_file_source {
-                    Err((self.id, Arc::clone(dlcon)))
+    /// Gets the cached data, if available.
+    /// If a thread is running to load the data, it is awaited.
+    /// This function doesn't block.
+    pub fn cached_data_await(&self) -> Option<Arc<Vec<u8>>> {
+        let mut cd = self.0.lock().unwrap();
+        let (out, next) = match replace(&mut cd.0, Err(None)) {
+            Ok(Ok(bytes)) => (Some(Arc::clone(&bytes)), Ok(Ok(bytes))),
+            Ok(Err(t)) => {
+                if let Some(bytes) = t.join().unwrap() {
+                    (Some(Arc::clone(&bytes)), Ok(Ok(bytes)))
                 } else {
-                    Ok(db.get_path(&self.location))
-                };
-                if let Some(v) = Self::load_data(src) {
-                    Some(Ok(Arc::new(v)))
-                } else {
-                    None
+                    (None, Err(Some(Instant::now())))
                 }
             }
-            Some(Err(t)) => match t.join() {
-                Err(_e) => None,
-                Ok(Some(v)) => Some(Ok(v)),
-                Ok(None) => None,
-            },
-            Some(Ok(v)) => Some(Ok(v)),
+            Err(e) => (None, Err(e)),
         };
-        if let Some(Ok(v)) = &cd.0 {
-            cd.1 = Some(v.len());
-        }
-        drop(cd);
-        self.cached_data()
+        cd.0 = next;
+        out
     }
     fn load_data(
         src: Result<
@@ -236,17 +282,22 @@ impl ToFromBytes for Song {
             file_size: ToFromBytes::from_bytes(s)?,
             duration_millis: ToFromBytes::from_bytes(s)?,
             general: ToFromBytes::from_bytes(s)?,
-            cached_data: CachedData(Arc::new(Mutex::new((None, None)))),
+            cached_data: CachedData(Arc::new(Mutex::new((Err(None), None)))),
         })
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct CachedData(
     pub  Arc<
         Mutex<(
-            Option<Result<Arc<Vec<u8>>, JoinHandle<Option<Arc<Vec<u8>>>>>>,
+            Result<Result<Arc<Vec<u8>>, JoinHandle<Option<Arc<Vec<u8>>>>>, Option<Instant>>,
             Option<usize>,
         )>,
     >,
 );
+impl Clone for CachedData {
+    fn clone(&self) -> Self {
+        Self(Arc::clone(&self.0))
+    }
+}
