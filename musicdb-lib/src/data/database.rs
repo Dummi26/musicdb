@@ -60,8 +60,9 @@ impl<T: Read + Write + Send> ClientIo for T {}
 pub enum UpdateEndpoint {
     Bytes(Box<dyn Write + Sync + Send>),
     CmdChannel(mpsc::Sender<Arc<Command>>),
-    CmdChannelTokio(tokio::sync::mpsc::UnboundedSender<Arc<Command>>),
     Custom(Box<dyn FnMut(&Command) + Send>),
+    CustomArc(Box<dyn FnMut(&Arc<Command>) + Send>),
+    CustomBytes(Box<dyn FnMut(&[u8]) + Send>),
 }
 
 impl Database {
@@ -970,15 +971,19 @@ impl Database {
                         remove.push(i);
                     }
                 }
-                UpdateEndpoint::CmdChannelTokio(sender) => {
+                UpdateEndpoint::Custom(func) => func(update),
+                UpdateEndpoint::CustomArc(func) => {
                     if arc.is_none() {
                         arc = Some(Arc::new(update.clone()));
                     }
-                    if sender.send(arc.clone().unwrap()).is_err() {
-                        remove.push(i);
-                    }
+                    func(arc.as_ref().unwrap())
                 }
-                UpdateEndpoint::Custom(func) => func(update),
+                UpdateEndpoint::CustomBytes(func) => {
+                    if bytes.is_none() {
+                        bytes = Some(update.to_bytes_vec());
+                    }
+                    func(bytes.as_ref().unwrap())
+                }
             }
         }
         if !remove.is_empty() {

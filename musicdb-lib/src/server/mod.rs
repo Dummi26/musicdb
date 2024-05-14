@@ -121,7 +121,7 @@ impl Command {
 pub fn run_server(
     database: Arc<Mutex<Database>>,
     addr_tcp: Option<SocketAddr>,
-    sender_sender: Option<tokio::sync::mpsc::Sender<mpsc::Sender<Command>>>,
+    sender_sender: Option<Box<dyn FnOnce(mpsc::Sender<Command>)>>,
 ) {
     run_server_caching_thread_opt(database, addr_tcp, sender_sender, None)
 }
@@ -129,7 +129,7 @@ pub fn run_server(
 pub fn run_server_caching_thread_opt(
     database: Arc<Mutex<Database>>,
     addr_tcp: Option<SocketAddr>,
-    sender_sender: Option<tokio::sync::mpsc::Sender<mpsc::Sender<Command>>>,
+    sender_sender: Option<Box<dyn FnOnce(mpsc::Sender<Command>)>>,
     caching_thread: Option<Box<dyn FnOnce(&mut crate::data::cache_manager::CacheManager)>>,
 ) {
     use std::time::Instant;
@@ -152,7 +152,7 @@ pub fn run_server_caching_thread_opt(
         None
     };
     if let Some(s) = sender_sender {
-        s.blocking_send(command_sender.clone()).unwrap();
+        s(command_sender.clone())
     }
     database.lock().unwrap().command_sender = Some(command_sender.clone());
     if let Some(addr) = addr_tcp {

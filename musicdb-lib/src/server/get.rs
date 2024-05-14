@@ -3,6 +3,7 @@ use std::{
     io::{BufRead, BufReader, Read, Write},
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
+    time::Instant,
 };
 
 use crate::data::{database::Database, CoverId, SongId};
@@ -128,30 +129,36 @@ impl<T: Write + Read> Client<T> {
         }
         writeln!(self.0.get_mut(), "{}", con_get_encode_string(&str))?;
         self.0.get_mut().flush()?;
-        let mut response = String::new();
-        self.0.read_line(&mut response)?;
-        let len_line = response.trim();
-        if len_line.starts_with("len: ") {
-            if let Ok(len) = len_line[4..].trim().parse() {
-                let mut out = Vec::with_capacity(len);
-                for _ in 0..len {
-                    let mut line = String::new();
-                    self.0.read_line(&mut line)?;
-                    let line = line.trim_end_matches(['\n', '\r']);
-                    if line.starts_with('#') {
-                        out.push((line[1..].to_owned(), false))
-                    } else if line.starts_with('!') {
-                        out.push((line[1..].to_owned(), true))
-                    } else {
-                        return Ok(Err(format!("bad line-format: {line}")));
-                    }
-                }
-                Ok(Ok(out))
+        loop {
+            let mut response = String::new();
+            self.0.read_line(&mut response)?;
+            let len_line = response.trim();
+            if len_line.starts_with('%') {
+                eprintln!("[Find Unused Song Files] Status: {}", len_line[1..].trim());
             } else {
-                Ok(Err(format!("bad len in len-line: {len_line}")))
-            }
-        } else {
-            Ok(Err(format!("bad len-line: {len_line}")))
+                break if len_line.starts_with("len: ") {
+                    if let Ok(len) = len_line[4..].trim().parse() {
+                        let mut out = Vec::with_capacity(len);
+                        for _ in 0..len {
+                            let mut line = String::new();
+                            self.0.read_line(&mut line)?;
+                            let line = line.trim_end_matches(['\n', '\r']);
+                            if line.starts_with('#') {
+                                out.push((line[1..].to_owned(), false))
+                            } else if line.starts_with('!') {
+                                out.push((line[1..].to_owned(), true))
+                            } else {
+                                return Ok(Err(format!("bad line-format: {line}")));
+                            }
+                        }
+                        Ok(Ok(out))
+                    } else {
+                        Ok(Err(format!("bad len in len-line: {len_line}")))
+                    }
+                } else {
+                    Ok(Err(format!("bad len-line: {len_line}")))
+                };
+            };
         }
     }
 }
@@ -307,9 +314,13 @@ pub fn handle_one_connection_as_get(
                         let unused = find_unused_song_files(
                             &db,
                             &lib_dir,
-                            &FindUnusedSongFilesConfig {
+                            &mut FindUnusedSongFilesConfig {
                                 extensions: extensions
                                     .unwrap_or_else(|| Some(vec![".mp3".to_owned()])),
+                                w: connection.get_mut(),
+                                last_write: Instant::now(),
+                                new: 0,
+                                songs: 0,
                             },
                         );
                         writeln!(connection.get_mut(), "len: {}", unused.len())?;
@@ -365,22 +376,26 @@ pub fn con_get_encode_string(line: &str) -> String {
 fn find_unused_song_files(
     db: &Arc<Mutex<Database>>,
     path: &impl AsRef<Path>,
-    cfg: &FindUnusedSongFilesConfig,
+    cfg: &mut FindUnusedSongFilesConfig,
 ) -> Vec<PathBuf> {
     let mut files = vec![];
     find_unused_song_files_internal(db, path, &"", cfg, &mut files, &mut vec![], true);
     files
 }
 
-struct FindUnusedSongFilesConfig {
+struct FindUnusedSongFilesConfig<'a> {
     extensions: Option<Vec<String>>,
+    w: &'a mut dyn Write,
+    last_write: Instant,
+    new: usize,
+    songs: usize,
 }
 
 fn find_unused_song_files_internal(
     db: &Arc<Mutex<Database>>,
     path: &impl AsRef<Path>,
     rel_path: &impl AsRef<Path>,
-    cfg: &FindUnusedSongFilesConfig,
+    cfg: &mut FindUnusedSongFilesConfig,
     unused_files: &mut Vec<PathBuf>,
     files_buf: &mut Vec<PathBuf>,
     is_final: bool,
@@ -421,6 +436,7 @@ fn find_unused_song_files_internal(
     }
     if (is_final && files_buf.len() > 0) || files_buf.len() > 50 {
         let db = db.lock().unwrap();
+        cfg.songs += files_buf.len();
         for song in db.songs().values() {
             if let Some(i) = files_buf
                 .iter()
@@ -429,6 +445,11 @@ fn find_unused_song_files_internal(
                 files_buf.remove(i);
             }
         }
+        cfg.new += files_buf.len();
         unused_files.extend(std::mem::replace(files_buf, vec![]).into_iter());
+        if cfg.last_write.elapsed().as_secs_f32() > 1.0 {
+            cfg.last_write = Instant::now();
+            _ = writeln!(cfg.w, "%{}/{}", cfg.new, cfg.songs);
+        }
     }
 }

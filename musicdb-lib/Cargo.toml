@@ -10,7 +10,6 @@ rand = "0.8.5"
 rc-u8-reader = "2.0.16"
 rodio = { version = "0.18.0", optional = true }
 sysinfo = "0.30.12"
-tokio = { version = "1.37.0", features = ["sync"] }
 
 [features]
 default = ["playback"]
