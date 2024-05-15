@@ -7,14 +7,14 @@ edition = "2021"
 
 [dependencies]
 musicdb-lib = { path = "../musicdb-lib", features = ["playback"] }
-axum = { version = "0.6.19", features = ["headers"] }
 clap = { version = "4.4.6", features = ["derive"] }
-futures = "0.3.28"
 headers = "0.3.8"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-tokio = { version = "1.0", features = ["full"] }
-tokio-stream = "0.1.14"
-tower = { version = "0.4", features = ["util"] }
-tower-http = { version = "0.4.0", features = ["fs", "trace"] }
-trace = "0.1.7"
+tokio = { version = "1.37.0", optional = true, features = ["rt"] }
+rocket = { version = "0.5.0", optional = true }
+html-escape = { version = "0.2.13", optional = true }
+
+[features]
+default = ["website"]
+website = ["dep:tokio", "dep:rocket", "dep:html-escape"]

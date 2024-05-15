@@ -1,3 +1,4 @@
+#[cfg(feature = "website")]
 mod web;
 
 use std::{
@@ -5,7 +6,6 @@ use std::{
     path::PathBuf,
     process::exit,
     sync::{Arc, Mutex},
-    thread,
 };
 
 use clap::Parser;
@@ -47,8 +47,7 @@ struct Args {
     advanced_cache_song_lookahead_limit: u32,
 }
 
-#[tokio::main]
-async fn main() {
+fn main() {
     // parse args
     let args = Args::parse();
     let mut database = if args.init {
@@ -88,11 +87,25 @@ async fn main() {
             );
         };
         if let Some(addr) = &args.web {
-            let (s, mut r) = tokio::sync::mpsc::channel(2);
-            let db = Arc::clone(&database);
-            thread::spawn(move || run_server(database, Some(s)));
-            if let Some(sender) = r.recv().await {
-                web::main(db, sender, *addr).await;
+            #[cfg(not(feature = "website"))]
+            {
+                let _ = addr;
+                eprintln!("Website support requires the 'website' feature to be enabled when compiling the server!");
+                std::process::exit(80);
+            }
+            #[cfg(feature = "website")]
+            {
+                let (s, r) = std::sync::mpsc::sync_channel(1);
+                let db = Arc::clone(&database);
+                std::thread::spawn(move || {
+                    run_server(database, Some(Box::new(move |c| s.send(c).unwrap())))
+                });
+                let sender = r.recv().unwrap();
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .unwrap()
+                    .block_on(web::main(db, sender, *addr));
             }
         } else {
             run_server(database, None);

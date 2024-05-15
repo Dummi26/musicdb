@@ -68,6 +68,7 @@ pub struct SettingsContent {
     pub scroll_sensitivity: Panel<(Label, Slider)>,
     pub idle_time: Panel<(Label, Slider)>,
     pub save_button: Button<[Label; 1]>,
+    pub add_new_songs_button: Button<[Label; 1]>,
     pub keybinds: Vec<Panel<(AdvancedLabel, KeybindInput)>>,
     pub keybinds_should_be_updated: Arc<AtomicBool>,
     pub keybinds_updated: bool,
@@ -84,13 +85,14 @@ impl GuiElemChildren for SettingsContent {
                 self.scroll_sensitivity.elem_mut(),
                 self.idle_time.elem_mut(),
                 self.save_button.elem_mut(),
+                self.add_new_songs_button.elem_mut(),
             ]
             .into_iter()
             .chain(self.keybinds.iter_mut().map(|v| v.elem_mut())),
         )
     }
     fn len(&self) -> usize {
-        7 + self.keybinds.len()
+        8 + self.keybinds.len()
     }
 }
 pub struct KeybindInput {
@@ -455,6 +457,17 @@ impl SettingsContent {
                     Vec2::new(0.5, 0.5),
                 )],
             ),
+            add_new_songs_button: Button::new(
+                GuiElemCfg::default(),
+                |_| vec![GuiAction::OpenAddSongsMenu],
+                [Label::new(
+                    GuiElemCfg::default(),
+                    "search for new songs".to_string(),
+                    Color::WHITE,
+                    None,
+                    Vec2::new(0.5, 0.5),
+                )],
+            ),
             keybinds: vec![],
             keybinds_should_be_updated: Arc::new(AtomicBool::new(true)),
             keybinds_updated: false,
@@ -537,7 +550,7 @@ impl GuiElem for Settings {
             scrollbox.config_mut().redraw = true;
             if scrollbox.children_heights.len() == scrollbox.children.len() {
                 for (i, h) in scrollbox.children_heights.iter_mut().enumerate() {
-                    *h = if i == 0 || i >= 7 {
+                    *h = if i == 0 || i >= 8 {
                         info.line_height * 2.0
                     } else {
                         info.line_height

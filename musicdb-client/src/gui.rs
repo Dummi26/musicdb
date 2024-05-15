@@ -33,6 +33,7 @@ use crate::{
     gui_edit_song::EditorForSongs,
     gui_notif::{NotifInfo, NotifOverlay},
     gui_screen::GuiScreen,
+    gui_song_adder::SongAdder,
     gui_text::Label,
     textcfg,
 };
@@ -1127,6 +1128,8 @@ pub enum GuiAction {
     EditSongs(Vec<Song>),
     // EditAlbums(Vec<Album>),
     // EditArtists(Vec<Artist>),
+    OpenAddSongsMenu,
+    CloseAddSongsMenu,
 }
 pub enum Dragging {
     Artist(ArtistId),
@@ -1307,6 +1310,19 @@ impl Gui {
             GuiAction::EditSongs(songs) => {
                 self.gui.c_editing_songs = Some(EditorForSongs::new(songs));
             }
+            GuiAction::OpenAddSongsMenu => {
+                if self.gui.c_song_adder.is_none() {
+                    self.gui.c_song_adder = Some(SongAdder::new(
+                        GuiElemCfg::default(),
+                        self.high_performance,
+                        self.line_height,
+                        self.scroll_pixels_multiplier,
+                        self.scroll_lines_multiplier,
+                        self.scroll_pages_multiplier,
+                    ));
+                }
+            }
+            GuiAction::CloseAddSongsMenu => self.gui.c_song_adder = None,
         }
     }
 }

@@ -19,6 +19,7 @@ use crate::{
     gui_notif::NotifOverlay,
     gui_queue::QueueViewer,
     gui_settings::Settings,
+    gui_song_adder::SongAdder,
     gui_statusbar::StatusBar,
     gui_text::Label,
     gui_wrappers::Hotkey,
@@ -49,6 +50,7 @@ pub struct GuiScreen {
     pub c_editing_songs: Option<EditorForSongs>,
     pub c_status_bar: StatusBar,
     pub c_settings: Settings,
+    pub c_song_adder: Option<SongAdder>,
     pub c_main_view: Panel<MainView>,
     pub c_context_menu: Option<Box<dyn GuiElem>>,
     pub idle: AnimationController<f32>,
@@ -110,6 +112,7 @@ impl GuiScreen {
                 scroll_sensitivity_lines,
                 scroll_sensitivity_pages,
             ),
+            c_song_adder: None,
             c_main_view: Panel::new(
                 GuiElemCfg::at(Rectangle::from_tuples((0.0, 0.0), (1.0, 0.9))),
                 MainView {
@@ -248,6 +251,7 @@ impl GuiElem for GuiScreen {
                 ]
                 .into_iter()
                 .chain(self.c_editing_songs.as_mut().map(|v| v.elem_mut()))
+                .chain(self.c_song_adder.as_mut().map(|v| v.elem_mut()).into_iter())
                 .chain([
                     self.c_status_bar.elem_mut(),
                     self.c_settings.elem_mut(),

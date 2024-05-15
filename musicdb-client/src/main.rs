@@ -46,6 +46,8 @@ mod gui_screen;
 #[cfg(feature = "speedy2d")]
 mod gui_settings;
 #[cfg(feature = "speedy2d")]
+mod gui_song_adder;
+#[cfg(feature = "speedy2d")]
 mod gui_statusbar;
 #[cfg(feature = "speedy2d")]
 mod gui_text;
