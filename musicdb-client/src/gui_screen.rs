@@ -5,13 +5,13 @@ use musicdb_lib::{
     server::Command,
 };
 use speedy2d::{color::Color, dimen::Vec2, shape::Rectangle, window::VirtualKeyCode, Graphics2D};
+use uianimator::{default_animator_f64_quadratic::DefaultAnimatorF64Quadratic, Animator};
 
 use crate::{
     gui::{
         DrawInfo, GuiAction, GuiElem, GuiElemCfg, GuiElemChildren, KeyAction, KeyBinding,
         SpecificGuiElem,
     },
-    gui_anim::AnimationController,
     gui_base::{Button, Panel},
     gui_edit_song::EditorForSongs,
     gui_idle_display::IdleDisplay,
@@ -53,7 +53,8 @@ pub struct GuiScreen {
     pub c_song_adder: Option<SongAdder>,
     pub c_main_view: Panel<MainView>,
     pub c_context_menu: Option<Box<dyn GuiElem>>,
-    pub idle: AnimationController<f32>,
+    pub idle: DefaultAnimatorF64Quadratic,
+    pub idle_prev_val: f32,
     // pub settings: (bool, Option<Instant>),
     pub settings: (bool, Option<Instant>),
     pub last_interaction: Instant,
@@ -171,7 +172,8 @@ impl GuiScreen {
             ),
             c_context_menu: None,
             hotkey: Hotkey::new_noshift(VirtualKeyCode::Escape),
-            idle: AnimationController::new(0.0, 0.0, 0.01, 1.0, 0.8, 0.6, Instant::now()),
+            idle: DefaultAnimatorF64Quadratic::new(0.0, 0.67),
+            idle_prev_val: 0.0,
             settings: (false, None),
             last_interaction: Instant::now(),
             idle_timeout: Some(60.0),
@@ -202,13 +204,14 @@ impl GuiScreen {
         }
     }
     pub fn force_idle(&mut self) {
-        self.idle.target = 1.0;
+        self.idle.set_target(1.0, Instant::now());
     }
     pub fn not_idle(&mut self) {
-        self.last_interaction = Instant::now();
-        if self.idle.target > 0.0 {
-            if self.idle.value < 1.0 {
-                self.idle.target = 0.0;
+        let time = Instant::now();
+        self.last_interaction = time;
+        if self.idle.target() > 0.0 {
+            if self.idle.get_value(time) < 1.0 {
+                self.idle.set_target(0.0, time);
             } else {
                 self.c_idle_display.c_idle_exit_hint.config_mut().enabled = true;
             }
@@ -217,13 +220,13 @@ impl GuiScreen {
     pub fn unidle(&mut self) {
         self.not_idle();
         self.c_idle_display.c_idle_exit_hint.config_mut().enabled = false;
-        self.idle.target = 0.0;
+        self.idle.set_target(0.0, Instant::now());
     }
     fn idle_check(&mut self) {
-        if self.idle.target == 0.0 {
+        if self.idle.target() == 0.0 {
             if let Some(dur) = &self.idle_timeout {
                 if self.last_interaction.elapsed().as_secs_f64() > *dur {
-                    self.idle.target = 1.0;
+                    self.idle.set_target(1.0, Instant::now());
                 }
             }
         }
@@ -337,7 +340,7 @@ impl GuiElem for GuiScreen {
         if self.prev_mouse_pos != info.mouse_pos {
             self.prev_mouse_pos = info.mouse_pos;
             self.not_idle();
-        } else if self.idle.target == 0.0 && self.config.pixel_pos.size() != info.pos.size() {
+        } else if self.idle.target() == 0.0 && self.config.pixel_pos.size() != info.pos.size() {
             // resizing prevents idle, but doesn't un-idle
             self.not_idle();
         }
@@ -375,26 +378,28 @@ impl GuiElem for GuiScreen {
             false
         };
         // request_redraw for animations
-        let idle_changed = self.idle.update(info.time, info.high_performance);
+        let idle_value = self.idle.get_value(Instant::now()) as f32;
+        let idle_changed = self.idle_prev_val != idle_value;
         if idle_changed || idle_exit_anim || self.settings.1.is_some() {
+            self.idle_prev_val = idle_value;
             if let Some(h) = &info.helper {
                 h.request_redraw()
             }
         }
         // animations: idle
         if idle_changed {
-            let enable_normal_ui = self.idle.value < 1.0;
+            let enable_normal_ui = idle_value < 1.0;
             self.set_normal_ui_enabled(enable_normal_ui);
             if let Some(h) = &info.helper {
                 h.set_cursor_visible(enable_normal_ui);
             }
             let idcfg = self.c_idle_display.config_mut();
-            let top = 1.0 - self.idle.value;
+            let top = 1.0 - idle_value;
             let bottom = top + 1.0;
             idcfg.pos = Rectangle::from_tuples((0.0, top), (1.0, bottom));
-            idcfg.enabled = self.idle.value > 0.0;
-            self.c_status_bar.idle_mode = self.idle.value;
-            self.c_idle_display.idle_mode = self.idle.value;
+            idcfg.enabled = idle_value > 0.0;
+            self.c_status_bar.idle_mode = idle_value;
+            self.c_idle_display.idle_mode = idle_value;
         }
         // animations: settings
         if self.settings.1.is_some() {

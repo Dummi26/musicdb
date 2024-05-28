@@ -14,6 +14,7 @@ speedy2d = { version = "1.12.0", optional = true }
 toml = "0.7.6"
 mers_lib = { version = "0.3.2", optional = true }
 musicdb-mers = { version = "0.1.0", path = "../musicdb-mers", optional = true }
+uianimator = "0.1.1"
 
 [features]
 default = ["gui", "mers", "merscfg"]
