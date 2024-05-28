@@ -229,28 +229,49 @@ pub fn handle_one_connection_as_get(
                         }
                     }
                     "custom-file" => {
-                        if let Some(bytes) = request.next().and_then(|path| {
-                            let db = db.lock().unwrap();
-                            let mut parent = match &db.custom_files {
-                                None => None,
-                                Some(None) => Some(db.lib_directory.clone()),
-                                Some(Some(p)) => Some(p.clone()),
-                            };
-                            // check for malicious paths [TODO: Improve]
-                            if Path::new(path).is_absolute() {
-                                parent = None;
-                            }
-                            if let Some(parent) = parent {
-                                let path = parent.join(path);
-                                if path.starts_with(parent) {
-                                    fs::read(path).ok()
+                        if let Some(bytes) =
+                            request.next().and_then(|path| 'load_custom_file_data: {
+                                let db = db.lock().unwrap();
+                                let mut parent = match &db.custom_files {
+                                    None => {
+                                        if let Some(con) = &db.remote_server_as_song_file_source {
+                                            if let Ok(Ok(data)) =
+                                                con.lock().unwrap().custom_file(path)
+                                            {
+                                                break 'load_custom_file_data Some(data);
+                                            } else {
+                                                None
+                                            }
+                                        } else {
+                                            None
+                                        }
+                                    }
+                                    // if a remote source is present, this means we should ignore it. if no remote source is present, use the lib_dir.
+                                    Some(None) => {
+                                        if db.remote_server_as_song_file_source.is_none() {
+                                            Some(db.lib_directory.clone())
+                                        } else {
+                                            None
+                                        }
+                                    }
+                                    Some(Some(p)) => Some(p.clone()),
+                                };
+                                // check for malicious paths [TODO: Improve]
+                                if Path::new(path).is_absolute() {
+                                    parent = None;
+                                }
+                                if let Some(parent) = parent {
+                                    let path = parent.join(path);
+                                    if path.starts_with(parent) {
+                                        fs::read(path).ok()
+                                    } else {
+                                        None
+                                    }
                                 } else {
                                     None
                                 }
-                            } else {
-                                None
-                            }
-                        }) {
+                            })
+                        {
                             writeln!(connection.get_mut(), "len: {}", bytes.len())?;
                             connection.get_mut().write_all(&bytes)?;
                         } else {

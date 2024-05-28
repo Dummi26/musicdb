@@ -16,12 +16,20 @@ pub struct PlayerBackendRodio<T> {
     stopped: bool,
     current: Option<(SongId, Arc<Vec<u8>>, Option<u128>, T)>,
     next: Option<(SongId, Arc<Vec<u8>>, Option<MyDecoder>, T)>,
-    command_sender: std::sync::mpsc::Sender<Command>,
+    command_sender: Option<std::sync::mpsc::Sender<Command>>,
 }
 
 impl<T> PlayerBackendRodio<T> {
     pub fn new(
         command_sender: std::sync::mpsc::Sender<Command>,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        Self::new_with_optional_command_sending(Some(command_sender))
+    }
+    pub fn new_without_command_sending() -> Result<Self, Box<dyn std::error::Error>> {
+        Self::new_with_optional_command_sending(None)
+    }
+    pub fn new_with_optional_command_sending(
+        command_sender: Option<std::sync::mpsc::Sender<Command>>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let (output_stream, output_stream_handle) = rodio::OutputStream::try_default()?;
         let sink = Sink::try_new(&output_stream_handle)?;
@@ -48,12 +56,13 @@ impl<T> PlayerBackend<T> for PlayerBackendRodio<T> {
     ) {
         let decoder = decoder_from_bytes(Arc::clone(&bytes));
         if let Err(e) = &decoder {
-            self.command_sender
-                .send(Command::ErrorInfo(
+            if let Some(s) = &self.command_sender {
+                s.send(Command::ErrorInfo(
                     format!("Couldn't decode song #{id}!"),
                     format!("Error: '{e}'"),
                 ))
                 .unwrap();
+            }
         }
         self.next = Some((id, bytes, decoder.ok(), custom_data));
     }

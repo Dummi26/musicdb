@@ -10,6 +10,7 @@ use crate::{
 pub struct Player<T: PlayerBackend<SongCustomData>> {
     cached: HashMap<SongId, CachedData>,
     pub backend: T,
+    allow_sending_commands: bool,
 }
 
 pub struct SongCustomData {
@@ -80,6 +81,14 @@ impl<T: PlayerBackend<SongCustomData>> Player<T> {
         Self {
             cached: HashMap::new(),
             backend,
+            allow_sending_commands: true,
+        }
+    }
+    pub fn new_client(backend: T) -> Self {
+        Self {
+            cached: HashMap::new(),
+            backend,
+            allow_sending_commands: false,
         }
     }
     pub fn handle_command(&mut self, command: &Command) {
@@ -108,8 +117,10 @@ impl<T: PlayerBackend<SongCustomData>> Player<T> {
         self.update_uncache_opt(db, false)
     }
     pub fn update_uncache_opt(&mut self, db: &mut Database, allow_uncaching: bool) {
-        if self.backend.song_finished() {
-            db.apply_command(Command::NextSong);
+        if self.allow_sending_commands {
+            if self.allow_sending_commands && self.backend.song_finished() {
+                db.apply_command(Command::NextSong);
+            }
         }
 
         let queue_current_song = db.queue.get_current_song().copied();
@@ -125,7 +136,7 @@ impl<T: PlayerBackend<SongCustomData>> Player<T> {
                         .next_song()
                         .is_some_and(|(_, _, t)| t.load_duration);
                     self.backend.next(db.playing, load_duration);
-                    if load_duration {
+                    if self.allow_sending_commands && load_duration {
                         if let Some(dur) = self.backend.current_song_duration() {
                             db.apply_command(Command::SetSongDuration(id, dur))
                         }
@@ -149,7 +160,7 @@ impl<T: PlayerBackend<SongCustomData>> Player<T> {
                             SongCustomData { load_duration },
                         );
                         self.backend.next(db.playing, load_duration);
-                        if load_duration {
+                        if self.allow_sending_commands && load_duration {
                             if let Some(dur) = self.backend.current_song_duration() {
                                 db.apply_command(Command::SetSongDuration(id, dur))
                             }
@@ -157,7 +168,7 @@ impl<T: PlayerBackend<SongCustomData>> Player<T> {
                     } else {
                         // only show an error if the user tries to play the song.
                         // otherwise, the error might be spammed.
-                        if db.playing {
+                        if self.allow_sending_commands && db.playing {
                             db.apply_command(Command::ErrorInfo(
                                 format!("Couldn't load bytes for song {id}"),
                                 format!(
@@ -204,7 +215,7 @@ impl<T: PlayerBackend<SongCustomData>> Player<T> {
             if db.playing {
                 self.backend.resume();
                 // if we can't resume (i.e. there is no song), send `Pause` command
-                if !self.backend.playing() {
+                if self.allow_sending_commands && !self.backend.playing() {
                     db.apply_command(Command::Pause);
                 }
             } else {

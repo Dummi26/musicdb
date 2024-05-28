@@ -1,12 +1,18 @@
 pub mod get;
 
 use std::{
-    io::{Read, Write},
+    io::{BufRead as _, BufReader, Read, Write},
+    net::{SocketAddr, TcpListener},
     sync::{mpsc, Arc, Mutex},
+    thread,
+    time::Duration,
 };
 
 use colorize::AnsiColor;
 
+#[cfg(feature = "playback")]
+use crate::player::Player;
+use crate::server::get::handle_one_connection_as_get;
 use crate::{
     data::{
         album::Album,
@@ -17,15 +23,6 @@ use crate::{
         AlbumId, ArtistId, SongId,
     },
     load::ToFromBytes,
-};
-#[cfg(feature = "playback")]
-use crate::{player::Player, server::get::handle_one_connection_as_get};
-#[cfg(feature = "playback")]
-use std::{
-    io::{BufRead, BufReader},
-    net::{SocketAddr, TcpListener},
-    thread,
-    time::Duration,
 };
 
 #[derive(Clone, Debug)]
@@ -117,33 +114,45 @@ impl Command {
 /// a) initialize new connections using db.init_connection() to synchronize the new client
 /// b) handle the decoding of messages using Command::from_bytes()
 /// c) re-encode all received messages using Command::to_bytes_vec(), send them to the db, and send them to all your clients.
-#[cfg(feature = "playback")]
 pub fn run_server(
     database: Arc<Mutex<Database>>,
     addr_tcp: Option<SocketAddr>,
     sender_sender: Option<Box<dyn FnOnce(mpsc::Sender<Command>)>>,
+    play_audio: bool,
 ) {
-    run_server_caching_thread_opt(database, addr_tcp, sender_sender, None)
+    run_server_caching_thread_opt(database, addr_tcp, sender_sender, None, play_audio)
 }
-#[cfg(feature = "playback")]
 pub fn run_server_caching_thread_opt(
     database: Arc<Mutex<Database>>,
     addr_tcp: Option<SocketAddr>,
     sender_sender: Option<Box<dyn FnOnce(mpsc::Sender<Command>)>>,
     caching_thread: Option<Box<dyn FnOnce(&mut crate::data::cache_manager::CacheManager)>>,
+    play_audio: bool,
 ) {
+    #[cfg(not(feature = "playback"))]
+    if play_audio {
+        panic!("Can't run the server: cannot play audio because the `playback` feature was disabled when compiling, but `play_audio` was set to `true`!");
+    }
+
     use std::time::Instant;
 
-    use crate::{
-        data::cache_manager::CacheManager,
-        player::{rodio::PlayerBackendRodio, PlayerBackend},
-    };
+    use crate::data::cache_manager::CacheManager;
+    #[cfg(feature = "playback")]
+    use crate::player::{rodio::PlayerBackendRodio, PlayerBackend};
 
     // commands sent to this will be handeled later in this function in an infinite loop.
     // these commands are sent to the database asap.
     let (command_sender, command_receiver) = mpsc::channel();
 
-    let mut player = Player::new(PlayerBackendRodio::new(command_sender.clone()).unwrap());
+    #[cfg(feature = "playback")]
+    let mut player = if play_audio {
+        Some(Player::new(
+            PlayerBackendRodio::new(command_sender.clone()).unwrap(),
+        ))
+    } else {
+        None
+    };
+    #[allow(unused)]
     let cache_manager = if let Some(func) = caching_thread {
         let mut cm = CacheManager::new(Arc::clone(&database));
         func(&mut cm);
@@ -203,7 +212,12 @@ pub fn run_server_caching_thread_opt(
             }
         }
     }
-    let song_done_polling = player.backend.song_finished_polling();
+    #[cfg(feature = "playback")]
+    let song_done_polling = player
+        .as_ref()
+        .is_some_and(|p| p.backend.song_finished_polling());
+    #[cfg(not(feature = "playback"))]
+    let song_done_polling = false;
     let (dur, check_every) = if song_done_polling {
         (Duration::from_millis(50), 200)
     } else {
@@ -213,16 +227,23 @@ pub fn run_server_caching_thread_opt(
     let mut checkf = true;
     loop {
         check += 1;
-        if check >= check_every || checkf || player.backend.song_finished() {
+        #[cfg(feature = "playback")]
+        let song_finished = player.as_ref().is_some_and(|p| p.backend.song_finished());
+        #[cfg(not(feature = "playback"))]
+        let song_finished = false;
+        if check >= check_every || checkf || song_finished {
             check = 0;
             checkf = false;
             // at the start and once after every command sent to the server,
             let mut db = database.lock().unwrap();
             // update the player
-            if cache_manager.is_some() {
-                player.update_dont_uncache(&mut db);
-            } else {
-                player.update(&mut db);
+            #[cfg(feature = "playback")]
+            if let Some(player) = &mut player {
+                if cache_manager.is_some() {
+                    player.update_dont_uncache(&mut db);
+                } else {
+                    player.update(&mut db);
+                }
             }
             // autosave if necessary
             if let Some((first, last)) = db.times_data_modified {
@@ -236,7 +257,10 @@ pub fn run_server_caching_thread_opt(
         }
         if let Ok(command) = command_receiver.recv_timeout(dur) {
             checkf = true;
-            player.handle_command(&command);
+            #[cfg(feature = "playback")]
+            if let Some(player) = &mut player {
+                player.handle_command(&command);
+            }
             database.lock().unwrap().apply_command(command);
         }
     }

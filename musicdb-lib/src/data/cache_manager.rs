@@ -163,7 +163,7 @@ impl CacheManager {
                                     Err(true) => {
                                         break;
                                     }
-                                    Ok(()) => {
+                                    Ok(true) => {
                                         eprintln!(
                                             "[{}] CacheManager :: Start caching bytes for song '{}'.",
                                             "INFO".cyan(),
@@ -172,6 +172,7 @@ impl CacheManager {
                                         sleep_short = true;
                                         break;
                                     }
+                                    Ok(false) => (),
                                 }
                             }
                         }

@@ -58,7 +58,7 @@ if [ ! -z "$DBDIR" ]; then
     mv "dbfile" "$DBDIR" || return
     
     # start server
-    "$CMD_SERVER" "$DBDIR" "$MUSICDIR" --tcp 0.0.0.0:26002 &
+    "$CMD_SERVER" --tcp 0.0.0.0:26002 local "$DBDIR" "$MUSICDIR" &
     sleep 1
 
     # start client

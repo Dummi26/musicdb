@@ -89,15 +89,16 @@ impl CachedData {
     }
     /// If no data is cached yet and no caching thread is running, starts a thread to cache the data.
     pub fn cache_data_start_thread(&self, db: &Database, song: &Song) -> bool {
-        self.cache_data_start_thread_or_say_already_running(db, song)
-            .is_ok()
+        self.cache_data_start_thread_or_say_already_running(db, song) == Ok(true)
     }
+    /// Ok(true) => thread started,
+    /// Ok(false) => data was already loaded
     pub fn cache_data_start_thread_or_say_already_running(
         &self,
         db: &Database,
         song: &Song,
-    ) -> Result<(), bool> {
-        self.get_data_or_start_thread_and_say_already_running(db, |_| (), || (), song)
+    ) -> Result<bool, bool> {
+        self.get_data_or_start_thread_and_say_already_running(db, |_| false, || true, song)
     }
     /// gets the data if available, or, if no thread is running, starts a thread to get the data.
     /// if a thread is running, was started, or recently encountered an error, `None` is returned, otherwise `Some(data)`.
@@ -128,7 +129,7 @@ impl CachedData {
     ) -> Result<T, bool> {
         let mut cd = self.0.lock().unwrap();
         match cd.0.as_mut() {
-            Err(Some(i)) if i.elapsed().as_secs_f32() > 60.0 => return Err(false),
+            Err(Some(i)) if i.elapsed().as_secs_f32() < 60.0 => return Err(false),
             Err(_) => (),
             Ok(Err(t)) => {
                 if t.is_finished() {

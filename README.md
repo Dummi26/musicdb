@@ -76,7 +76,7 @@ musicdb-client 0.0.0.0:26002 gui
 To start the server:
 
 ```sh
-musicdb-server ~/my_dbdir ~/music --tcp 0.0.0.0:26002
+musicdb-server --tcp 0.0.0.0:26002 --play-audio local ~/my_dbdir ~/music
 ```
 
 A simple script can start the server and then the client:
@@ -84,7 +84,7 @@ A simple script can start the server and then the client:
 ```sh
 # if the server is already running, this command will fail since 0.0.0.0:26002 is already in use,
 # and you will never end up with 2+ servers running at the same time
-musicdb-server ~/my_dbdir ~/music --tcp 0.0.0.0:26002 &
+musicdb-server --tcp 0.0.0.0:26002 --play-audio local ~/my_dbdir ~/music &
 # wait for the server to load (on most systems, this should never take more than 0.1 seconds, but just in case...)
 sleep 1
 # now start the client

@@ -17,9 +17,9 @@ musicdb-mers = { version = "0.1.0", path = "../musicdb-mers", optional = true }
 uianimator = "0.1.1"
 
 [features]
-default = ["gui", "mers", "merscfg"]
+default = ["gui", "playback"]
 # gui:
-#   enables the gui mode
+#   enables the gui modes
 # merscfg:
 #   allows using mers to configure the gui
 # mers:

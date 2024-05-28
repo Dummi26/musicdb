@@ -9,7 +9,12 @@ use std::{
 };
 
 use musicdb_lib::{
-    data::{database::Database, queue::Queue, song::Song, AlbumId, ArtistId, CoverId, SongId},
+    data::{
+        database::{ClientIo, Database},
+        queue::Queue,
+        song::Song,
+        AlbumId, ArtistId, CoverId, SongId,
+    },
     load::ToFromBytes,
     server::{get, Command},
 };
@@ -79,9 +84,11 @@ pub fn hotkey_select_songs(modifiers: &ModifiersState, key: Option<VirtualKeyCod
 pub fn main(
     database: Arc<Mutex<Database>>,
     connection: TcpStream,
-    get_con: get::Client<TcpStream>,
+    get_con: Arc<Mutex<get::Client<Box<dyn ClientIo + 'static>>>>,
     event_sender_arc: Arc<Mutex<Option<UserEventSender<GuiEvent>>>>,
-    after_db_cmd: &Arc<Mutex<Option<Box<dyn FnMut(Command) + Send + Sync + 'static>>>>,
+    #[cfg(feature = "merscfg")] after_db_cmd: &Arc<
+        Mutex<Option<Box<dyn FnMut(Command) + Send + Sync + 'static>>>,
+    >,
 ) {
     let config_dir = super::get_config_file_path();
     let config_file = config_dir.join("config_gui.toml");
@@ -219,7 +226,7 @@ pub fn main(
         font,
         Arc::clone(&database),
         connection,
-        Arc::new(Mutex::new(get_con)),
+        get_con,
         event_sender_arc,
         Arc::new(sender),
         line_height,
@@ -264,6 +271,7 @@ pub fn main(
             #[cfg(feature = "merscfg")]
             merscfg: crate::merscfg::MersCfg::new(config_dir.join("dynamic_config.mers"), database),
         },
+        #[cfg(feature = "merscfg")]
         after_db_cmd,
     ));
 }
@@ -284,7 +292,7 @@ pub struct Gui {
     pub event_sender: Arc<UserEventSender<GuiEvent>>,
     pub database: Arc<Mutex<Database>>,
     pub connection: TcpStream,
-    pub get_con: Arc<Mutex<get::Client<TcpStream>>>,
+    pub get_con: Arc<Mutex<get::Client<Box<dyn ClientIo + 'static>>>>,
     pub gui: GuiScreen,
     pub notif_sender:
         Sender<Box<dyn FnOnce(&NotifOverlay) -> (Box<dyn GuiElem>, NotifInfo) + Send>>,
@@ -316,7 +324,7 @@ impl Gui {
         font: Font,
         database: Arc<Mutex<Database>>,
         connection: TcpStream,
-        get_con: Arc<Mutex<get::Client<TcpStream>>>,
+        get_con: Arc<Mutex<get::Client<Box<dyn ClientIo + 'static>>>>,
         event_sender_arc: Arc<Mutex<Option<UserEventSender<GuiEvent>>>>,
         event_sender: Arc<UserEventSender<GuiEvent>>,
         line_height: f32,
@@ -1158,7 +1166,7 @@ pub struct DrawInfo<'a> {
     /// true if `info.pos.contains(info.mouse_pos)`.
     pub mouse_pos_in_bounds: bool,
     pub helper: Option<&'a mut WindowHelper<GuiEvent>>,
-    pub get_con: Arc<Mutex<get::Client<TcpStream>>>,
+    pub get_con: Arc<Mutex<get::Client<Box<dyn ClientIo + 'static>>>>,
     pub covers: &'a mut HashMap<CoverId, GuiServerImage>,
     pub custom_images: &'a mut HashMap<String, GuiServerImage>,
     pub has_keyboard_focus: bool,
@@ -1529,18 +1537,6 @@ impl WindowHandler<GuiEvent> for Gui {
         scancode: KeyScancode,
     ) {
         helper.request_redraw();
-        // handle keybinds unless settings are open, opening or closing
-        if self.gui.settings.0 == false && self.gui.settings.1.is_none() {
-            if let Some(key) = virtual_key_code {
-                let keybind = KeyBinding::new(&self.modifiers, key);
-                if let Some(action) = self.keybinds.get(&keybind) {
-                    for a in self.key_actions.get(action).execute() {
-                        self.exec_gui_action(a);
-                    }
-                    return;
-                }
-            }
-        }
         if let Some(VirtualKeyCode::Tab) = virtual_key_code {
             if !(self.modifiers.ctrl() || self.modifiers.alt() || self.modifiers.logo()) {
                 self.gui._keyboard_move_focus(self.modifiers.shift(), false);
@@ -1578,6 +1574,18 @@ impl WindowHandler<GuiEvent> for Gui {
         scancode: KeyScancode,
     ) {
         helper.request_redraw();
+        // handle keybinds unless settings are open, opening or closing
+        if self.gui.settings.0 == false && self.gui.settings.1.is_none() {
+            if let Some(key) = virtual_key_code {
+                let keybind = KeyBinding::new(&self.modifiers, key);
+                if let Some(action) = self.keybinds.get(&keybind) {
+                    for a in self.key_actions.get(action).execute() {
+                        self.exec_gui_action(a);
+                    }
+                    return;
+                }
+            }
+        }
         for a in self.gui._keyboard_event(
             &mut |e, a| {
                 if e.config().keyboard_events_focus {
@@ -1663,7 +1671,10 @@ pub enum GuiServerImage {
 }
 #[allow(unused)]
 impl GuiServerImage {
-    pub fn new_cover(id: CoverId, get_con: Arc<Mutex<get::Client<TcpStream>>>) -> Self {
+    pub fn new_cover<T: ClientIo + 'static>(
+        id: CoverId,
+        get_con: Arc<Mutex<get::Client<T>>>,
+    ) -> Self {
         Self::Loading(std::thread::spawn(move || {
             get_con
                 .lock()
@@ -1673,7 +1684,10 @@ impl GuiServerImage {
                 .and_then(|v| v.ok())
         }))
     }
-    pub fn new_custom_file(file: String, get_con: Arc<Mutex<get::Client<TcpStream>>>) -> Self {
+    pub fn new_custom_file<T: ClientIo + 'static>(
+        file: String,
+        get_con: Arc<Mutex<get::Client<T>>>,
+    ) -> Self {
         Self::Loading(std::thread::spawn(move || {
             get_con
                 .lock()

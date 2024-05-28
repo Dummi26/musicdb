@@ -10,7 +10,9 @@ use clap::{Parser, Subcommand};
 #[cfg(feature = "speedy2d")]
 use gui::GuiEvent;
 #[cfg(feature = "playback")]
-use musicdb_lib::player::Player;
+use musicdb_lib::data::cache_manager::CacheManager;
+#[cfg(feature = "playback")]
+use musicdb_lib::player::{rodio::PlayerBackendRodio, Player};
 use musicdb_lib::{
     data::{
         database::{ClientIo, Database},
@@ -69,9 +71,17 @@ struct Args {
 
 #[derive(Subcommand, Debug, Clone)]
 enum Mode {
-    #[cfg(feature = "speedy2d")]
     /// graphical user interface
+    #[cfg(feature = "speedy2d")]
     Gui,
+    /// graphical user interface + syncplayer using local files (syncplayer-network can be enabled in settings)
+    #[cfg(feature = "speedy2d")]
+    #[cfg(feature = "playback")]
+    GuiSyncplayerLocal { lib_dir: PathBuf },
+    /// graphical user interface + syncplayer (syncplayer-network can be toggled in settings)
+    #[cfg(feature = "speedy2d")]
+    #[cfg(feature = "playback")]
+    GuiSyncplayerNetwork,
     /// play in sync with the server, but load the songs from a local copy of the lib-dir
     #[cfg(feature = "playback")]
     SyncplayerLocal { lib_dir: PathBuf },
@@ -112,6 +122,7 @@ fn main() {
         Mutex<Option<Box<dyn FnMut(Command) + Send + Sync + 'static>>>,
     > = Arc::new(Mutex::new(None));
     let con_thread = {
+        #[cfg(any(feature = "mers", feature = "merscfg"))]
         let mers_after_db_updated_action = Arc::clone(&mers_after_db_updated_action);
         let mode = mode.clone();
         let database = Arc::clone(&database);
@@ -119,20 +130,50 @@ fn main() {
         // this is all you need to keep the db in sync
         thread::spawn(move || {
             #[cfg(feature = "playback")]
-            let mut player =
-                if matches!(mode, Mode::SyncplayerLocal { .. } | Mode::SyncplayerNetwork) {
-                    Some(Player::new().unwrap().without_sending_commands())
-                } else {
-                    None
-                };
+            #[cfg(not(feature = "speedy2d"))]
+            let is_syncplayer =
+                matches!(mode, Mode::SyncplayerLocal { .. } | Mode::SyncplayerNetwork);
+            #[cfg(feature = "playback")]
+            #[cfg(feature = "speedy2d")]
+            let is_syncplayer = matches!(
+                mode,
+                Mode::SyncplayerLocal { .. }
+                    | Mode::SyncplayerNetwork
+                    | Mode::GuiSyncplayerLocal { .. }
+                    | Mode::GuiSyncplayerNetwork
+            );
+            #[cfg(feature = "playback")]
+            let mut cache_manager = None;
+            #[cfg(feature = "playback")]
+            let mut player = if is_syncplayer {
+                let cm = CacheManager::new(Arc::clone(&database));
+                cache_manager = Some(cm);
+                Some(Player::new_client(
+                    PlayerBackendRodio::new_without_command_sending().unwrap(),
+                ))
+            } else {
+                None
+            };
             #[allow(unused_labels)]
             'ifstatementworkaround: {
                 // use if+break instead of if-else because we can't #[cfg(feature)] the if statement,
                 // since we want the else part to run if the feature is disabled
                 #[cfg(feature = "playback")]
-                if let Mode::SyncplayerLocal { lib_dir } = mode {
+                let lib_dir = match &mode {
+                    Mode::SyncplayerLocal { lib_dir } => Some(lib_dir.clone()),
+                    #[cfg(feature = "speedy2d")]
+                    Mode::GuiSyncplayerLocal { lib_dir } => Some(lib_dir.clone()),
+                    _ => None,
+                };
+                #[cfg(feature = "playback")]
+                if let Some(lib_dir) = lib_dir {
                     let mut db = database.lock().unwrap();
                     db.lib_directory = lib_dir;
+                    break 'ifstatementworkaround;
+                }
+                #[cfg(feature = "speedy2d")]
+                if matches!(mode, Mode::Gui) {
+                    // gui does this in the main thread
                     break 'ifstatementworkaround;
                 }
                 let mut db = database.lock().unwrap();
@@ -142,26 +183,27 @@ fn main() {
                 )));
             }
             loop {
-                #[cfg(feature = "playback")]
-                if let Some(player) = &mut player {
-                    let mut db = database.lock().unwrap();
-                    if db.is_client_init() {
-                        // command_sender does nothing. if a song finishes, we don't want to move to the next song, we want to wait for the server to send the NextSong event.
-                        player.update(&mut db, &Arc::new(|_| {}));
-                    }
-                }
                 let update = Command::from_bytes(&mut con).unwrap();
+                let mut db = database.lock().unwrap();
                 #[cfg(feature = "playback")]
                 if let Some(player) = &mut player {
                     player.handle_command(&update);
                 }
-                #[cfg(any(feature = "mers", feature = "merscfg"))]
-                if let Some(action) = &mut *mers_after_db_updated_action.lock().unwrap() {
-                    database.lock().unwrap().apply_command(update.clone());
-                    action(update);
-                } else {
-                    database.lock().unwrap().apply_command(update);
+                #[allow(unused_labels)]
+                'feature_if: {
+                    #[cfg(any(feature = "mers", feature = "merscfg"))]
+                    if let Some(action) = &mut *mers_after_db_updated_action.lock().unwrap() {
+                        db.apply_command(update.clone());
+                        action(update);
+                        break 'feature_if;
+                    }
+                    db.apply_command(update);
                 }
+                #[cfg(feature = "playback")]
+                if let Some(player) = &mut player {
+                    player.update_dont_uncache(&mut *db);
+                }
+                drop(db);
                 #[cfg(feature = "speedy2d")]
                 if let Some(v) = &*update_gui_sender.lock().unwrap() {
                     v.send_event(GuiEvent::Refresh).unwrap();
@@ -171,8 +213,31 @@ fn main() {
     };
     match mode {
         #[cfg(feature = "speedy2d")]
-        Mode::Gui => {
+        Mode::Gui | Mode::GuiSyncplayerLocal { .. } | Mode::GuiSyncplayerNetwork => {
             {
+                let get_con: Arc<
+                    Mutex<musicdb_lib::server::get::Client<Box<dyn ClientIo + 'static>>>,
+                > = Arc::new(Mutex::new(
+                    musicdb_lib::server::get::Client::new(BufReader::new(Box::new(
+                        TcpStream::connect(addr).expect("opening get client connection"),
+                    )
+                        as _))
+                    .expect("initializing get client connection"),
+                ));
+                'anotherifstatement: {
+                    #[cfg(feature = "playback")]
+                    if let Mode::GuiSyncplayerLocal { lib_dir } = mode {
+                        database.lock().unwrap().lib_directory = lib_dir;
+                        break 'anotherifstatement;
+                    }
+                    #[cfg(feature = "playback")]
+                    if let Mode::GuiSyncplayerNetwork = mode {
+                        break 'anotherifstatement;
+                    }
+                    // if not using syncplayer-local
+                    database.lock().unwrap().remote_server_as_song_file_source =
+                        Some(Arc::clone(&get_con));
+                }
                 let occasional_refresh_sender = Arc::clone(&sender);
                 thread::spawn(move || loop {
                     std::thread::sleep(std::time::Duration::from_secs(1));
@@ -183,10 +248,7 @@ fn main() {
                 gui::main(
                     database,
                     con,
-                    musicdb_lib::server::get::Client::new(BufReader::new(
-                        TcpStream::connect(addr).expect("opening get client connection"),
-                    ))
-                    .expect("initializing get client connection"),
+                    get_con,
                     sender,
                     #[cfg(feature = "merscfg")]
                     &mers_after_db_updated_action,
