@@ -149,7 +149,7 @@ fn main() {
             let mut player = if is_syncplayer {
                 let cm = CacheManager::new(Arc::clone(&database));
                 cm.set_memory_mib(1024, 2048);
-                cm.set_cache_songs_count(1000);
+                cm.set_cache_songs_count(20);
                 cache_manager = Some(cm);
                 Some(Player::new_client(
                     PlayerBackendRodio::new_without_command_sending().unwrap(),
