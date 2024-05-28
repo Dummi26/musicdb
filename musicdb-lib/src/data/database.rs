@@ -1046,7 +1046,7 @@ pub struct Cover {
     pub data: Arc<Mutex<(bool, Option<(Instant, Vec<u8>)>)>>,
 }
 impl Cover {
-    pub fn get_bytes<O>(
+    pub fn get_bytes_from_file<O>(
         &self,
         path: impl FnOnce(&DatabaseLocation) -> PathBuf,
         conv: impl FnOnce(&Vec<u8>) -> O,

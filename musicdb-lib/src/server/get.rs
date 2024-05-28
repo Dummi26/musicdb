@@ -178,25 +178,39 @@ pub fn handle_one_connection_as_get(
             if let Some(req) = request.next() {
                 match req {
                     "cover-bytes" => {
-                        if let Some(cover) = request
-                            .next()
-                            .and_then(|id| id.parse().ok())
-                            .and_then(|id| db.lock().unwrap().covers().get(&id).cloned())
-                        {
-                            if let Some(v) = cover.get_bytes(
-                                |p| db.lock().unwrap().get_path(p),
-                                |bytes| {
+                        if let Some(cover_id) = request.next().and_then(|id| id.parse().ok()) {
+                            let dbl = db.lock().unwrap();
+                            if let Some(get_con) = &dbl.remote_server_as_song_file_source {
+                                if let Some(bytes) = get_con
+                                    .lock()
+                                    .unwrap()
+                                    .cover_bytes(cover_id)
+                                    .ok()
+                                    .and_then(Result::ok)
+                                {
                                     writeln!(connection.get_mut(), "len: {}", bytes.len())?;
-                                    connection.get_mut().write_all(bytes)?;
-                                    Ok::<(), std::io::Error>(())
-                                },
-                            ) {
-                                v?;
+                                    connection.get_mut().write_all(&bytes)?;
+                                } else {
+                                    writeln!(connection.get_mut(), "no")?;
+                                }
+                            } else if let Some(cover) = dbl.covers().get(&cover_id) {
+                                if let Some(v) = cover.get_bytes_from_file(
+                                    |p| dbl.get_path(p),
+                                    |bytes| {
+                                        writeln!(connection.get_mut(), "len: {}", bytes.len())?;
+                                        connection.get_mut().write_all(bytes)?;
+                                        Ok::<(), std::io::Error>(())
+                                    },
+                                ) {
+                                    v?;
+                                } else {
+                                    writeln!(connection.get_mut(), "no data")?;
+                                }
                             } else {
-                                writeln!(connection.get_mut(), "no data")?;
+                                writeln!(connection.get_mut(), "no cover")?;
                             }
                         } else {
-                            writeln!(connection.get_mut(), "no cover")?;
+                            writeln!(connection.get_mut(), "bad id")?;
                         }
                     }
                     "song-file" => {
