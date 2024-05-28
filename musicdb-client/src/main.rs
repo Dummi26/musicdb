@@ -143,10 +143,13 @@ fn main() {
                     | Mode::GuiSyncplayerNetwork
             );
             #[cfg(feature = "playback")]
+            #[allow(unused)]
             let mut cache_manager = None;
             #[cfg(feature = "playback")]
             let mut player = if is_syncplayer {
                 let cm = CacheManager::new(Arc::clone(&database));
+                cm.set_memory_mib(1024, 2048);
+                cm.set_cache_songs_count(1000);
                 cache_manager = Some(cm);
                 Some(Player::new_client(
                     PlayerBackendRodio::new_without_command_sending().unwrap(),
