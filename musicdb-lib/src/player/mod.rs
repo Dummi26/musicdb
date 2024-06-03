@@ -214,10 +214,6 @@ impl<T: PlayerBackend<SongCustomData>> Player<T> {
         if db.playing != self.backend.playing() {
             if db.playing {
                 self.backend.resume();
-                // if we can't resume (i.e. there is no song), send `Pause` command
-                if self.allow_sending_commands && !self.backend.playing() {
-                    db.apply_command(Command::Pause);
-                }
             } else {
                 self.backend.pause();
             }
