@@ -1,3 +1,6 @@
+#[cfg(feature = "playback-via-playback-rs")]
+pub mod playback_rs;
+#[cfg(feature = "playback-via-rodio")]
 pub mod rodio;
 
 use std::{collections::HashMap, ffi::OsStr, sync::Arc};

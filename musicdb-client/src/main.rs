@@ -12,7 +12,7 @@ use gui::GuiEvent;
 #[cfg(feature = "playback")]
 use musicdb_lib::data::cache_manager::CacheManager;
 #[cfg(feature = "playback")]
-use musicdb_lib::player::{rodio::PlayerBackendRodio, Player};
+use musicdb_lib::player::{playback_rs::PlayerBackendPlaybackRs, Player};
 use musicdb_lib::{
     data::{
         database::{ClientIo, Database},
@@ -152,7 +152,7 @@ fn main() {
                 cm.set_cache_songs_count(20);
                 cache_manager = Some(cm);
                 Some(Player::new_client(
-                    PlayerBackendRodio::new_without_command_sending().unwrap(),
+                    PlayerBackendPlaybackRs::new_without_command_sending().unwrap(),
                 ))
             } else {
                 None

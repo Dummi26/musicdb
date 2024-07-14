@@ -137,18 +137,25 @@ pub fn run_server_caching_thread_opt(
     use std::time::Instant;
 
     use crate::data::cache_manager::CacheManager;
+    #[cfg(feature = "playback-via-playback-rs")]
+    use crate::player::playback_rs::PlayerBackendPlaybackRs;
+    #[cfg(feature = "playback-via-rodio")]
+    use crate::player::rodio::PlayerBackendRodio;
     #[cfg(feature = "playback")]
-    use crate::player::{rodio::PlayerBackendRodio, PlayerBackend};
+    use crate::player::PlayerBackend;
 
     // commands sent to this will be handeled later in this function in an infinite loop.
     // these commands are sent to the database asap.
     let (command_sender, command_receiver) = mpsc::channel();
 
+    #[cfg(feature = "playback-via-playback-rs")]
+    let backend = PlayerBackendPlaybackRs::new(command_sender.clone()).unwrap();
+    #[cfg(feature = "playback-via-rodio")]
+    let backend = PlayerBackendRodio::new(command_sender.clone()).unwrap();
+
     #[cfg(feature = "playback")]
     let mut player = if play_audio {
-        Some(Player::new(
-            PlayerBackendRodio::new(command_sender.clone()).unwrap(),
-        ))
+        Some(Player::new(backend))
     } else {
         None
     };
