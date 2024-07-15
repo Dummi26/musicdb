@@ -61,19 +61,19 @@ impl<T> PlayerBackend<T> for PlayerBackendPlaybackRs<T> {
                 None
             }
         };
-        if let Some(song) = &loaded_song {
-            if self.player.has_current_song() {
-                if let Err(e) = self.player.play_song_next(song, None) {
-                    if let Some(s) = &self.command_sender {
-                        s.send(Command::ErrorInfo(
-                            format!("Couldn't preload song #{id}!"),
-                            format!("Error: {e}"),
-                        ))
-                        .unwrap();
-                    }
-                }
-            }
-        }
+        // if let Some(song) = &loaded_song {
+        //     if self.player.has_current_song() {
+        //         if let Err(e) = self.player.play_song_next(song, None) {
+        //             if let Some(s) = &self.command_sender {
+        //                 s.send(Command::ErrorInfo(
+        //                     format!("Couldn't preload song #{id}!"),
+        //                     format!("Error: {e}"),
+        //                 ))
+        //                 .unwrap();
+        //             }
+        //         }
+        //     }
+        // }
         self.next = Some((id, loaded_song, custom_data));
     }
     fn pause(&mut self) {
