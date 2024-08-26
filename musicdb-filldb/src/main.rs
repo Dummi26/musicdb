@@ -222,7 +222,7 @@ fn main() {
             DatabaseLocation {
                 rel_path: path.to_path_buf(),
             },
-            match path.metadata() {
+            match song_path.metadata() {
                 Ok(v) => match v.modified() {
                     Ok(v) => if let Ok(time) = v.duration_since(SystemTime::UNIX_EPOCH) {
                         Some(time.as_secs())
