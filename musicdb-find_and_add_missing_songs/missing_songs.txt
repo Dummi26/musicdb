@@ -1,0 +1,577 @@
+#0: Volbeat/Seal The Deal & Let's Boogie/01 The Devil's Bleeding Crown.mp3
+#1: Volbeat/Seal The Deal & Let's Boogie/02 Marie Laveau.mp3
+#2: Volbeat/Seal The Deal & Let's Boogie/03 The Bliss.mp3
+#3: Volbeat/Seal The Deal & Let's Boogie/04 The Gates Of Babylon.mp3
+#4: Volbeat/Seal The Deal & Let's Boogie/05 Let It Burn.mp3
+#5: Volbeat/Seal The Deal & Let's Boogie/06 Black Rose.mp3
+#6: Volbeat/Seal The Deal & Let's Boogie/07 Rebound.mp3
+#7: Volbeat/Seal The Deal & Let's Boogie/08 Mary Jane Kelly.mp3
+#8: Volbeat/Seal The Deal & Let's Boogie/09 Goodbye Forever.mp3
+#9: Volbeat/Seal The Deal & Let's Boogie/10 Seal The Deal.mp3
+#10: Volbeat/Seal The Deal & Let's Boogie/11 Battleship Chains.mp3
+#11: Volbeat/Seal The Deal & Let's Boogie/12 You Will Know.mp3
+#12: Volbeat/Seal The Deal & Let's Boogie/13 The Loa's Crossroad.mp3
+#13: Volbeat/The Strength - The Sound - The Songs/01 Caroline Leaving.mp3
+#14: Volbeat/The Strength - The Sound - The Songs/02 Another Day, Another Way.mp3
+#15: Volbeat/The Strength - The Sound - The Songs/03 Something Else Or.mp3
+#16: Volbeat/The Strength - The Sound - The Songs/04 Rebel Monster.mp3
+#17: Volbeat/The Strength - The Sound - The Songs/05 Pool Of Booze Booze Booza.mp3
+#18: Volbeat/The Strength - The Sound - The Songs/06 Always Wu.mp3
+#19: Volbeat/The Strength - The Sound - The Songs/07 Say Your Number.mp3
+#20: Volbeat/The Strength - The Sound - The Songs/08 Soulweeper.mp3
+#21: Volbeat/The Strength - The Sound - The Songs/09 Fire Song.mp3
+#22: Volbeat/The Strength - The Sound - The Songs/10 Danny & Lucy (11pm).mp3
+#23: Volbeat/The Strength - The Sound - The Songs/11 Caroline # 1.mp3
+#24: Volbeat/The Strength - The Sound - The Songs/12 Alienized.mp3
+#25: Volbeat/The Strength - The Sound - The Songs/13 I Only Wanna Be With You.mp3
+#26: Volbeat/The Strength - The Sound - The Songs/14 Everything's Still Fine.mp3
+#27: Volbeat/The Strength - The Sound - The Songs/15 Healing Subconsciously.mp3
+#28: Accept/Restless And Wild/01 Fast As A Shark.wma
+#29: Accept/Restless And Wild/02 Restless And Wild.wma
+#30: Accept/Restless And Wild/03 Ahead Of The Pack.wma
+#31: Accept/Restless And Wild/04 Shake Your Heads.wma
+#32: Accept/Restless And Wild/05 Neon Nights.wma
+#33: Accept/Restless And Wild/06 Get Ready.wma
+#34: Accept/Restless And Wild/07 Demon's Night.wma
+#35: Accept/Restless And Wild/08 Flash Rockin' Man.wma
+#36: Accept/Restless And Wild/09 Don't Go Stealing My Soul Away.wma
+#37: Accept/Restless And Wild/10 Princess Of The Dawn.wma
+#38: Accept/Restless And Wild/mp3/01 Fast As A Shark.mp3
+#39: Accept/Restless And Wild/mp3/02 Restless And Wild.mp3
+#40: Accept/Restless And Wild/mp3/03 Ahead Of The Pack.mp3
+#41: Accept/Restless And Wild/mp3/04 Shake Your Heads.mp3
+#42: Accept/Restless And Wild/mp3/05 Neon Nights.mp3
+#43: Accept/Restless And Wild/mp3/06 Get Ready.mp3
+#44: Accept/Restless And Wild/mp3/07 Demon's Night.mp3
+#45: Accept/Restless And Wild/mp3/08 Flash Rockin' Man.mp3
+#46: Accept/Dio/Holy Diver/02 Holy Diver.wma
+#47: Accept/Dio/Holy Diver/05 Don't Talk To Strangers.wma
+#48: Accept/Dio/Holy Diver/06 Straight Through The Heart.wma
+#49: Accept/Dio/Holy Diver/07 Invisible.wma
+#50: Accept/Dio/Holy Diver/08 Rainbow In The Dark.wma
+#51: Accept/Dio/Holy Diver/09 Shame On The Night.wma
+#52: Accept/Dio/The Last In Line/02 The Last In Line.wma
+#53: Accept/Dio/The Last In Line/03 Breathless.wma
+#54: Accept/Dio/The Last In Line/05 One Night In The City.wma
+#55: Accept/Dio/The Last In Line/07 Mystery.wma
+#56: Accept/Dio/The Last In Line/08 Eat Your Heart Out.wma
+#57: Accept/Dio/The Last In Line/09 Egypt (The Chains Are On).wma
+#58: Accept/Objection Overruled/01 Objection Overruled.mp3
+#59: Accept/Objection Overruled/02 I Don't Wanna Be Like You.mp3
+#60: Accept/Objection Overruled/03 Protectors Of Terror.mp3
+#61: Accept/Objection Overruled/04 Slaves To Metal.mp3
+#62: Accept/Objection Overruled/05 All Or Nothing.mp3
+#63: Accept/Objection Overruled/06 Bulletproof.mp3
+#64: Accept/Objection Overruled/07 Amamos La Vida.mp3
+#65: Accept/Objection Overruled/08 Sick, Dirty And Mean.mp3
+#66: Accept/Objection Overruled/09 Donation.mp3
+#67: Accept/Objection Overruled/10 Just By My Own.mp3
+#68: Accept/Objection Overruled/11 This One's For You.mp3
+#69: Avenged Sevenfold/Avenged Sevenfold/01 Critical Acclaim.mp3
+#70: Avenged Sevenfold/Avenged Sevenfold/02 Almost Easy.mp3
+#71: Avenged Sevenfold/Avenged Sevenfold/03 Scream.mp3
+#72: Avenged Sevenfold/Avenged Sevenfold/04 Afterlife.mp3
+#73: Avenged Sevenfold/Avenged Sevenfold/05 Gunslinger.mp3
+#74: Avenged Sevenfold/Avenged Sevenfold/06 Unbound (The Wild Ride).mp3
+#75: Avenged Sevenfold/Avenged Sevenfold/07 Brompton Cocktail.mp3
+#76: Avenged Sevenfold/Avenged Sevenfold/08 Lost.mp3
+#77: Avenged Sevenfold/Avenged Sevenfold/09 A Little Piece Of Heaven.mp3
+#78: Avenged Sevenfold/Avenged Sevenfold/10 Dear God.mp3
+#79: Black Sabbath/Born Again/01 Trashed.mp3
+#80: Black Sabbath/Born Again/02 Stonehenge.mp3
+#81: Black Sabbath/Born Again/03 Disturbing The Priest.mp3
+#82: Black Sabbath/Born Again/04 The Dark.mp3
+#83: Black Sabbath/Born Again/05 Zero The Hero.mp3
+#84: Black Sabbath/Born Again/06 Digital Bitch.mp3
+#85: Black Sabbath/Born Again/07 Born Again.mp3
+#86: Black Sabbath/Born Again/08 Hot Line.mp3
+#87: Black Sabbath/Born Again/09 Keep It Warm.mp3
+#88: Black Sabbath/Born Again [Disc 2]/01 The Fallen.mp3
+#89: Black Sabbath/Born Again [Disc 2]/02 Stonehenge.mp3
+#90: Black Sabbath/Born Again [Disc 2]/03 Hot Line [Live].mp3
+#91: Black Sabbath/Born Again [Disc 2]/04 War Pigs [Live].mp3
+#92: Black Sabbath/Born Again [Disc 2]/05 Black Sabbath [Live].mp3
+#93: Black Sabbath/Born Again [Disc 2]/06 The Dark [Live].mp3
+#94: Black Sabbath/Born Again [Disc 2]/07 Zero The Hero [Live].mp3
+#95: Black Sabbath/Born Again [Disc 2]/08 Digital Bitch [Live].mp3
+#96: Black Sabbath/Born Again [Disc 2]/09 Iron Man [Live].mp3
+#97: Black Sabbath/Born Again [Disc 2]/10 Smoke On The Water [Live].mp3
+#98: Black Sabbath/Born Again [Disc 2]/11 Paranoid [Live].mp3
+#99: Black Sabbath/Reunion [Live] [Disc 1]/01 War Pigs.mp3
+#100: Black Sabbath/Reunion [Live] [Disc 1]/02 Behind The Wall Of Sleep.mp3
+#101: Black Sabbath/Reunion [Live] [Disc 1]/03 N.I.B.mp3
+#102: Black Sabbath/Reunion [Live] [Disc 1]/04 Fairies Wear Boots.mp3
+#103: Black Sabbath/Reunion [Live] [Disc 1]/05 Electric Funeral.mp3
+#104: Black Sabbath/Reunion [Live] [Disc 1]/06 Sweet Leaf.mp3
+#105: Black Sabbath/Reunion [Live] [Disc 1]/07 Spiral Architect.mp3
+#106: Black Sabbath/Reunion [Live] [Disc 1]/08 Into The Void.mp3
+#107: Black Sabbath/Reunion [Live] [Disc 1]/09 Snowblind.mp3
+#108: Black Sabbath/Reunion [Live] [Disc 2]/01 Sabbath Bloody Sabbath.mp3
+#109: Black Sabbath/Reunion [Live] [Disc 2]/02 Orchid-Lord Of This World.mp3
+#110: Black Sabbath/Reunion [Live] [Disc 2]/03 Dirty Women.mp3
+#111: Black Sabbath/Reunion [Live] [Disc 2]/04 Black Sabbath.mp3
+#112: Black Sabbath/Reunion [Live] [Disc 2]/05 Iron Man.mp3
+#113: Black Sabbath/Reunion [Live] [Disc 2]/06 Children Of The Grave.mp3
+#114: Black Sabbath/Reunion [Live] [Disc 2]/07 Paranoid.mp3
+#115: Black Sabbath/Reunion [Live] [Disc 2]/08 Psycho Man.mp3
+#116: Black Sabbath/Reunion [Live] [Disc 2]/09 Selling My Soul.mp3
+#117: Black Sabbath/The Best Of Black Sabbath [Disc 1]/01 Black Sabbath.mp3
+#118: Black Sabbath/The Best Of Black Sabbath [Disc 1]/02 The Wizard.mp3
+#119: Black Sabbath/The Best Of Black Sabbath [Disc 1]/03 N.I.B.mp3
+#120: Black Sabbath/The Best Of Black Sabbath [Disc 1]/04 Evil Woman (Don't Play Your Games With Me).mp3
+#121: Black Sabbath/The Best Of Black Sabbath [Disc 1]/05 Wicked World.mp3
+#122: Black Sabbath/The Best Of Black Sabbath [Disc 1]/06 War Pigs.mp3
+#123: Black Sabbath/The Best Of Black Sabbath [Disc 1]/07 Paranoid.mp3
+#124: Black Sabbath/The Best Of Black Sabbath [Disc 1]/08 Planet Caravan.mp3
+#125: Black Sabbath/The Best Of Black Sabbath [Disc 1]/09 Iron Man.mp3
+#126: Black Sabbath/The Best Of Black Sabbath [Disc 1]/10 Electric Funeral.mp3
+#127: Black Sabbath/The Best Of Black Sabbath [Disc 1]/11 Fairies Wear Boots.mp3
+#128: Black Sabbath/The Best Of Black Sabbath [Disc 1]/12 Sweet Leaf.mp3
+#129: Black Sabbath/The Best Of Black Sabbath [Disc 1]/13 Embryo.mp3
+#130: Black Sabbath/The Best Of Black Sabbath [Disc 1]/14 Children Of The Grave.mp3
+#131: Black Sabbath/The Best Of Black Sabbath [Disc 1]/15 Lord Of This World.mp3
+#132: Black Sabbath/The Best Of Black Sabbath [Disc 1]/16 Into The Void.mp3
+#133: Black Sabbath/The End- 4 February 2017 Birmingham [Live] [Disc 1]/01 Black Sabbath.mp3
+#134: Black Sabbath/The End- 4 February 2017 Birmingham [Live] [Disc 1]/02 Fairies Wear Boots.mp3
+#135: Black Sabbath/The End- 4 February 2017 Birmingham [Live] [Disc 1]/03 Under The Sun - Every Day Comes And Goes.mp3
+#136: Black Sabbath/The End- 4 February 2017 Birmingham [Live] [Disc 1]/04 After Forever.mp3
+#137: Black Sabbath/The End- 4 February 2017 Birmingham [Live] [Disc 1]/05 Into The Void.mp3
+#138: Black Sabbath/The End- 4 February 2017 Birmingham [Live] [Disc 1]/06 Snowblind.mp3
+#139: Black Sabbath/The End- 4 February 2017 Birmingham [Live] [Disc 1]/07 Band Introductions.mp3
+#140: Black Sabbath/The End- 4 February 2017 Birmingham [Live] [Disc 1]/08 War Pigs.mp3
+#141: Black Sabbath/The End- 4 February 2017 Birmingham [Live] [Disc 1]/09 Behind The Wall Of Sleep.mp3
+#142: Black Sabbath/The End- 4 February 2017 Birmingham [Live] [Disc 1]/10 Bassically - N.I.B.mp3
+#143: Black Sabbath/The End- 4 February 2017 Birmingham [Live] [Disc 2]/01 Hand Of Doom.mp3
+#144: Black Sabbath/The End- 4 February 2017 Birmingham [Live] [Disc 2]/02 Supernaut - Sabbath Bloody Sabbath - Megalomania.mp3
+#145: Black Sabbath/The End- 4 February 2017 Birmingham [Live] [Disc 2]/03 Rat Salad - Drum Solo.mp3
+#146: Black Sabbath/The End- 4 February 2017 Birmingham [Live] [Disc 2]/04 Iron Man.mp3
+#147: Black Sabbath/The End- 4 February 2017 Birmingham [Live] [Disc 2]/05 Dirty Women.mp3
+#148: Black Sabbath/The End- 4 February 2017 Birmingham [Live] [Disc 2]/06 Children Of The Grave.mp3
+#149: Black Sabbath/The End- 4 February 2017 Birmingham [Live] [Disc 2]/07 Paranoid.mp3
+#150: Black Sabbath/The Best Of Black Sabbath [Disc 2]/01 Tomorrow's Dream.mp3
+#151: Black Sabbath/The Best Of Black Sabbath [Disc 2]/02 Supernaut.mp3
+#152: Black Sabbath/The Best Of Black Sabbath [Disc 2]/03 Snowblind.mp3
+#153: Black Sabbath/The Best Of Black Sabbath [Disc 2]/04 Sabbath Bloody Sabbath.mp3
+#154: Black Sabbath/The Best Of Black Sabbath [Disc 2]/05 Killing Yourself to Live.mp3
+#155: Black Sabbath/The Best Of Black Sabbath [Disc 2]/06 Spiral Architect.mp3
+#156: Black Sabbath/The Best Of Black Sabbath [Disc 2]/07 Hole in the Sky.mp3
+#157: Black Sabbath/The Best Of Black Sabbath [Disc 2]/08 Don't Start (Too Late).mp3
+#158: Black Sabbath/The Best Of Black Sabbath [Disc 2]/09 Symptom of the Universe.mp3
+#159: Black Sabbath/The Best Of Black Sabbath [Disc 2]/10 Am I Going Insane (Radio).mp3
+#160: Black Sabbath/The Best Of Black Sabbath [Disc 2]/11 Dirty Women.mp3
+#161: Black Sabbath/The Best Of Black Sabbath [Disc 2]/12 Never Say Die.mp3
+#162: Black Sabbath/The Best Of Black Sabbath [Disc 2]/13 A Hard Road.mp3
+#163: Black Sabbath/The Best Of Black Sabbath [Disc 2]/14 Heaven And Hell.mp3
+#164: Black Sabbath/The Best Of Black Sabbath [Disc 2]/15 Turn Up the Night.mp3
+#165: Black Sabbath/The Best Of Black Sabbath [Disc 2]/16 The Dark - Zero the Hero.mp3
+#166: Iron Maiden/The Final Frontier (2015 Remaster)/01 Satellite 15.....The Final Frontier (2015 Remaster).mp3
+#167: Iron Maiden/The Final Frontier (2015 Remaster)/02 El Dorado (2015 Remaster).mp3
+#168: Iron Maiden/The Final Frontier (2015 Remaster)/03 Mother of Mercy (2015 Remaster).mp3
+#169: Iron Maiden/The Final Frontier (2015 Remaster)/04 Coming Home (2015 Remaster).mp3
+#170: Iron Maiden/The Final Frontier (2015 Remaster)/05 The Alchemist (2015 Remaster).mp3
+#171: Iron Maiden/The Final Frontier (2015 Remaster)/06 Isle of Avalon (2015 Remaster).mp3
+#172: Iron Maiden/The Final Frontier (2015 Remaster)/07 Starblind (2015 Remaster).mp3
+#173: Iron Maiden/The Final Frontier (2015 Remaster)/08 The Talisman (2015 Remaster).mp3
+#174: Iron Maiden/The Final Frontier (2015 Remaster)/09 The Man Who Would Be King (2015 Remaster).mp3
+#175: Iron Maiden/The Final Frontier (2015 Remaster)/10 When the Wild Wind Blows (2015 Remaster).mp3
+#176: Iron Maiden/A Matter Of Life And Death/01 Different World.mp3
+#177: Iron Maiden/A Matter Of Life And Death/02 These Colours Don't Run.mp3
+#178: Iron Maiden/A Matter Of Life And Death/03 Brighter Than A Thousand Suns.mp3
+#179: Iron Maiden/A Matter Of Life And Death/04 The Pilgrim.mp3
+#180: Iron Maiden/A Matter Of Life And Death/05 The Longest Day.mp3
+#181: Iron Maiden/A Matter Of Life And Death/06 Out Of The Shadows.mp3
+#182: Iron Maiden/A Matter Of Life And Death/07 The Reincarnation Of Benjamin Breeg.mp3
+#183: Iron Maiden/A Matter Of Life And Death/08 For The Greater Good Of God.mp3
+#184: Iron Maiden/A Matter Of Life And Death/09 Lord Of Light.mp3
+#185: Iron Maiden/A Matter Of Life And Death/10 The Legacy.mp3
+#186: Iron Maiden/Killers/01 The Ides Of March.mp3
+#187: Iron Maiden/Killers/02 Wrathchild.mp3
+#188: Iron Maiden/Killers/03 Murders In The Rue Morgue.mp3
+#189: Iron Maiden/Killers/04 Another Life.mp3
+#190: Iron Maiden/Killers/05 Genghis Khan.mp3
+#191: Iron Maiden/Killers/06 Innocent Exile.mp3
+#192: Iron Maiden/Killers/07 Killers.mp3
+#193: Iron Maiden/Killers/08 Prodigal Son.mp3
+#194: Iron Maiden/Killers/09 Purgatory.mp3
+#195: Iron Maiden/Killers/10 Twilight Zone.mp3
+#196: Iron Maiden/Killers/11 Drifter.mp3
+#197: Iron Maiden/Maiden England '88 [Live] [Disc 1]/01 Moonchild.mp3
+#198: Iron Maiden/Maiden England '88 [Live] [Disc 1]/02 The Evil That Men Do.mp3
+#199: Iron Maiden/Maiden England '88 [Live] [Disc 1]/03 The Prisoner.mp3
+#200: Iron Maiden/Maiden England '88 [Live] [Disc 1]/04 Still Life.mp3
+#201: Iron Maiden/Maiden England '88 [Live] [Disc 1]/05 Die With Your Boots On.mp3
+#202: Iron Maiden/Maiden England '88 [Live] [Disc 1]/06 Infinite Dreams.mp3
+#203: Iron Maiden/Maiden England '88 [Live] [Disc 1]/07 Killers.mp3
+#204: Iron Maiden/Maiden England '88 [Live] [Disc 1]/08 Can I Play With Madness.mp3
+#205: Iron Maiden/Maiden England '88 [Live] [Disc 1]/09 Heaven Can Wait.mp3
+#206: Iron Maiden/Maiden England '88 [Live] [Disc 1]/10 Wasted Years.mp3
+#207: Iron Maiden/Maiden England '88 [Live] [Disc 2]/01 The Clairvoyant.mp3
+#208: Iron Maiden/Maiden England '88 [Live] [Disc 2]/02 Seventh Son Of A Seventh Son.mp3
+#209: Iron Maiden/Maiden England '88 [Live] [Disc 2]/03 The Number Of The Beast.mp3
+#210: Iron Maiden/Maiden England '88 [Live] [Disc 2]/04 Hallowed Be Thy Name.mp3
+#211: Iron Maiden/Maiden England '88 [Live] [Disc 2]/05 Iron Maiden.mp3
+#212: Iron Maiden/Maiden England '88 [Live] [Disc 2]/06 Run To The Hills.mp3
+#213: Iron Maiden/Maiden England '88 [Live] [Disc 2]/07 Running Free.mp3
+#214: Iron Maiden/Maiden England '88 [Live] [Disc 2]/08 Sanctuary.mp3
+#215: Iron Maiden/No Prayer For The Dying/01 Tailgunner.mp3
+#216: Iron Maiden/No Prayer For The Dying/02 Holy Smoke.mp3
+#217: Iron Maiden/No Prayer For The Dying/03 No Prayer For The Dying.mp3
+#218: Iron Maiden/No Prayer For The Dying/04 Public Enema Number One.mp3
+#219: Iron Maiden/No Prayer For The Dying/05 Fates Warning.mp3
+#220: Iron Maiden/No Prayer For The Dying/06 The Assassin.mp3
+#221: Iron Maiden/No Prayer For The Dying/07 Run Silent Run Deep.mp3
+#222: Iron Maiden/No Prayer For The Dying/08 Hooks In You.mp3
+#223: Iron Maiden/No Prayer For The Dying/09 Bring Your Daughter To The Slaughter.mp3
+#224: Iron Maiden/No Prayer For The Dying/10 Mother Russia.mp3
+#225: Iron Maiden/Powerslave (2015 Remaster)/01 Aces High (2015 Remaster).mp3
+#226: Iron Maiden/Powerslave (2015 Remaster)/02 2 Minutes to Midnight (2015 Remaster).mp3
+#227: Iron Maiden/Powerslave (2015 Remaster)/03 Losfer Words (Big 'Orra) [2015 Remaster].mp3
+#228: Iron Maiden/Powerslave (2015 Remaster)/04 Flash of the Blade (2015 Remaster).mp3
+#229: Iron Maiden/Powerslave (2015 Remaster)/05 The Duellists (2015 Remaster).mp3
+#230: Iron Maiden/Powerslave (2015 Remaster)/06 Back in the Village (2015 Remaster).mp3
+#231: Iron Maiden/Powerslave (2015 Remaster)/07 Powerslave (2015 Remaster).mp3
+#232: Iron Maiden/Powerslave (2015 Remaster)/08 Rime of the Ancient Mariner (2015 Remaster).mp3
+#233: Iron Maiden/Seventh Son Of A Seventh Son/01 Moonchild.wma
+#234: Iron Maiden/Seventh Son Of A Seventh Son/02 Infinite Dreams.wma
+#235: Iron Maiden/Seventh Son Of A Seventh Son/03 Can I Play With Madness.wma
+#236: Iron Maiden/Seventh Son Of A Seventh Son/04 The Evil That Men Do.wma
+#237: Iron Maiden/Seventh Son Of A Seventh Son/05 Seventh Son Of A Seventh Son.wma
+#238: Iron Maiden/Seventh Son Of A Seventh Son/06 The Prophecy.wma
+#239: Iron Maiden/Seventh Son Of A Seventh Son/07 The Clairvoyant.wma
+#240: Iron Maiden/Seventh Son Of A Seventh Son/08 Only The Good Die Young.wma
+#241: Iron Maiden/Somewhere Back In Time- The Best Of- 1980-1989/01 Churchill's Speech.wma
+#242: Iron Maiden/Somewhere Back In Time- The Best Of- 1980-1989/02 Aces High [Live].wma
+#243: Iron Maiden/Somewhere Back In Time- The Best Of- 1980-1989/03 2 Minutes To Midnight.wma
+#244: Iron Maiden/Somewhere Back In Time- The Best Of- 1980-1989/04 The Trooper.wma
+#245: Iron Maiden/Somewhere Back In Time- The Best Of- 1980-1989/05 Wasted Years.wma
+#246: Iron Maiden/Somewhere Back In Time- The Best Of- 1980-1989/06 Children Of The Damned.wma
+#247: Iron Maiden/Somewhere Back In Time- The Best Of- 1980-1989/07 The Number Of The Beast.wma
+#248: Iron Maiden/Somewhere Back In Time- The Best Of- 1980-1989/08 Run To The Hills.wma
+#249: Iron Maiden/Somewhere Back In Time- The Best Of- 1980-1989/09 Phantom Of The Opera [Live].wma
+#250: Iron Maiden/Somewhere Back In Time- The Best Of- 1980-1989/10 The Evil That Men Do.wma
+#251: Iron Maiden/Somewhere Back In Time- The Best Of- 1980-1989/11 Wrathchild [Live].wma
+#252: Iron Maiden/Somewhere Back In Time- The Best Of- 1980-1989/12 Can I Play With Madness.wma
+#253: Iron Maiden/Somewhere Back In Time- The Best Of- 1980-1989/13 Powerslave.wma
+#254: Iron Maiden/Somewhere Back In Time- The Best Of- 1980-1989/14 Hallowed Be Thy Name.wma
+#255: Iron Maiden/Somewhere Back In Time- The Best Of- 1980-1989/15 Iron Maiden [Live].wma
+#256: Iron Maiden/Somewhere Back In Time- The Best Of- 1980-1989/mp3/02%20Aces%20High%20%5BLive%5D.mp3
+#257: Iron Maiden/Somewhere Back In Time- The Best Of- 1980-1989/mp3/05-Wasted-Years.mp3
+#258: Iron Maiden/Somewhere Back In Time- The Best Of- 1980-1989/mp3/06-Children-Of-The-Damned.mp3
+#259: Iron Maiden/Somewhere Back In Time- The Best Of- 1980-1989/mp3/07-The-Number-Of-The-Beast.mp3
+#260: Iron Maiden/Somewhere Back In Time- The Best Of- 1980-1989/mp3/08-Run-To-The-Hills.mp3
+#261: Iron Maiden/Somewhere Back In Time- The Best Of- 1980-1989/mp3/11-Wrathchild-_Live_.mp3
+#262: Iron Maiden/Somewhere Back In Time- The Best Of- 1980-1989/mp3/13-Powerslave.mp3
+#263: Iron Maiden/Somewhere Back In Time- The Best Of- 1980-1989/mp3/14-Hallowed-Be-Thy-Name.mp3
+#264: Iron Maiden/Somewhere Back In Time- The Best Of- 1980-1989/mp3/15-Iron-Maiden-_Live_.mp3
+#265: Judas Priest/Redeemer Of Souls/01 Dragonaut.mp3
+#266: Judas Priest/Redeemer Of Souls/02 Redeemer Of Souls.mp3
+#267: Judas Priest/Redeemer Of Souls/03 Halls Of Valhalla.mp3
+#268: Judas Priest/Redeemer Of Souls/04 Sword Of Damocles.mp3
+#269: Judas Priest/Redeemer Of Souls/05 March Of The Damned.mp3
+#270: Judas Priest/Redeemer Of Souls/06 Down In Flames.mp3
+#271: Judas Priest/Redeemer Of Souls/07 Hell & Back.mp3
+#272: Judas Priest/Redeemer Of Souls/08 Cold Blooded.mp3
+#273: Judas Priest/Redeemer Of Souls/09 Metalizer.mp3
+#274: Judas Priest/Redeemer Of Souls/10 Crossfire.mp3
+#275: Judas Priest/Redeemer Of Souls/11 Secrets Of The Dead.mp3
+#276: Judas Priest/Redeemer Of Souls/12 Battle Cry.mp3
+#277: Judas Priest/Redeemer Of Souls/13 Beginning Of The End.mp3
+#278: Megadeth/Warheads On Foreheads [Disc 2]/01 Hangar 18.wma
+#279: Megadeth/Warheads On Foreheads [Disc 2]/02 Tornado Of Souls.wma
+#280: Megadeth/Warheads On Foreheads [Disc 2]/03 Rust In Peace... Polaris.wma
+#281: Megadeth/Warheads On Foreheads [Disc 2]/04 Five Magics.wma
+#282: Megadeth/Warheads On Foreheads [Disc 2]/05 Take No Prisoners.wma
+#283: Megadeth/Warheads On Foreheads [Disc 2]/06 Skin O' My Teeth.wma
+#284: Megadeth/Warheads On Foreheads [Disc 2]/07 Angry Again.wma
+#285: Megadeth/Warheads On Foreheads [Disc 2]/08 Symphony Of Destruction.wma
+#286: Megadeth/Warheads On Foreheads [Disc 2]/09 Sweating Bullets.wma
+#287: Megadeth/Warheads On Foreheads [Disc 2]/10 A Tout Le Monde.wma
+#288: Megadeth/Warheads On Foreheads [Disc 2]/11 Train Of Consequences.wma
+#289: Megadeth/Warheads On Foreheads [Disc 2]/12 Reckoning Day.wma
+#290: Megadeth/Warheads On Foreheads [Disc 3]/01 Trust.wma
+#291: Megadeth/Warheads On Foreheads [Disc 3]/02 She-Wolf.wma
+#292: Megadeth/Warheads On Foreheads [Disc 3]/03 Wanderlust.wma
+#293: Megadeth/Warheads On Foreheads [Disc 3]/04 Dread And The Fugitive Mind.wma
+#294: Megadeth/Warheads On Foreheads [Disc 3]/05 Blackmail The Universe.wma
+#295: Megadeth/Warheads On Foreheads [Disc 3]/06 Washington Is Next!.wma
+#296: Megadeth/Warheads On Foreheads [Disc 3]/07 Head Crusher.wma
+#297: Megadeth/Warheads On Foreheads [Disc 3]/08 Public Enemy No. 1.wma
+#298: Megadeth/Warheads On Foreheads [Disc 3]/09 Kingmaker.wma
+#299: Megadeth/Warheads On Foreheads [Disc 3]/10 The Threat Is Real.wma
+#300: Megadeth/Warheads On Foreheads [Disc 3]/11 Poisonous Shadows.wma
+#301: Megadeth/Warheads On Foreheads [Disc 3]/12 Death From Within.wma
+#302: Megadeth/Warheads On Foreheads [Disc 3]/13 Dystopia.wma
+#303: Megadeth/Warheads On Foreheads [Disc 1]/01 Rattlehead.wma
+#304: Megadeth/Warheads On Foreheads [Disc 1]/02 Mechanix.wma
+#305: Megadeth/Warheads On Foreheads [Disc 1]/03 Killing Is My Business... And Business Is Good!.wma
+#306: Megadeth/Warheads On Foreheads [Disc 1]/04 The Conjuring.wma
+#307: Megadeth/Warheads On Foreheads [Disc 1]/05 Wake Up Dead.wma
+#308: Megadeth/Warheads On Foreheads [Disc 1]/06 Devils Island.wma
+#309: Megadeth/Warheads On Foreheads [Disc 1]/07 Good Mourning - Black Friday.wma
+#310: Megadeth/Warheads On Foreheads [Disc 1]/08 Set The World Afire.wma
+#311: Megadeth/Warheads On Foreheads [Disc 1]/09 In My Darkest Hour.wma
+#312: Megadeth/Warheads On Foreheads [Disc 1]/10 Holy Wars... The Punishment Due.wma
+#313: Metallica/Hardwired… To Self-Destruct [Disc 1]/01 Hardwired.wma
+#314: Metallica/Hardwired… To Self-Destruct [Disc 1]/02 Atlas, Rise!.wma
+#315: Metallica/Hardwired… To Self-Destruct [Disc 1]/03 Now That We're Dead.wma
+#316: Metallica/Hardwired… To Self-Destruct [Disc 1]/04 Moth Into Flame.wma
+#317: Metallica/Hardwired… To Self-Destruct [Disc 1]/05 Dream No More.wma
+#318: Metallica/Hardwired… To Self-Destruct [Disc 1]/06 Halo On Fire.wma
+#319: Ozzy Osbourne/Memoirs of a Madman/01 Crazy Train.wma
+#320: Ozzy Osbourne/Memoirs of a Madman/02 Mr. Crowley.wma
+#321: Ozzy Osbourne/Memoirs of a Madman/03 Flying High Again.wma
+#322: Ozzy Osbourne/Memoirs of a Madman/04 Over the Mountain.wma
+#323: Ozzy Osbourne/Memoirs of a Madman/05 Bark at the Moon.wma
+#324: Ozzy Osbourne/Memoirs of a Madman/06 The Ultimate Sin.wma
+#325: Ozzy Osbourne/Memoirs of a Madman/07 Miracle Man.wma
+#326: Ozzy Osbourne/Memoirs of a Madman/08 No More Tears [Edit][Edit].wma
+#327: Ozzy Osbourne/Memoirs of a Madman/09 Mama, I'm Coming Home.wma
+#328: Ozzy Osbourne/Memoirs of a Madman/10 Road to Nowhere.wma
+#329: Ozzy Osbourne/Memoirs of a Madman/11 Perry Mason.wma
+#330: Ozzy Osbourne/Memoirs of a Madman/12 I Just Want You.wma
+#331: Ozzy Osbourne/Memoirs of a Madman/13 Gets Me Through.wma
+#332: Ozzy Osbourne/Memoirs of a Madman/14 Changes.wma
+#333: Ozzy Osbourne/Memoirs of a Madman/15 I Don't Wanna Stop.wma
+#334: Ozzy Osbourne/Memoirs of a Madman/16 Let Me Hear You Scream.wma
+#335: Ozzy Osbourne/Memoirs of a Madman/17 Paranoid [#][Live].wma
+#336: Ozzy Osbourne/Ordinary Man/01 Straight To Hell.mp3
+#337: Ozzy Osbourne/Ordinary Man/02 All My Life.mp3
+#338: Ozzy Osbourne/Ordinary Man/03 Goodbye.mp3
+#339: Ozzy Osbourne/Ordinary Man/04 Ordinary Man.mp3
+#340: Ozzy Osbourne/Ordinary Man/05 Under The Graveyard.mp3
+#341: Ozzy Osbourne/Ordinary Man/06 Eat Me.mp3
+#342: Ozzy Osbourne/Ordinary Man/07 Today Is The End.mp3
+#343: Ozzy Osbourne/Ordinary Man/08 Scary Little Green Men.mp3
+#344: Ozzy Osbourne/Ordinary Man/09 Holy For Tonight.mp3
+#345: Ozzy Osbourne/Ordinary Man/10 It's A Raid.mp3
+#346: Ozzy Osbourne/Ordinary Man/11 Take What You Want.mp3
+#347: Ozzy Osbourne/Ozzmosis/01 Perry Mason.wma
+#348: Ozzy Osbourne/Ozzmosis/02 I Just Want You.wma
+#349: Ozzy Osbourne/Ozzmosis/03 Ghost Behind My Eyes.wma
+#350: Ozzy Osbourne/Ozzmosis/04 Thunder Underground.wma
+#351: Ozzy Osbourne/Ozzmosis/05 See You On The Other Side.wma
+#352: Ozzy Osbourne/Ozzmosis/06 Tomorrow.wma
+#353: Ozzy Osbourne/Ozzmosis/07 Denial.wma
+#354: Ozzy Osbourne/Ozzmosis/08 My Little Man.wma
+#355: Ozzy Osbourne/Ozzmosis/09 My Jekyll Doesn't Hide.wma
+#356: Ozzy Osbourne/Ozzmosis/10 Old L.A. Tonight.wma
+#357: Ozzy Osbourne/Scream/06 Crucify.wma
+#358: Ozzy Osbourne/Speak Of The Devil [Live]/01 Symptoms Of The Universe.wma
+#359: Ozzy Osbourne/Speak Of The Devil [Live]/02 Snowblind.wma
+#360: Ozzy Osbourne/Speak Of The Devil [Live]/03 Black Sabbath.wma
+#361: Ozzy Osbourne/Speak Of The Devil [Live]/04 Fairies Wear Boots.wma
+#362: Ozzy Osbourne/Speak Of The Devil [Live]/05 War Pigs.wma
+#363: Ozzy Osbourne/Speak Of The Devil [Live]/06 The Wizard.wma
+#364: Ozzy Osbourne/Speak Of The Devil [Live]/07 N.I.B.wma
+#365: Ozzy Osbourne/Speak Of The Devil [Live]/08 Sweet Leaf.wma
+#366: Ozzy Osbourne/Speak Of The Devil [Live]/09 Never Say Die.wma
+#367: Ozzy Osbourne/Speak Of The Devil [Live]/10 Sabbath Bloody Sabbath.wma
+#368: Ozzy Osbourne/Speak Of The Devil [Live]/11 Iron Man - Children Of The Grave.wma
+#369: Ozzy Osbourne/Speak Of The Devil [Live]/12 Paranoid.wma
+#370: Ozzy Osbourne/The Ozzman Cometh/03 Goodbye To Romance.wma
+#371: Ozzy Osbourne/The Ozzman Cometh/06 Over The Mountain.wma
+#372: Ozzy Osbourne/The Ozzman Cometh/09 Shot In The Dark.wma
+#373: Ozzy Osbourne/The Ozzman Cometh/15 Back On Earth.wma
+#374: In Extremo/Unbekanntes Album (15.10.2017 20-18-14)/01 Titelnummer 1.wma
+#375: In Extremo/Unbekanntes Album (15.10.2017 20-18-14)/02 Titelnummer 2.wma
+#376: In Extremo/Unbekanntes Album (15.10.2017 20-18-14)/03 Titelnummer 3.wma
+#377: In Extremo/Unbekanntes Album (15.10.2017 20-18-14)/04 Titelnummer 4.wma
+#378: In Extremo/Unbekanntes Album (15.10.2017 20-18-14)/05 Titelnummer 5.wma
+#379: In Extremo/Unbekanntes Album (15.10.2017 20-18-14)/06 Titelnummer 6.wma
+#380: In Extremo/Unbekanntes Album (15.10.2017 20-18-14)/07 Titelnummer 7.wma
+#381: In Extremo/Unbekanntes Album (15.10.2017 20-18-14)/08 Titelnummer 8.wma
+#382: In Extremo/Unbekanntes Album (15.10.2017 20-18-14)/09 Titelnummer 9.wma
+#383: In Extremo/Unbekanntes Album (15.10.2017 20-18-14)/10 Titelnummer 10.wma
+#384: In Extremo/Unbekanntes Album (15.10.2017 20-18-14)/11 Titelnummer 11.wma
+#385: In Extremo/Unbekanntes Album (15.10.2017 20-18-14)/12 Titelnummer 12.wma
+#386: In Extremo/Unbekanntes Album (15.10.2017 20-18-14)/13 Titelnummer 13.wma
+#387: In Extremo/Unbekanntes Album (15.10.2017 20-18-14)/14 Titelnummer 14.wma
+#388: In Extremo/Unbekanntes Album (15.10.2017 20-18-14)/15 Titelnummer 15.wma
+#389: In Extremo/Unbekanntes Album (15.10.2017 20-18-14)/16 Titelnummer 16.wma
+#390: In Extremo/Unbekanntes Album (15.10.2017 20-18-14)/17 Titelnummer 17.wma
+#391: In Extremo/Unbekanntes Album (15.10.2017 20-18-14)/18 Titelnummer 18.wma
+#392: In Extremo/Unbekanntes Album (15.10.2017 20-18-14)/19 Titelnummer 19.wma
+#393: In Extremo/Unbekanntes Album (15.10.2017 20-18-14)/20 Titelnummer 20.wma
+#394: In Extremo/Unbekanntes Album (16.10.2017 20-07-49)/01 Titelnummer 1.wma
+#395: In Extremo/Unbekanntes Album (16.10.2017 20-07-49)/02 Titelnummer 2.wma
+#396: In Extremo/Unbekanntes Album (16.10.2017 20-07-49)/03 Titelnummer 3.wma
+#397: In Extremo/Unbekanntes Album (16.10.2017 20-07-49)/04 Titelnummer 4.wma
+#398: In Extremo/Unbekanntes Album (16.10.2017 20-07-49)/05 Titelnummer 5.wma
+#399: In Extremo/Unbekanntes Album (16.10.2017 20-07-49)/06 Titelnummer 6.wma
+#400: In Extremo/Unbekanntes Album (16.10.2017 20-07-49)/07 Titelnummer 7.wma
+#401: In Extremo/Unbekanntes Album (16.10.2017 20-07-49)/08 Titelnummer 8.wma
+#402: In Extremo/Unbekanntes Album (16.10.2017 20-07-49)/09 Titelnummer 9.wma
+#403: In Extremo/Unbekanntes Album (16.10.2017 20-07-49)/10 Titelnummer 10.wma
+#404: In Extremo/Unbekanntes Album (16.10.2017 20-07-49)/11 Titelnummer 11.wma
+#405: In Extremo/Unbekanntes Album (16.10.2017 20-07-49)/12 Titelnummer 12.wma
+#406: In Extremo/Unbekanntes Album (16.10.2017 20-07-49)/13 Titelnummer 13.wma
+#407: In Extremo/Unbekanntes Album (16.10.2017 20-07-49)/14 Titelnummer 14.wma
+#408: In Extremo/Unbekanntes Album (16.10.2017 20-07-49)/15 Titelnummer 15.wma
+#409: In Extremo/Unbekanntes Album (16.10.2017 20-07-49)/16 Titelnummer 16.wma
+#410: In Extremo/Unbekanntes Album (16.10.2017 20-07-49)/17 Titelnummer 17.wma
+#411: In Extremo/Unbekanntes Album (16.10.2017 20-07-49)/18 Titelnummer 18.wma
+#412: In Extremo/Unbekanntes Album (16.10.2017 20-07-49)/19 Titelnummer 19.wma
+#413: In Extremo/Unbekanntes Album (16.10.2017 20-07-49)/20 Titelnummer 20.wma
+#414: Manowar/Fighting the World/01 Fighting the World.wma
+#415: Manowar/Fighting the World/02 Blow Your Speakers.wma
+#416: Manowar/Fighting the World/03 Carry On.wma
+#417: Manowar/Fighting the World/04 Violence and Bloodshed.wma
+#418: Manowar/Fighting the World/05 Defender.wma
+#419: Manowar/Fighting the World/06 Drums of Doom.wma
+#420: Manowar/Fighting the World/07 Holy War.wma
+#421: Manowar/Fighting the World/08 Master of Revenge.wma
+#422: Manowar/Fighting the World/09 Black Wind, Fire and Steel.wma
+#423: Manowar/Gods Of War/01 Overture To The Hymn Of The Immortal Warriors.mp3
+#424: Manowar/Gods Of War/02 The Ascension.mp3
+#425: Manowar/Gods Of War/03 King Of Kings.mp3
+#426: Manowar/Gods Of War/04 Army Of The Dead, Pt. I.mp3
+#427: Manowar/Gods Of War/05 Sleipnir.mp3
+#428: Manowar/Gods Of War/06 Loki God Of Fire.mp3
+#429: Manowar/Gods Of War/07 Blood Brothers.mp3
+#430: Manowar/Gods Of War/08 Overture To Odin.mp3
+#431: Manowar/Gods Of War/09 The Blood Of Odin.mp3
+#432: Manowar/Gods Of War/10 Sons Of Odin.mp3
+#433: Manowar/Gods Of War/11 Glory Majesty Unity.mp3
+#434: Manowar/Gods Of War/12 Gods Of War.mp3
+#435: Manowar/Gods Of War/13 Army Of The Dead, Pt. II.mp3
+#436: Manowar/Gods Of War/14 Odin.mp3
+#437: Manowar/Gods Of War/15 Hymn Of The Immortal Warriors.mp3
+#438: Manowar/Gods Of War/16 Die For Metal.mp3
+#439: Manowar/Into Glory Ride Imperial Edition MMXIX/01 Warlord.mp3
+#440: Manowar/Into Glory Ride Imperial Edition MMXIX/02 Secret of Steel.mp3
+#441: Manowar/Into Glory Ride Imperial Edition MMXIX/03 Gloves of Metal.mp3
+#442: Manowar/Into Glory Ride Imperial Edition MMXIX/04 Gates of Valhalla.mp3
+#443: Manowar/Into Glory Ride Imperial Edition MMXIX/05 Hatred.mp3
+#444: Manowar/Into Glory Ride Imperial Edition MMXIX/06 Revelation (Death's Angel).mp3
+#445: Manowar/Into Glory Ride Imperial Edition MMXIX/07 March For Revenge (By the Soldiers of Death).mp3
+#446: Manowar/Louder Than Hell/01 Return of the Warlords.wma
+#447: Manowar/Louder Than Hell/02 Brothers of Metal, Pt. 1.wma
+#448: Manowar/Louder Than Hell/03 The Gods Made Heavy Metal.wma
+#449: Manowar/Louder Than Hell/04 Courage.wma
+#450: Manowar/Louder Than Hell/05 Number 1.wma
+#451: Manowar/Louder Than Hell/06 Outlaw.wma
+#452: Manowar/Louder Than Hell/07 King.wma
+#453: Manowar/Louder Than Hell/08 Today Is a Good Day to Die.wma
+#454: Manowar/Louder Than Hell/09 My Spirit Lives On.wma
+#455: Manowar/Louder Than Hell/10 The Power.wma
+#456: Manowar/The Final Battle I [EP]/01 March Of The Heroes Into Valhalla.wma
+#457: Manowar/The Final Battle I [EP]/02 Blood And Steel.wma
+#458: Manowar/The Final Battle I [EP]/03 Sword Of The Highlands.wma
+#459: Manowar/The Final Battle I [EP]/04 You Shall Die Before I Die.wma
+#460: Manowar/The Lord Of Steel [Retail Edition]/01 The Lord Of Steel.wma
+#461: Manowar/The Lord Of Steel [Retail Edition]/02 Manowarriors.wma
+#462: Manowar/The Lord Of Steel [Retail Edition]/03 Born In A Grave.wma
+#463: Manowar/The Lord Of Steel [Retail Edition]/04 Righteous Glory.wma
+#464: Manowar/The Lord Of Steel [Retail Edition]/05 Touch The Sky.wma
+#465: Manowar/The Lord Of Steel [Retail Edition]/06 Black List.wma
+#466: Manowar/The Lord Of Steel [Retail Edition]/07 Expendable.wma
+#467: Manowar/The Lord Of Steel [Retail Edition]/08 El Gringo.wma
+#468: Manowar/The Lord Of Steel [Retail Edition]/09 Anihilation.wma
+#469: Manowar/The Lord Of Steel [Retail Edition]/10 Hail Kill And Die.wma
+#470: Manowar/The Lord Of Steel [Retail Edition]/11 The Kingdom Of Steel.wma
+#471: Manowar/The Triumph Of Steel/01 Achilles, Agony And Ecstasy In Eight Parts.wma
+#472: Manowar/The Triumph Of Steel/02 Metal Warriors.wma
+#473: Manowar/The Triumph Of Steel/03 Ride The Dragon.wma
+#474: Manowar/The Triumph Of Steel/04 Spirit Horse Of The Cherokee.wma
+#475: Manowar/The Triumph Of Steel/05 Burning.wma
+#476: Manowar/The Triumph Of Steel/06 The Power Of Thy Sword.wma
+#477: Manowar/The Triumph Of Steel/07 The Demon's Whip.wma
+#478: Manowar/The Triumph Of Steel/08 Master Of The Wind.wma
+#479: Manowar/Thunder In The Sky [EP] [Disc 1]/01 Thunder In The Sky.wma
+#480: Manowar/Thunder In The Sky [EP] [Disc 1]/02 Let The Gods Decide.wma
+#481: Manowar/Thunder In The Sky [EP] [Disc 1]/03 Father.wma
+#482: Manowar/Thunder In The Sky [EP] [Disc 1]/04 Die With Honor [Edit Version].wma
+#483: Manowar/Thunder In The Sky [EP] [Disc 1]/05 The Crown And The Ring [Metal Version].wma
+#484: Manowar/Thunder In The Sky [EP] [Disc 1]/06 God Or Man.wma
+#485: Manowar/Thunder In The Sky [EP] [Disc 2]/01 Татко (Father - Bulgarian Version).mp3
+#486: Manowar/Thunder In The Sky [EP] [Disc 2]/02 Otac (Father - Croatian Version).mp3
+#487: Manowar/Thunder In The Sky [EP] [Disc 2]/03 Isä (Father - Finnish Version).mp3
+#488: Manowar/Thunder In The Sky [EP] [Disc 2]/04 Mon Père (Father - French Version).mp3
+#489: Manowar/Thunder In The Sky [EP] [Disc 2]/05 Vater (Father - German Version).mp3
+#490: Manowar/Thunder In The Sky [EP] [Disc 2]/06 Πατέρα (Father - Greek Version).mp3
+#491: Manowar/Thunder In The Sky [EP] [Disc 2]/07 Apa (Father - Hungarian Version).mp3
+#492: Manowar/Thunder In The Sky [EP] [Disc 2]/08 Padre (Father - Italian Version).mp3
+#493: Manowar/Thunder In The Sky [EP] [Disc 2]/09 父 (Father - Japanese Version).mp3
+#494: Manowar/Thunder In The Sky [EP] [Disc 2]/10 Far (Father - Norwegian Version).mp3
+#495: Manowar/Thunder In The Sky [EP] [Disc 2]/11 Ojciec (Father - Polish Version).mp3
+#496: Manowar/Thunder In The Sky [EP] [Disc 2]/12 Pai (Father - Portuguese Version).mp3
+#497: Manowar/Thunder In The Sky [EP] [Disc 2]/13 Tată (Father - Romanian Version).mp3
+#498: Manowar/Thunder In The Sky [EP] [Disc 2]/14 Padre (Father - Spanish Version).mp3
+#499: Manowar/Thunder In The Sky [EP] [Disc 2]/15 Baba (Father - Turkish Version).mp3
+#500: Manowar/Warriors of the World/01 Call to Arms.wma
+#501: Manowar/Warriors of the World/02 The Fight for Freedom.wma
+#502: Manowar/Warriors of the World/03 Nessun Dorma.wma
+#503: Manowar/Warriors of the World/04 Valhalla.wma
+#504: Manowar/Warriors of the World/05 Swords in the Wind.wma
+#505: Manowar/Warriors of the World/06 An American Trilogy.wma
+#506: Manowar/Warriors of the World/08 Warriors of the World United.wma
+#507: Motörhead/Overkill [Bonus Track Edition]/01 Overkill.mp3
+#508: Motörhead/Overkill [Bonus Track Edition]/02 Stay Clean.mp3
+#509: Motörhead/Overkill [Bonus Track Edition]/03 (I Won't) Pay Your Price.mp3
+#510: Motörhead/Overkill [Bonus Track Edition]/04 I'll Be Your Sister.mp3
+#511: Motörhead/Overkill [Bonus Track Edition]/05 Capricorn.mp3
+#512: Motörhead/Overkill [Bonus Track Edition]/06 No Class.mp3
+#513: Motörhead/Overkill [Bonus Track Edition]/07 Damage Case.mp3
+#514: Motörhead/Overkill [Bonus Track Edition]/08 Tear Ya Down.mp3
+#515: Motörhead/Overkill [Bonus Track Edition]/09 Metropolis.mp3
+#516: Motörhead/Overkill [Bonus Track Edition]/10 Limb From Limb.mp3
+#517: Motörhead/Overkill [Bonus Track Edition]/11 Too Late, Too Late.mp3
+#518: Motörhead/Overkill [Bonus Track Edition]/12 Like A Nightmare.mp3
+#519: Motörhead/Overkill [Bonus Track Edition]/13 Louie Louie.mp3
+#520: Motörhead/Overkill [Bonus Track Edition]/14 Tear Ya Down [Instrumental].mp3
+#521: Motörhead/Overkill [Bonus Track Edition]/15 Louie Louie (Alternate Version).mp3
+#522: Motörhead/The Best Of Motörhead [Disc 1]/01 Ace Of Spades.wma
+#523: Motörhead/The Best Of Motörhead [Disc 1]/02 Overkill.wma
+#524: Motörhead/The Best Of Motörhead [Disc 1]/03 Bomber.wma
+#525: Motörhead/The Best Of Motörhead [Disc 1]/04 Please Don't Touch.wma
+#526: Motörhead/The Best Of Motörhead [Disc 1]/05 Motörhead.wma
+#527: Motörhead/The Best Of Motörhead [Disc 1]/06 No Class.wma
+#528: Motörhead/The Best Of Motörhead [Disc 1]/07 Louie Louie.wma
+#529: Motörhead/The Best Of Motörhead [Disc 1]/08 Damage Case.wma
+#530: Motörhead/The Best Of Motörhead [Disc 1]/09 Too Late Too Late.wma
+#531: Motörhead/The Best Of Motörhead [Disc 1]/12 Metropolis.wma
+#532: Motörhead/The Best Of Motörhead [Disc 1]/14 Tear Ya Down.wma
+#533: Motörhead/The Best Of Motörhead [Disc 1]/16 Iron Horse - Born To Lose.wma
+#534: Motörhead/The Best Of Motörhead [Disc 2]/01 Iron Fist.wma
+#535: Motörhead/The Best Of Motörhead [Disc 2]/02 Heart Of Stone.wma
+#536: Motörhead/The Best Of Motörhead [Disc 2]/03 Bomber.wma
+#537: Motörhead/The Best Of Motörhead [Disc 2]/04 Shine.wma
+#538: Motörhead/The Best Of Motörhead [Disc 2]/07 Doctor Rock.wma
+#539: Motörhead/The Best Of Motörhead [Disc 2]/11 Eat The Rich.wma
+#540: Motörhead/The Best Of Motörhead [Disc 2]/13 Dogs.wma
+#541: Motörhead/The Best Of Motörhead [Disc 2]/15 Sacrifice.wma
+#542: Motörhead/The Best Of Motörhead [Disc 2]/20 The Hammer [Live].wma
+#543: Motörhead/Under Cöver/01 Breaking The Law.wma
+#544: Motörhead/Under Cöver/02 God Save The Queen.wma
+#545: Motörhead/Under Cöver/03 Heroes.wma
+#546: Motörhead/Under Cöver/04 Starstruck.wma
+#547: Motörhead/Under Cöver/05 Cat Scratch Fever.wma
+#548: Motörhead/Under Cöver/06 Jumpin' Jack Flash.wma
+#549: Motörhead/Under Cöver/07 Sympathy For The Devil.wma
+#550: Motörhead/Under Cöver/08 Hellraiser.wma
+#551: Motörhead/Under Cöver/09 Rockaway Beach.wma
+#552: Motörhead/Under Cöver/10 Shoot 'Em Down.wma
+#553: Motörhead/Under Cöver/11 Whiplash.wma
+#554: Wind Rose/Wintersaga/01 Of Iron And Gold.mp3
+#555: Wind Rose/Wintersaga/02 Wintersaga.mp3
+#556: Wind Rose/Wintersaga/03 Drunken Dwarves.mp3
+#557: Wind Rose/Wintersaga/04 Diggy Diggy Hole.mp3
+#558: Wind Rose/Wintersaga/05 Mine Mine Mine!.mp3
+#559: Wind Rose/Wintersaga/06 The Art Of War.mp3
+#560: Wind Rose/Wintersaga/07 There And Back Again.mp3
+#561: Wind Rose/Wintersaga/08 The King Under The Mountain.mp3
+#562: Wind Rose/Wintersaga/09 We Were Warriors.mp3
+#563: Within Temptation/Mother Earth/01 Mother Earth.mp3
+#564: Within Temptation/Mother Earth/02 Ice Queen.mp3
+#565: Within Temptation/Mother Earth/03 Our Farewell.mp3
+#566: Within Temptation/Mother Earth/04 Caged.mp3
+#567: Within Temptation/Mother Earth/05 The Promise.mp3
+#568: Within Temptation/Mother Earth/06 Never-Ending Story.mp3
+#569: Within Temptation/Mother Earth/07 Deceiver Of Fools.mp3
+#570: Within Temptation/Mother Earth/08 Intro.mp3
+#571: Within Temptation/Mother Earth/09 Dark Wings.mp3
+#572: Within Temptation/Mother Earth/10 In Perfect Harmony.mp3
+#573: Within Temptation/Mother Earth/11 Restless.mp3
+#574: Within Temptation/Mother Earth/12 Bittersweet.mp3
+#575: Within Temptation/Mother Earth/13 Enter [Live].mp3
+#576: Within Temptation/Mother Earth/14 The Dance [Live].mp3

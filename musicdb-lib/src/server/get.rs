@@ -133,26 +133,35 @@ impl<T: Write + Read> Client<T> {
                     len_line[1..].trim()
                 );
             } else {
-                let mut read_list = || -> std::io::Result<Result<Vec<String>, String>> {
-                    if len_line.starts_with("len: ") {
-                        if let Ok(len) = len_line[4..].trim().parse() {
-                            let mut out = Vec::with_capacity(len);
-                            for _ in 0..len {
-                                let mut line = String::new();
-                                self.0.read_line(&mut line)?;
-                                let line = line.trim_end_matches(['\n', '\r']);
-                                out.push(line.trim().to_owned());
-                            }
-                            Ok(Ok(out))
+                let len_line = len_line.to_owned();
+                let mut read_list =
+                    |l: Option<String>| -> std::io::Result<Result<Vec<String>, String>> {
+                        let len_line = if let Some(l) = &l {
+                            l.as_str()
                         } else {
-                            Ok(Err(format!("bad len in len-line: {len_line}")))
+                            response.clear();
+                            self.0.read_line(&mut response)?;
+                            response.trim()
+                        };
+                        if len_line.starts_with("len: ") {
+                            if let Ok(len) = len_line[4..].trim().parse() {
+                                let mut out = Vec::with_capacity(len);
+                                for _ in 0..len {
+                                    let mut line = String::new();
+                                    self.0.read_line(&mut line)?;
+                                    let line = line.trim_end_matches(['\n', '\r']);
+                                    out.push(line.trim().to_owned());
+                                }
+                                Ok(Ok(out))
+                            } else {
+                                Ok(Err(format!("bad len in len-line: {len_line}")))
+                            }
+                        } else {
+                            Ok(Err(format!("bad len-line: {len_line}")))
                         }
-                    } else {
-                        Ok(Err(format!("bad len-line: {len_line}")))
-                    }
-                };
+                    };
                 break Ok(Ok((
-                    match read_list()? {
+                    match read_list(Some(len_line))? {
                         Ok(v) => match v
                             .into_iter()
                             .map(|v| v.trim().parse::<SongId>().map_err(|e| (v, e.to_string())))
@@ -165,7 +174,7 @@ impl<T: Write + Read> Client<T> {
                         },
                         Err(e) => return Ok(Err(e)),
                     },
-                    match read_list()? {
+                    match read_list(None)? {
                         Ok(v) => match v
                             .into_iter()
                             .map(|v| {
@@ -189,7 +198,7 @@ impl<T: Write + Read> Client<T> {
                         },
                         Err(e) => return Ok(Err(e)),
                     },
-                    match read_list()? {
+                    match read_list(None)? {
                         Ok(v) => match v
                             .into_iter()
                             .map(|v| v.trim().parse::<SongId>().map_err(|e| (v, e)))
@@ -202,7 +211,7 @@ impl<T: Write + Read> Client<T> {
                         },
                         Err(e) => return Ok(Err(e)),
                     },
-                    match read_list()? {
+                    match read_list(None)? {
                         Ok(v) => match v
                             .into_iter()
                             .map(|v| {

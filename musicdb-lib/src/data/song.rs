@@ -248,7 +248,7 @@ impl Display for Song {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.title)?;
         match self.album {
-            Some(album) => write!(f, " (by {} on {album})", self.artist)?,
+            Some(album) => write!(f, " ({} by {} on {album})", self.id, self.artist)?,
             None => write!(f, " (by {})", self.artist)?,
         }
         Ok(())
