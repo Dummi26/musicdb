@@ -249,7 +249,7 @@ impl Display for Song {
         write!(f, "{}", self.title)?;
         match self.album {
             Some(album) => write!(f, " ({} by {} on {album})", self.id, self.artist)?,
-            None => write!(f, " (by {})", self.artist)?,
+            None => write!(f, " ({} by {})", self.id, self.artist)?,
         }
         Ok(())
     }
