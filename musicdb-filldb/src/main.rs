@@ -4,7 +4,7 @@ use std::{
     fs,
     io::Write,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex}, time::SystemTime,
 };
 
 use id3::TagLike;
@@ -12,7 +12,7 @@ use musicdb_lib::data::{
     album::Album,
     artist::Artist,
     database::{Cover, Database},
-    song::{CachedData, Song},
+    song::Song,
     CoverId, DatabaseLocation, GeneralData,
 };
 
@@ -218,18 +218,45 @@ fn main() {
                     .to_string_lossy()
                     .into_owned()
             });
-        database.add_song_new(Song {
-            id: 0,
-            title: title.clone(),
-            location: DatabaseLocation {
+        database.add_song_new(Song::new(
+            DatabaseLocation {
                 rel_path: path.to_path_buf(),
             },
-            album: album_id,
-            artist: artist_id,
-            more_artists: vec![],
-            cover: None,
-            file_size: song_file_metadata.len(),
-            duration_millis: if let Some(dur) = song_tags.duration() {
+            match path.metadata() {
+                Ok(v) => match v.modified() {
+                    Ok(v) => if let Ok(time) = v.duration_since(SystemTime::UNIX_EPOCH) {
+                        Some(time.as_secs())
+                    } else {
+                        eprintln!(
+                            "LastModified time of song {:?} is before the UNIX-EPOCH, setting `None`.",
+                            song_path
+                        );
+                        None
+                    },
+                    Err(e) => {
+                        eprintln!(
+                            "LastModified time of song {:?} not available: {e}.",
+                            song_path
+                        );
+                        None
+                    }
+                }
+                Err(e) => {
+                    eprintln!(
+                        "LastModified time of song {:?} could not be read: {e}.",
+                        song_path
+                    );
+                    None
+                    
+                }
+            },
+            title.clone(),
+            album_id,
+            artist_id,
+            vec![],
+            None,
+            song_file_metadata.len(),
+            if let Some(dur) = song_tags.duration() {
                 dur as u64
             } else {
                 if skip_duration {
@@ -249,8 +276,7 @@ fn main() {
                 }
             },
             general,
-            cached_data: CachedData(Arc::new(Mutex::new((None, None)))),
-        });
+        ));
     }
     eprintln!("searching for covers...");
     let mut multiple_cover_options = vec![];

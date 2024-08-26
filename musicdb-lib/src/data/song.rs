@@ -21,6 +21,7 @@ use super::{
 pub struct Song {
     pub id: SongId,
     pub location: DatabaseLocation,
+    pub file_last_modified_unix_timestamp: Option<u64>,
     pub title: String,
     pub album: Option<AlbumId>,
     pub artist: ArtistId,
@@ -38,6 +39,7 @@ pub struct Song {
 impl Song {
     pub fn new(
         location: DatabaseLocation,
+        file_last_modified_unix_timestamp: Option<u64>,
         title: String,
         album: Option<AlbumId>,
         artist: ArtistId,
@@ -45,10 +47,12 @@ impl Song {
         cover: Option<CoverId>,
         file_size: u64,
         duration_millis: u64,
+        general: GeneralData,
     ) -> Self {
         Self {
             id: 0,
             location,
+            file_last_modified_unix_timestamp,
             title,
             album,
             artist,
@@ -56,7 +60,7 @@ impl Song {
             cover,
             file_size,
             duration_millis,
-            general: GeneralData::default(),
+            general,
             cached_data: CachedData(Arc::new(Mutex::new((Err(None), None)))),
         }
     }
@@ -258,6 +262,7 @@ impl ToFromBytes for Song {
     {
         self.id.to_bytes(s)?;
         self.location.to_bytes(s)?;
+        self.file_last_modified_unix_timestamp.to_bytes(s)?;
         self.title.to_bytes(s)?;
         self.album.to_bytes(s)?;
         self.artist.to_bytes(s)?;
@@ -275,6 +280,7 @@ impl ToFromBytes for Song {
         Ok(Self {
             id: ToFromBytes::from_bytes(s)?,
             location: ToFromBytes::from_bytes(s)?,
+            file_last_modified_unix_timestamp: ToFromBytes::from_bytes(s)?,
             title: ToFromBytes::from_bytes(s)?,
             album: ToFromBytes::from_bytes(s)?,
             artist: ToFromBytes::from_bytes(s)?,

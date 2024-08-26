@@ -3,7 +3,7 @@ use std::{
     collections::{BTreeSet, HashMap},
     fs::{self, File},
     io::{BufReader, Read, Write},
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{mpsc, Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -73,7 +73,10 @@ impl Database {
         self.client_is_init
     }
     pub fn get_path(&self, location: &DatabaseLocation) -> PathBuf {
-        self.lib_directory.join(&location.rel_path)
+        Self::get_path_nodb(&self.lib_directory, location)
+    }
+    pub fn get_path_nodb(lib_directory: &impl AsRef<Path>, location: &DatabaseLocation) -> PathBuf {
+        lib_directory.as_ref().join(&location.rel_path)
     }
     fn modified_data(&mut self) {
         let now = Instant::now();

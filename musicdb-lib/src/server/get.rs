@@ -3,7 +3,7 @@ use std::{
     io::{BufRead, BufReader, Read, Write},
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
-    time::Instant,
+    time::{Instant, SystemTime},
 };
 
 use crate::data::{database::Database, CoverId, SongId};
@@ -102,6 +102,134 @@ impl<T: Write + Read> Client<T> {
             Ok(Err(response))
         }
     }
+    /// find songs which have no last-modified time, whose time has changed, whose files have been removed or whose files could not be read due to another error.
+    pub fn find_songs_with_changed_files(
+        &mut self,
+    ) -> Result<
+        Result<
+            (
+                Vec<SongId>,
+                Vec<(SongId, u64)>,
+                Vec<SongId>,
+                Vec<(SongId, String)>,
+            ),
+            String,
+        >,
+        std::io::Error,
+    > {
+        writeln!(
+            self.0.get_mut(),
+            "{}",
+            con_get_encode_string("find-songs-with-changed-files")
+        )?;
+        self.0.get_mut().flush()?;
+        loop {
+            let mut response = String::new();
+            self.0.read_line(&mut response)?;
+            let len_line = response.trim();
+            if len_line.starts_with('%') {
+                eprintln!(
+                    "[Find Songs With Changed Files] Status: {}",
+                    len_line[1..].trim()
+                );
+            } else {
+                let mut read_list = || -> std::io::Result<Result<Vec<String>, String>> {
+                    if len_line.starts_with("len: ") {
+                        if let Ok(len) = len_line[4..].trim().parse() {
+                            let mut out = Vec::with_capacity(len);
+                            for _ in 0..len {
+                                let mut line = String::new();
+                                self.0.read_line(&mut line)?;
+                                let line = line.trim_end_matches(['\n', '\r']);
+                                out.push(line.trim().to_owned());
+                            }
+                            Ok(Ok(out))
+                        } else {
+                            Ok(Err(format!("bad len in len-line: {len_line}")))
+                        }
+                    } else {
+                        Ok(Err(format!("bad len-line: {len_line}")))
+                    }
+                };
+                break Ok(Ok((
+                    match read_list()? {
+                        Ok(v) => match v
+                            .into_iter()
+                            .map(|v| v.trim().parse::<SongId>().map_err(|e| (v, e.to_string())))
+                            .collect()
+                        {
+                            Ok(v) => v,
+                            Err((s, e)) => {
+                                return Ok(Err(format!("error parsing songid(notime) '{s}': {e}")))
+                            }
+                        },
+                        Err(e) => return Ok(Err(e)),
+                    },
+                    match read_list()? {
+                        Ok(v) => match v
+                            .into_iter()
+                            .map(|v| {
+                                v.trim()
+                                    .split_once(':')
+                                    .ok_or_else(|| format!("missing colon"))
+                                    .and_then(|(i, t)| {
+                                        Ok((
+                                            i.parse::<SongId>().map_err(|e| e.to_string())?,
+                                            t.parse::<u64>().map_err(|e| e.to_string())?,
+                                        ))
+                                    })
+                                    .map_err(|e| (v, e))
+                            })
+                            .collect()
+                        {
+                            Ok(v) => v,
+                            Err((s, e)) => {
+                                return Ok(Err(format!("error parsing songid+time '{s}': {e}")))
+                            }
+                        },
+                        Err(e) => return Ok(Err(e)),
+                    },
+                    match read_list()? {
+                        Ok(v) => match v
+                            .into_iter()
+                            .map(|v| v.trim().parse::<SongId>().map_err(|e| (v, e)))
+                            .collect()
+                        {
+                            Ok(v) => v,
+                            Err((s, e)) => {
+                                return Ok(Err(format!("error parsing songid(deleted) '{s}': {e}")))
+                            }
+                        },
+                        Err(e) => return Ok(Err(e)),
+                    },
+                    match read_list()? {
+                        Ok(v) => match v
+                            .into_iter()
+                            .map(|v| {
+                                v.trim()
+                                    .split_once(':')
+                                    .ok_or_else(|| format!("missing colon"))
+                                    .and_then(|(i, t)| {
+                                        Ok((
+                                            i.parse::<SongId>().map_err(|e| e.to_string())?,
+                                            t.to_owned(),
+                                        ))
+                                    })
+                                    .map_err(|e| (v, e))
+                            })
+                            .collect()
+                        {
+                            Ok(v) => v,
+                            Err((s, e)) => {
+                                return Ok(Err(format!("error parsing songid+error '{s}': {e}")))
+                            }
+                        },
+                        Err(e) => return Ok(Err(e)),
+                    },
+                )));
+            };
+        }
+    }
     /// tell the server to search for files that are not in its song database.
     ///
     /// ## `extensions`:
@@ -109,6 +237,8 @@ impl<T: Write + Read> Client<T> {
     /// If `Some([])`, allow all extensions, even ones like `.jpg` and files without extensions.
     /// If `Some(...)`, only allow the specified extensions. Note: These are actually suffixes, for example `mp3` would allow a file named `test_mp3`, while `.mp3` would only allow `test.mp3`.
     /// Because of this, you usually want to include the `.` before the extension, and double extensions like `.tar.gz` are also supported.
+    ///
+    /// For each file, returns a boolean error flag indicating, if `true`, that the path was invalid (not UTF-8 or contained a newline).
     pub fn find_unused_song_files(
         &mut self,
         extensions: Option<&[&str]>,
@@ -315,6 +445,91 @@ pub fn handle_one_connection_as_get(
                             connection.get_mut().write_all(&bytes)?;
                         } else {
                             writeln!(connection.get_mut(), "no data")?;
+                        }
+                    }
+                    "find-songs-with-changed-files" => {
+                        let db_lock = db.lock().unwrap();
+                        let lib_directory = db_lock.lib_directory.clone();
+                        let all_songs = db_lock
+                            .songs()
+                            .iter()
+                            .map(|(id, song)| {
+                                (
+                                    *id,
+                                    song.location.clone(),
+                                    song.file_last_modified_unix_timestamp.clone(),
+                                )
+                            })
+                            .collect::<Vec<_>>();
+                        drop(db_lock);
+                        let (
+                            mut songs_no_time,
+                            mut songs_new_time,
+                            mut songs_removed,
+                            mut songs_err,
+                        ) = (vec![], vec![], vec![], vec![]);
+                        for (id, location, last_modified) in all_songs {
+                            let path = Database::get_path_nodb(&lib_directory, &location);
+                            match path.try_exists() {
+                                Ok(true) => match path.metadata() {
+                                    Ok(metadata) => {
+                                        let time = metadata.modified().ok().and_then(|time| {
+                                            time.duration_since(SystemTime::UNIX_EPOCH)
+                                                .ok()
+                                                .map(|v| v.as_secs())
+                                        });
+                                        if last_modified.is_none() || time != last_modified {
+                                            if let Some(time) = time {
+                                                songs_new_time.push((id, time));
+                                            } else {
+                                                songs_no_time.push(id);
+                                            }
+                                        }
+                                    }
+                                    Err(e) => songs_err.push((id, e.to_string())),
+                                },
+                                Ok(false) => songs_removed.push(id),
+                                Err(e) => songs_err.push((id, e.to_string())),
+                            }
+                        }
+                        write_list(
+                            connection.get_mut(),
+                            songs_no_time.len(),
+                            songs_no_time.into_iter().map(|id| (id, None)),
+                        )?;
+                        write_list(
+                            connection.get_mut(),
+                            songs_new_time.len(),
+                            songs_new_time
+                                .into_iter()
+                                .map(|(id, t)| (id, Some(format!("{t}")))),
+                        )?;
+                        write_list(
+                            connection.get_mut(),
+                            songs_removed.len(),
+                            songs_removed.into_iter().map(|id| (id, None)),
+                        )?;
+                        write_list(
+                            connection.get_mut(),
+                            songs_err.len(),
+                            songs_err
+                                .into_iter()
+                                .map(|(id, e)| (id, Some(format!("{e}")))),
+                        )?;
+                        fn write_list(
+                            connection: &mut impl Write,
+                            len: usize,
+                            list: impl IntoIterator<Item = (u64, Option<String>)>,
+                        ) -> std::io::Result<()> {
+                            writeln!(connection, "len: {}", len)?;
+                            for (song, data) in list {
+                                if let Some(data) = data {
+                                    writeln!(connection, "{song}:{data}")?;
+                                } else {
+                                    writeln!(connection, "{song}")?;
+                                }
+                            }
+                            Ok(())
                         }
                     }
                     "find-unused-song-files" => {
