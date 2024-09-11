@@ -12,8 +12,8 @@ directories = "5.0.1"
 regex = "1.9.3"
 speedy2d = { version = "1.12.0", optional = true }
 toml = "0.7.6"
-mers_lib = { version = "0.3.2", optional = true }
-musicdb-mers = { version = "0.1.0", path = "../musicdb-mers", optional = true }
+# mers_lib = { version = "0.3.2", optional = true }
+# musicdb-mers = { version = "0.1.0", path = "../musicdb-mers", optional = true }
 uianimator = "0.1.1"
 
 [features]
@@ -27,6 +27,6 @@ default = ["gui", "playback"]
 # playback:
 #   enables syncplayer modes, where the client mirrors the server's playback
 gui = ["speedy2d"]
-merscfg = ["mers_lib", "musicdb-mers", "speedy2d"]
-mers = ["mers_lib", "musicdb-mers"]
+# merscfg = ["mers_lib", "musicdb-mers", "speedy2d"]
+# mers = ["mers_lib", "musicdb-mers"]
 playback = ["musicdb-lib/playback"]
