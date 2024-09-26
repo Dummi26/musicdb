@@ -264,24 +264,35 @@ fn main() {
         }
         #[cfg(feature = "mers")]
         Mode::RunMers { path } => {
-            let mut src = mers_lib::prelude_compile::Source::new_from_file(path).unwrap();
+            let mut src =
+                musicdb_mers::mers_lib::prelude_compile::Source::new_from_file(path).unwrap();
             let srca = Arc::new(src.clone());
             let con = Mutex::new(con);
             let (mut i1, mut i2, mut i3) = musicdb_mers::add(
-                mers_lib::prelude_compile::Config::new().bundle_std(),
+                musicdb_mers::mers_lib::prelude_compile::Config::new().bundle_std(),
                 &database,
                 &Arc::new(move |cmd: Command| cmd.to_bytes(&mut *con.lock().unwrap()).unwrap()),
                 &mers_after_db_updated_action,
             )
             .infos();
-            let program = mers_lib::prelude_compile::parse(&mut src, &srca)
-                .unwrap()
-                .compile(&mut i1, mers_lib::prelude_compile::CompInfo::default())
-                .unwrap();
+            let program = match musicdb_mers::mers_lib::prelude_compile::parse(&mut src, &srca) {
+                Ok(p) => p,
+                Err(e) => {
+                    eprintln!("{}", e.display_term());
+                    std::process::exit(60);
+                }
+            };
+            let program = match program.compile(&mut i1, Default::default()) {
+                Ok(p) => p,
+                Err(e) => {
+                    eprintln!("{}", e.display_term());
+                    std::process::exit(60);
+                }
+            };
             match program.check(&mut i3, None) {
                 Ok(_) => {}
                 Err(e) => {
-                    eprintln!("{e}");
+                    eprintln!("{}", e.display_term());
                     std::process::exit(60);
                 }
             };
@@ -293,7 +304,9 @@ fn main() {
                     break;
                 }
             }
-            program.run(&mut i2);
+            if let Err(e) = program.run(&mut i2) {
+                eprintln!("{}", e.display_term());
+            }
         }
     }
 }

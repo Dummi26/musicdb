@@ -15,7 +15,7 @@ use speedy2d::{
 };
 
 use crate::{
-    gui::{Dragging, DrawInfo, GuiAction, GuiElem, GuiElemCfg},
+    gui::{Dragging, DrawInfo, EventInfo, GuiAction, GuiElem, GuiElemCfg},
     gui_base::{Panel, ScrollBox},
     gui_text::{self, AdvancedLabel, Label, TextField},
 };
@@ -399,7 +399,8 @@ impl GuiElem for QueueEmptySpaceDragHandler {
     fn elem_mut(&mut self) -> &mut dyn GuiElem {
         self
     }
-    fn dragged(&mut self, dragged: Dragging) -> Vec<GuiAction> {
+    fn dragged(&mut self, e: &mut EventInfo, dragged: Dragging) -> Vec<GuiAction> {
+        e.take();
         dragged_add_to_queue(
             dragged,
             (),
@@ -551,17 +552,17 @@ impl GuiElem for QueueSong {
     fn elem_mut(&mut self) -> &mut dyn GuiElem {
         self
     }
-    fn mouse_down(&mut self, button: MouseButton) -> Vec<GuiAction> {
-        if button == MouseButton::Left {
+    fn mouse_down(&mut self, e: &mut EventInfo, button: MouseButton) -> Vec<GuiAction> {
+        if button == MouseButton::Left && e.take() {
             self.mouse = true;
             self.copy_on_mouse_down = self.copy;
         }
         vec![]
     }
-    fn mouse_up(&mut self, button: MouseButton) -> Vec<GuiAction> {
+    fn mouse_up(&mut self, e: &mut EventInfo, button: MouseButton) -> Vec<GuiAction> {
         if self.mouse && button == MouseButton::Left {
             self.mouse = false;
-            if !self.always_copy {
+            if e.take() && !self.always_copy {
                 vec![GuiAction::SendToServer(Command::QueueGoto(
                     self.path.clone(),
                 ))]
@@ -612,6 +613,7 @@ impl GuiElem for QueueSong {
     }
     fn key_watch(
         &mut self,
+        _e: &mut EventInfo,
         modifiers: ModifiersState,
         _down: bool,
         _key: Option<VirtualKeyCode>,
@@ -620,8 +622,9 @@ impl GuiElem for QueueSong {
         self.copy = self.always_copy || modifiers.ctrl();
         vec![]
     }
-    fn dragged(&mut self, dragged: Dragging) -> Vec<GuiAction> {
+    fn dragged(&mut self, e: &mut EventInfo, dragged: Dragging) -> Vec<GuiAction> {
         if !self.always_copy {
+            e.take();
             let insert_below = self.insert_below;
             dragged_add_to_queue(
                 dragged,
@@ -775,11 +778,11 @@ impl GuiElem for QueueFolder {
             self.copy_on_mouse_down,
         );
     }
-    fn mouse_down(&mut self, button: MouseButton) -> Vec<GuiAction> {
-        if button == MouseButton::Left {
+    fn mouse_down(&mut self, e: &mut EventInfo, button: MouseButton) -> Vec<GuiAction> {
+        if button == MouseButton::Left && e.take() {
             self.mouse = true;
             self.copy_on_mouse_down = self.copy;
-        } else if button == MouseButton::Right {
+        } else if button == MouseButton::Right && e.take() {
             // return vec![GuiAction::ContextMenu(Some(vec![Box::new(
             //     Panel::with_background(GuiElemCfg::default(), (), Color::DARK_GRAY),
             // )]))];
@@ -791,10 +794,10 @@ impl GuiElem for QueueFolder {
         }
         vec![]
     }
-    fn mouse_up(&mut self, button: MouseButton) -> Vec<GuiAction> {
+    fn mouse_up(&mut self, e: &mut EventInfo, button: MouseButton) -> Vec<GuiAction> {
         if self.mouse && button == MouseButton::Left {
             self.mouse = false;
-            if !self.always_copy {
+            if e.take() && !self.always_copy {
                 vec![GuiAction::SendToServer(Command::QueueGoto(
                     self.path.clone(),
                 ))]
@@ -807,6 +810,7 @@ impl GuiElem for QueueFolder {
     }
     fn key_watch(
         &mut self,
+        _e: &mut EventInfo,
         modifiers: ModifiersState,
         _down: bool,
         _key: Option<VirtualKeyCode>,
@@ -815,8 +819,9 @@ impl GuiElem for QueueFolder {
         self.copy = modifiers.ctrl();
         vec![]
     }
-    fn dragged(&mut self, dragged: Dragging) -> Vec<GuiAction> {
+    fn dragged(&mut self, e: &mut EventInfo, dragged: Dragging) -> Vec<GuiAction> {
         if !self.always_copy {
+            e.take();
             if self.insert_into {
                 dragged_add_to_queue(
                     dragged,
@@ -893,7 +898,8 @@ impl GuiElem for QueueIndentEnd {
             );
         }
     }
-    fn dragged(&mut self, dragged: Dragging) -> Vec<GuiAction> {
+    fn dragged(&mut self, e: &mut EventInfo, dragged: Dragging) -> Vec<GuiAction> {
+        e.take();
         dragged_add_to_queue(
             dragged,
             self.path_insert.clone(),
@@ -987,8 +993,8 @@ impl GuiElem for QueueLoop {
     fn elem_mut(&mut self) -> &mut dyn GuiElem {
         self
     }
-    fn mouse_wheel(&mut self, diff: f32) -> Vec<GuiAction> {
-        if self.always_copy {
+    fn mouse_wheel(&mut self, e: &mut EventInfo, diff: f32) -> Vec<GuiAction> {
+        if self.always_copy && e.take() {
             if let QueueContent::Loop(total, _, _) = self.queue.content_mut() {
                 if diff > 0.0 {
                     *total += 1;
@@ -1020,17 +1026,17 @@ impl GuiElem for QueueLoop {
             self.copy_on_mouse_down,
         );
     }
-    fn mouse_down(&mut self, button: MouseButton) -> Vec<GuiAction> {
-        if button == MouseButton::Left {
+    fn mouse_down(&mut self, e: &mut EventInfo, button: MouseButton) -> Vec<GuiAction> {
+        if button == MouseButton::Left && e.take() {
             self.mouse = true;
             self.copy_on_mouse_down = self.copy;
         }
         vec![]
     }
-    fn mouse_up(&mut self, button: MouseButton) -> Vec<GuiAction> {
+    fn mouse_up(&mut self, e: &mut EventInfo, button: MouseButton) -> Vec<GuiAction> {
         if self.mouse && button == MouseButton::Left {
             self.mouse = false;
-            if !self.always_copy {
+            if e.take() && !self.always_copy {
                 vec![GuiAction::SendToServer(Command::QueueGoto(
                     self.path.clone(),
                 ))]
@@ -1043,6 +1049,7 @@ impl GuiElem for QueueLoop {
     }
     fn key_watch(
         &mut self,
+        _e: &mut EventInfo,
         modifiers: ModifiersState,
         _down: bool,
         _key: Option<VirtualKeyCode>,
@@ -1051,8 +1058,9 @@ impl GuiElem for QueueLoop {
         self.copy = modifiers.ctrl();
         vec![]
     }
-    fn dragged(&mut self, dragged: Dragging) -> Vec<GuiAction> {
+    fn dragged(&mut self, e: &mut EventInfo, dragged: Dragging) -> Vec<GuiAction> {
         if !self.always_copy {
+            e.take();
             let mut p = self.path.clone();
             p.push(0);
             dragged_add_to_queue(

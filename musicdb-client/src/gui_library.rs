@@ -27,7 +27,7 @@ use speedy2d::{
 
 use crate::{
     gui::{
-        Dragging, DrawInfo, GuiAction, GuiConfig, GuiElem, GuiElemCfg, GuiElemChildren,
+        Dragging, DrawInfo, EventInfo, GuiAction, GuiConfig, GuiElem, GuiElemCfg, GuiElemChildren,
         GuiElemWrapper,
     },
     gui_anim::AnimationController,
@@ -598,21 +598,22 @@ impl GuiElem for LibraryBrowser {
     }
     fn key_watch(
         &mut self,
+        e: &mut EventInfo,
         modifiers: speedy2d::window::ModifiersState,
         down: bool,
         key: Option<VirtualKeyCode>,
         _scan: speedy2d::window::KeyScancode,
     ) -> Vec<GuiAction> {
-        if down && crate::gui::hotkey_deselect_all(&modifiers, key) {
+        if down && crate::gui::hotkey_deselect_all(&modifiers, key) && e.take() {
             self.selected.clear();
         }
-        if down && crate::gui::hotkey_select_all(&modifiers, key) {
+        if down && crate::gui::hotkey_select_all(&modifiers, key) && e.take() {
             self.selected_add_all();
         }
-        if down && crate::gui::hotkey_select_albums(&modifiers, key) {
+        if down && crate::gui::hotkey_select_albums(&modifiers, key) && e.take() {
             self.selected_add_albums();
         }
-        if down && crate::gui::hotkey_select_songs(&modifiers, key) {
+        if down && crate::gui::hotkey_select_songs(&modifiers, key) && e.take() {
             self.selected_add_songs();
         }
         vec![]
@@ -953,8 +954,8 @@ impl GuiElem for ListArtist {
             info.mouse_pos.y - info.pos.top_left().y,
         );
     }
-    fn mouse_down(&mut self, button: MouseButton) -> Vec<GuiAction> {
-        if button == MouseButton::Left {
+    fn mouse_down(&mut self, e: &mut EventInfo, button: MouseButton) -> Vec<GuiAction> {
+        if button == MouseButton::Left && e.take() {
             self.mouse = true;
             if self.sel {
                 vec![]
@@ -968,14 +969,16 @@ impl GuiElem for ListArtist {
             vec![]
         }
     }
-    fn mouse_up(&mut self, button: MouseButton) -> Vec<GuiAction> {
+    fn mouse_up(&mut self, e: &mut EventInfo, button: MouseButton) -> Vec<GuiAction> {
         if self.mouse && button == MouseButton::Left {
             self.mouse = false;
             self.config.redraw = true;
-            if !self.sel {
-                self.selected.insert_artist(self.id);
-            } else {
-                self.selected.remove_artist(&self.id);
+            if e.take() {
+                if !self.sel {
+                    self.selected.insert_artist(self.id);
+                } else {
+                    self.selected.remove_artist(&self.id);
+                }
             }
         }
         vec![]
@@ -1097,8 +1100,8 @@ impl GuiElem for ListAlbum {
             info.mouse_pos.y - info.pos.top_left().y,
         );
     }
-    fn mouse_down(&mut self, button: MouseButton) -> Vec<GuiAction> {
-        if button == MouseButton::Left {
+    fn mouse_down(&mut self, e: &mut EventInfo, button: MouseButton) -> Vec<GuiAction> {
+        if button == MouseButton::Left && e.take() {
             self.mouse = true;
             if self.sel {
                 vec![]
@@ -1112,14 +1115,16 @@ impl GuiElem for ListAlbum {
             vec![]
         }
     }
-    fn mouse_up(&mut self, button: MouseButton) -> Vec<GuiAction> {
+    fn mouse_up(&mut self, e: &mut EventInfo, button: MouseButton) -> Vec<GuiAction> {
         if self.mouse && button == MouseButton::Left {
             self.mouse = false;
             self.config.redraw = true;
-            if !self.sel {
-                self.selected.insert_album(self.id);
-            } else {
-                self.selected.remove_album(&self.id);
+            if e.take() {
+                if !self.sel {
+                    self.selected.insert_album(self.id);
+                } else {
+                    self.selected.remove_album(&self.id);
+                }
             }
         }
         vec![]
@@ -1238,8 +1243,8 @@ impl GuiElem for ListSong {
             info.mouse_pos.y - info.pos.top_left().y,
         );
     }
-    fn mouse_down(&mut self, button: MouseButton) -> Vec<GuiAction> {
-        if button == MouseButton::Left {
+    fn mouse_down(&mut self, e: &mut EventInfo, button: MouseButton) -> Vec<GuiAction> {
+        if button == MouseButton::Left && e.take() {
             self.mouse = true;
             if self.sel {
                 vec![]
@@ -1253,20 +1258,22 @@ impl GuiElem for ListSong {
             vec![]
         }
     }
-    fn mouse_up(&mut self, button: MouseButton) -> Vec<GuiAction> {
+    fn mouse_up(&mut self, e: &mut EventInfo, button: MouseButton) -> Vec<GuiAction> {
         if self.mouse && button == MouseButton::Left {
             self.mouse = false;
             self.config.redraw = true;
-            if !self.sel {
-                self.selected.insert_song(self.id);
-            } else {
-                self.selected.remove_song(&self.id);
+            if e.take() {
+                if !self.sel {
+                    self.selected.insert_song(self.id);
+                } else {
+                    self.selected.remove_song(&self.id);
+                }
             }
         }
         vec![]
     }
-    fn mouse_pressed(&mut self, button: MouseButton) -> Vec<GuiAction> {
-        if button == MouseButton::Right {
+    fn mouse_pressed(&mut self, e: &mut EventInfo, button: MouseButton) -> Vec<GuiAction> {
+        if button == MouseButton::Right && e.take() {
             let id = self.id;
             vec![GuiAction::Build(Box::new(move |db| {
                 if let Some(me) = db.songs().get(&id) {

@@ -9,8 +9,8 @@ use uianimator::{default_animator_f64_quadratic::DefaultAnimatorF64Quadratic, An
 
 use crate::{
     gui::{
-        DrawInfo, GuiAction, GuiElem, GuiElemCfg, GuiElemChildren, KeyAction, KeyBinding,
-        SpecificGuiElem,
+        DrawInfo, EventInfo, GuiAction, GuiElem, GuiElemCfg, GuiElemChildren, KeyAction,
+        KeyBinding, SpecificGuiElem,
     },
     gui_base::{Button, Panel},
     gui_edit_song::EditorForSongs,
@@ -97,7 +97,7 @@ impl GuiScreen {
         scroll_sensitivity_pages: f64,
     ) -> Self {
         Self {
-            config: config.w_keyboard_watch().w_mouse().w_keyboard_focus(),
+            config: config.w_keyboard_watch().w_mouse(),
             c_notif_overlay,
             c_status_bar: StatusBar::new(GuiElemCfg::at(Rectangle::from_tuples(
                 (0.0, 0.9),
@@ -277,22 +277,48 @@ impl GuiElem for GuiScreen {
     }
     fn key_watch(
         &mut self,
+        e: &mut EventInfo,
         modifiers: speedy2d::window::ModifiersState,
         down: bool,
         key: Option<speedy2d::window::VirtualKeyCode>,
         _scan: speedy2d::window::KeyScancode,
     ) -> Vec<GuiAction> {
         if down {
+            // don't `e.take()` here (it might cause keys the user wanted to type to go missing + it would break the next if statement)
             self.not_idle();
         }
-        if self.hotkey.triggered(modifiers, down, key) {
+        if self.hotkey.triggered(modifiers, down, key) && e.take() {
             self.config.request_keyboard_focus = true;
             vec![GuiAction::ResetKeyboardFocus]
+        // } else if down && matches!(key, Some(VirtualKeyCode::Space)) && e.take() {
+        // MOVED TO CHAR_WATCH !!!
         } else {
             vec![]
         }
     }
-    fn mouse_down(&mut self, _button: speedy2d::window::MouseButton) -> Vec<GuiAction> {
+    fn char_watch(
+        &mut self,
+        e: &mut EventInfo,
+        modifiers: speedy2d::window::ModifiersState,
+        key: char,
+    ) -> Vec<GuiAction> {
+        if key == ' ' && !(modifiers.ctrl() || modifiers.alt() || modifiers.logo()) && e.take() {
+            vec![GuiAction::Build(Box::new(|db| {
+                vec![GuiAction::SendToServer(if db.playing {
+                    Command::Pause
+                } else {
+                    Command::Resume
+                })]
+            }))]
+        } else {
+            vec![]
+        }
+    }
+    fn mouse_down(
+        &mut self,
+        _e: &mut EventInfo,
+        _button: speedy2d::window::MouseButton,
+    ) -> Vec<GuiAction> {
         self.not_idle();
         vec![]
     }
@@ -300,7 +326,7 @@ impl GuiElem for GuiScreen {
         if self.config.init {
             info.actions.extend([
                 GuiAction::AddKeybind(
-                    Some(KeyBinding::ctrl(VirtualKeyCode::Q)),
+                    Some((KeyBinding::ctrl(VirtualKeyCode::Q), true)),
                     KeyAction {
                         category: "General".to_owned(),
                         title: "Quit".to_owned(),
@@ -311,7 +337,7 @@ impl GuiElem for GuiScreen {
                     Box::new(|_| {}),
                 ),
                 GuiAction::AddKeybind(
-                    Some(KeyBinding::ctrl(VirtualKeyCode::I)),
+                    Some((KeyBinding::ctrl(VirtualKeyCode::I), true)),
                     KeyAction {
                         category: "General".to_owned(),
                         title: "Idle".to_owned(),
@@ -322,7 +348,7 @@ impl GuiElem for GuiScreen {
                     Box::new(|_| {}),
                 ),
                 GuiAction::AddKeybind(
-                    Some(KeyBinding::ctrl(VirtualKeyCode::F)),
+                    Some((KeyBinding::ctrl(VirtualKeyCode::F), true)),
                     KeyAction {
                         category: "Library".to_owned(),
                         title: "Search songs".to_owned(),
@@ -412,30 +438,6 @@ impl GuiElem for GuiScreen {
         // set idle timeout (only when settings are open)
         if self.settings.0 || self.settings.1.is_some() {
             self.idle_timeout = self.c_settings.get_timeout_val();
-        }
-    }
-    fn key_focus(
-        &mut self,
-        _modifiers: speedy2d::window::ModifiersState,
-        down: bool,
-        key: Option<speedy2d::window::VirtualKeyCode>,
-        _scan: speedy2d::window::KeyScancode,
-    ) -> Vec<GuiAction> {
-        if down && matches!(key, Some(VirtualKeyCode::Space)) {
-            vec![GuiAction::Build(Box::new(|db| {
-                vec![GuiAction::SendToServer(if db.playing {
-                    Command::Pause
-                } else {
-                    Command::Resume
-                })]
-            }))]
-        } else if down && matches!(key, Some(VirtualKeyCode::F8)) {
-            vec![GuiAction::SendToServer(Command::ErrorInfo(
-                "".to_owned(),
-                "tEsT".to_owned(),
-            ))]
-        } else {
-            vec![]
         }
     }
 }

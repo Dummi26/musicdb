@@ -10,7 +10,7 @@ use speedy2d::{
     window::{ModifiersState, MouseButton},
 };
 
-use crate::gui::{GuiAction, GuiElem, GuiElemCfg, GuiServerImage};
+use crate::gui::{EventInfo, GuiAction, GuiElem, GuiElemCfg, GuiServerImage};
 
 /*
 
@@ -224,12 +224,24 @@ impl GuiElem for TextField {
         g.draw_line(info.pos.top_left(), info.pos.bottom_left(), t, c);
         g.draw_line(info.pos.top_right(), info.pos.bottom_right(), t, c);
     }
-    fn mouse_pressed(&mut self, _button: MouseButton) -> Vec<GuiAction> {
-        self.config.request_keyboard_focus = true;
-        vec![GuiAction::ResetKeyboardFocus]
+    fn mouse_pressed(&mut self, e: &mut EventInfo, _button: MouseButton) -> Vec<GuiAction> {
+        if e.take() {
+            self.config.request_keyboard_focus = true;
+            vec![GuiAction::ResetKeyboardFocus]
+        } else {
+            vec![]
+        }
     }
-    fn char_focus(&mut self, modifiers: ModifiersState, key: char) -> Vec<GuiAction> {
-        if !(modifiers.ctrl() || modifiers.alt() || modifiers.logo()) && !key.is_control() {
+    fn char_focus(
+        &mut self,
+        e: &mut EventInfo,
+        modifiers: ModifiersState,
+        key: char,
+    ) -> Vec<GuiAction> {
+        if !(modifiers.ctrl() || modifiers.alt() || modifiers.logo())
+            && !key.is_control()
+            && e.take()
+        {
             let content = &mut self.c_input.content;
             let was_empty = content.get_text().is_empty();
             content.text().push(key);
@@ -249,6 +261,7 @@ impl GuiElem for TextField {
     }
     fn key_focus(
         &mut self,
+        e: &mut EventInfo,
         modifiers: ModifiersState,
         down: bool,
         key: Option<speedy2d::window::VirtualKeyCode>,
@@ -257,6 +270,7 @@ impl GuiElem for TextField {
         if down
             && !(modifiers.alt() || modifiers.logo())
             && key == Some(speedy2d::window::VirtualKeyCode::Backspace)
+            && e.take()
         {
             let content = &mut self.c_input.content;
             if !content.get_text().is_empty() {

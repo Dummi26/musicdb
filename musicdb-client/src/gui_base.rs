@@ -3,7 +3,7 @@ use std::{sync::Arc, time::Instant};
 use speedy2d::{color::Color, dimen::Vec2, shape::Rectangle, window::MouseButton};
 
 use crate::{
-    gui::{DrawInfo, GuiAction, GuiElem, GuiElemCfg, GuiElemChildren},
+    gui::{DrawInfo, EventInfo, GuiAction, GuiElem, GuiElemCfg, GuiElemChildren},
     gui_text::Label,
 };
 
@@ -291,20 +291,26 @@ impl<C: GuiElemChildren + 'static> GuiElem for ScrollBox<C> {
             );
         }
     }
-    fn mouse_wheel(&mut self, diff: f32) -> Vec<crate::gui::GuiAction> {
-        self.scroll_target = (self.scroll_target
-            - self.size_unit.from_abs(diff as f32, self.last_height_px))
-        .max(0.0);
+    fn mouse_wheel(&mut self, e: &mut EventInfo, diff: f32) -> Vec<crate::gui::GuiAction> {
+        let nst = (self.scroll_target - self.size_unit.from_abs(diff as f32, self.last_height_px))
+            .max(0.0);
+        // only take the event if this would actually scroll, and only scroll if we can actually take the event
+        if nst != self.scroll_target && e.take() {
+            self.scroll_target = nst;
+        }
         Vec::with_capacity(0)
     }
-    fn mouse_down(&mut self, button: MouseButton) -> Vec<GuiAction> {
-        if button == MouseButton::Left && self.mouse_in_scrollbar {
+    fn mouse_down(&mut self, e: &mut EventInfo, button: MouseButton) -> Vec<GuiAction> {
+        if button == MouseButton::Left && self.mouse_in_scrollbar && e.take() {
             self.mouse_scrolling = true;
         }
         vec![]
     }
-    fn mouse_up(&mut self, button: MouseButton) -> Vec<GuiAction> {
+    fn mouse_up(&mut self, e: &mut EventInfo, button: MouseButton) -> Vec<GuiAction> {
         if button == MouseButton::Left {
+            if self.mouse_scrolling {
+                e.take();
+            }
             self.mouse_scrolling = false;
         }
         vec![]
@@ -372,8 +378,8 @@ impl<C: GuiElemChildren + 'static> GuiElem for Button<C> {
     fn elem_mut(&mut self) -> &mut dyn GuiElem {
         self
     }
-    fn mouse_pressed(&mut self, button: MouseButton) -> Vec<GuiAction> {
-        if button == MouseButton::Left {
+    fn mouse_pressed(&mut self, e: &mut EventInfo, button: MouseButton) -> Vec<GuiAction> {
+        if button == MouseButton::Left && e.take() {
             (self.action.clone())(self)
         } else {
             vec![]
@@ -381,6 +387,7 @@ impl<C: GuiElemChildren + 'static> GuiElem for Button<C> {
     }
     fn key_focus(
         &mut self,
+        e: &mut EventInfo,
         _modifiers: speedy2d::window::ModifiersState,
         down: bool,
         key: Option<speedy2d::window::VirtualKeyCode>,
@@ -394,6 +401,7 @@ impl<C: GuiElemChildren + 'static> GuiElem for Button<C> {
                         | speedy2d::window::VirtualKeyCode::NumpadEnter,
                 )
             )
+            && e.take()
         {
             (self.action.clone())(self)
         } else {

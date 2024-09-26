@@ -299,7 +299,7 @@ pub struct Gui {
     pub size: UVec2,
     pub mouse_pos: Vec2,
     pub font: Font,
-    pub keybinds: BTreeMap<KeyBinding, KeyActionId>,
+    pub keybinds: BTreeMap<KeyBinding, KeyActionRef>,
     pub key_actions: KeyActions,
     pub covers: Option<HashMap<CoverId, GuiServerImage>>,
     pub custom_images: Option<HashMap<String, GuiServerImage>>,
@@ -351,11 +351,11 @@ impl Gui {
                 }
             }
             Ok(Err(e)) => {
-                eprintln!("Error loading merscfg:\n{e}");
+                eprintln!("Error loading merscfg:\n{}", e.display_term());
             }
             Ok(Ok(Err((m, e)))) => {
                 if let Some(e) = e {
-                    eprintln!("Error loading merscfg:\n{m}\n{e}");
+                    eprintln!("Error loading merscfg:\n{m}\n{}", e.display_term());
                 } else {
                     eprintln!("Error loading merscfg:\n{m}");
                 }
@@ -530,28 +530,39 @@ pub trait GuiElem {
     /// handles drawing.
     fn draw(&mut self, info: &mut DrawInfo, g: &mut Graphics2D) {}
     /// an event that is invoked whenever a mouse button is pressed on the element.
-    fn mouse_down(&mut self, button: MouseButton) -> Vec<GuiAction> {
+    fn mouse_down(&mut self, e: &mut EventInfo, button: MouseButton) -> Vec<GuiAction> {
         Vec::with_capacity(0)
     }
     /// an event that is invoked whenever a mouse button that was pressed on the element is released anywhere.
-    fn mouse_up(&mut self, button: MouseButton) -> Vec<GuiAction> {
+    fn mouse_up(&mut self, e: &mut EventInfo, button: MouseButton) -> Vec<GuiAction> {
         Vec::with_capacity(0)
     }
     /// an event that is invoked after a mouse button was pressed and released on the same GUI element.
-    fn mouse_pressed(&mut self, button: MouseButton) -> Vec<GuiAction> {
+    fn mouse_pressed(&mut self, e: &mut EventInfo, button: MouseButton) -> Vec<GuiAction> {
         Vec::with_capacity(0)
     }
-    fn mouse_wheel(&mut self, diff: f32) -> Vec<GuiAction> {
+    fn mouse_wheel(&mut self, e: &mut EventInfo, diff: f32) -> Vec<GuiAction> {
         Vec::with_capacity(0)
     }
-    fn char_watch(&mut self, modifiers: ModifiersState, key: char) -> Vec<GuiAction> {
+    fn char_watch(
+        &mut self,
+        e: &mut EventInfo,
+        modifiers: ModifiersState,
+        key: char,
+    ) -> Vec<GuiAction> {
         Vec::with_capacity(0)
     }
-    fn char_focus(&mut self, modifiers: ModifiersState, key: char) -> Vec<GuiAction> {
+    fn char_focus(
+        &mut self,
+        e: &mut EventInfo,
+        modifiers: ModifiersState,
+        key: char,
+    ) -> Vec<GuiAction> {
         Vec::with_capacity(0)
     }
     fn key_watch(
         &mut self,
+        e: &mut EventInfo,
         modifiers: ModifiersState,
         down: bool,
         key: Option<VirtualKeyCode>,
@@ -561,6 +572,7 @@ pub trait GuiElem {
     }
     fn key_focus(
         &mut self,
+        e: &mut EventInfo,
         modifiers: ModifiersState,
         down: bool,
         key: Option<VirtualKeyCode>,
@@ -569,11 +581,23 @@ pub trait GuiElem {
         Vec::with_capacity(0)
     }
     /// When something is dragged and released over this element
-    fn dragged(&mut self, dragged: Dragging) -> Vec<GuiAction> {
+    fn dragged(&mut self, e: &mut EventInfo, dragged: Dragging) -> Vec<GuiAction> {
         Vec::with_capacity(0)
     }
     fn updated_library(&mut self) {}
     fn updated_queue(&mut self) {}
+}
+pub struct EventInfo(bool);
+impl EventInfo {
+    pub fn can_take(&self) -> bool {
+        self.0
+    }
+    pub fn take(&mut self) -> bool {
+        std::mem::replace(&mut self.0, false)
+    }
+    fn new() -> Self {
+        Self(true)
+    }
 }
 impl<T: GuiElem + ?Sized> GuiElemInternal for T {}
 pub(crate) trait GuiElemInternal: GuiElem {
@@ -625,38 +649,49 @@ pub(crate) trait GuiElemInternal: GuiElem {
         self.config_mut().pixel_pos = std::mem::replace(&mut info.pos, ppos);
     }
     /// recursively applies the function to all gui elements below and including this one
-    fn _recursive_all(&mut self, f: &mut dyn FnMut(&mut dyn GuiElem)) {
-        f(self.elem_mut());
-        for c in self.children() {
-            c._recursive_all(f);
+    fn _recursive_all(&mut self, allow_deactivated: bool, f: &mut dyn FnMut(&mut dyn GuiElem)) {
+        if self.config().enabled || allow_deactivated {
+            f(self.elem_mut());
+            for c in self.children() {
+                c._recursive_all(allow_deactivated, f);
+            }
         }
     }
     fn _mouse_event(
         &mut self,
-        condition: &mut dyn FnMut(&mut dyn GuiElem) -> Option<Vec<GuiAction>>,
+        e: &mut EventInfo,
+        allow_deactivated: bool,
+        condition: &mut dyn FnMut(&mut dyn GuiElem, &mut EventInfo) -> Option<Vec<GuiAction>>,
         pos: Vec2,
     ) -> Option<Vec<GuiAction>> {
-        for c in &mut self.children() {
-            if c.config().enabled {
-                if c.config().pixel_pos.contains(pos) {
-                    if let Some(v) = c._mouse_event(condition, pos) {
-                        return Some(v);
+        if self.config().enabled || allow_deactivated {
+            for c in &mut self.children() {
+                if c.config().enabled {
+                    if c.config().pixel_pos.contains(pos) {
+                        if let Some(v) = c._mouse_event(e, allow_deactivated, condition, pos) {
+                            return Some(v);
+                        }
                     }
                 }
             }
+            condition(self.elem_mut(), e)
+        } else {
+            None
         }
-        condition(self.elem_mut())
     }
     fn _release_drag(
         &mut self,
+        e: &mut EventInfo,
         dragged: &mut Option<Dragging>,
         pos: Vec2,
     ) -> Option<Vec<GuiAction>> {
         self._mouse_event(
-            &mut |v| {
+            e,
+            false,
+            &mut |v, e| {
                 if v.config().drag_target {
                     if let Some(d) = dragged.take() {
-                        return Some(v.dragged(d));
+                        return Some(v.dragged(e, d));
                     }
                 }
                 None
@@ -666,13 +701,16 @@ pub(crate) trait GuiElemInternal: GuiElem {
     }
     fn _mouse_button(
         &mut self,
+        e: &mut EventInfo,
         button: MouseButton,
         down: bool,
         pos: Vec2,
     ) -> Option<Vec<GuiAction>> {
         if down {
             self._mouse_event(
-                &mut |v: &mut dyn GuiElem| {
+                e,
+                !down,
+                &mut |v: &mut dyn GuiElem, e| {
                     if v.config().mouse_events {
                         match button {
                             MouseButton::Left => {
@@ -689,7 +727,7 @@ pub(crate) trait GuiElemInternal: GuiElem {
                             }
                             MouseButton::Other(_) => {}
                         }
-                        Some(v.mouse_down(button))
+                        Some(v.mouse_down(e, button))
                     } else {
                         None
                     }
@@ -699,14 +737,16 @@ pub(crate) trait GuiElemInternal: GuiElem {
         } else {
             let mut vec = vec![];
             if let Some(a) = self._mouse_event(
-                &mut |v: &mut dyn GuiElem| {
+                e,
+                !down,
+                &mut |v: &mut dyn GuiElem, e| {
                     let down = v.config().mouse_down;
                     if v.config().mouse_events
                         && ((button == MouseButton::Left && down.0)
                             || (button == MouseButton::Middle && down.1)
                             || (button == MouseButton::Right && down.2))
                     {
-                        Some(v.mouse_pressed(button))
+                        Some(v.mouse_pressed(e, button))
                     } else {
                         None
                     }
@@ -715,7 +755,7 @@ pub(crate) trait GuiElemInternal: GuiElem {
             ) {
                 vec.extend(a);
             };
-            self._recursive_all(&mut |v| {
+            self._recursive_all(!down, &mut |v| {
                 if v.config().mouse_events {
                     match button {
                         MouseButton::Left => {
@@ -732,17 +772,19 @@ pub(crate) trait GuiElemInternal: GuiElem {
                         }
                         MouseButton::Other(_) => {}
                     }
-                    vec.extend(v.mouse_up(button));
+                    vec.extend(v.mouse_up(e, button));
                 }
             });
             Some(vec)
         }
     }
-    fn _mouse_wheel(&mut self, diff: f32, pos: Vec2) -> Option<Vec<GuiAction>> {
+    fn _mouse_wheel(&mut self, e: &mut EventInfo, diff: f32, pos: Vec2) -> Option<Vec<GuiAction>> {
         self._mouse_event(
-            &mut |v| {
+            e,
+            false,
+            &mut |v, e| {
                 if v.config().scroll_events {
-                    Some(v.mouse_wheel(diff))
+                    Some(v.mouse_wheel(e, diff))
                 } else {
                     None
                 }
@@ -752,29 +794,45 @@ pub(crate) trait GuiElemInternal: GuiElem {
     }
     fn _keyboard_event(
         &mut self,
-        f_focus: &mut dyn FnMut(&mut dyn GuiElem, &mut Vec<GuiAction>),
-        f_watch: &mut dyn FnMut(&mut dyn GuiElem, &mut Vec<GuiAction>),
+        e: &mut EventInfo,
+        allow_deactivated: bool,
+        f_focus: &mut dyn FnMut(&mut dyn GuiElem, &mut EventInfo, &mut Vec<GuiAction>),
+        f_watch: &mut dyn FnMut(&mut dyn GuiElem, &mut EventInfo, &mut Vec<GuiAction>),
     ) -> Vec<GuiAction> {
         let mut o = vec![];
-        self._keyboard_event_inner(&mut Some(f_focus), f_watch, &mut o, true);
+        self._keyboard_event_inner_focus(e, allow_deactivated, f_focus, &mut o);
+        self._keyboard_event_inner_nofocus(e, allow_deactivated, f_watch, &mut o);
         o
     }
-    fn _keyboard_event_inner(
+    fn _keyboard_event_inner_nofocus(
         &mut self,
-        f_focus: &mut Option<&mut dyn FnMut(&mut dyn GuiElem, &mut Vec<GuiAction>)>,
-        f_watch: &mut dyn FnMut(&mut dyn GuiElem, &mut Vec<GuiAction>),
+        e: &mut EventInfo,
+        allow_deactivated: bool,
+        f_watch: &mut dyn FnMut(&mut dyn GuiElem, &mut EventInfo, &mut Vec<GuiAction>),
         events: &mut Vec<GuiAction>,
-        focus: bool,
     ) {
-        f_watch(self.elem_mut(), events);
-        let focus_index = self.config().keyboard_focus_index;
-        for (i, child) in self.children().enumerate() {
-            child._keyboard_event_inner(f_focus, f_watch, events, focus && i == focus_index);
+        if self.config().enabled || allow_deactivated {
+            for child in self.children() {
+                child._keyboard_event_inner_nofocus(e, allow_deactivated, f_watch, events);
+            }
+            f_watch(self.elem_mut(), e, events);
         }
-        if focus {
-            // we have focus and no child has consumed f_focus
-            if let Some(f) = f_focus.take() {
-                f(self.elem_mut(), events)
+    }
+    fn _keyboard_event_inner_focus(
+        &mut self,
+        e: &mut EventInfo,
+        allow_deactivated: bool,
+        f_focus: &mut dyn FnMut(&mut dyn GuiElem, &mut EventInfo, &mut Vec<GuiAction>),
+        events: &mut Vec<GuiAction>,
+    ) {
+        if e.can_take() && (self.config().enabled || allow_deactivated) {
+            let i = self.config().keyboard_focus_index;
+            if let Some(child) = self.children().nth(i) {
+                child._keyboard_event_inner_focus(e, allow_deactivated, f_focus, events);
+            }
+            if e.can_take() {
+                // we have focus and no child has taken the event
+                f_focus(self.elem_mut(), e, events);
             }
         }
     }
@@ -880,44 +938,56 @@ impl<T: GuiElemWrapper> GuiElem for T {
     fn draw(&mut self, info: &mut DrawInfo, g: &mut Graphics2D) {
         self.as_elem_mut().draw(info, g)
     }
-    fn mouse_down(&mut self, button: MouseButton) -> Vec<GuiAction> {
-        self.as_elem_mut().mouse_down(button)
+    fn mouse_down(&mut self, e: &mut EventInfo, button: MouseButton) -> Vec<GuiAction> {
+        self.as_elem_mut().mouse_down(e, button)
     }
-    fn mouse_up(&mut self, button: MouseButton) -> Vec<GuiAction> {
-        self.as_elem_mut().mouse_up(button)
+    fn mouse_up(&mut self, e: &mut EventInfo, button: MouseButton) -> Vec<GuiAction> {
+        self.as_elem_mut().mouse_up(e, button)
     }
-    fn mouse_pressed(&mut self, button: MouseButton) -> Vec<GuiAction> {
-        self.as_elem_mut().mouse_pressed(button)
+    fn mouse_pressed(&mut self, e: &mut EventInfo, button: MouseButton) -> Vec<GuiAction> {
+        self.as_elem_mut().mouse_pressed(e, button)
     }
-    fn mouse_wheel(&mut self, diff: f32) -> Vec<GuiAction> {
-        self.as_elem_mut().mouse_wheel(diff)
+    fn mouse_wheel(&mut self, e: &mut EventInfo, diff: f32) -> Vec<GuiAction> {
+        self.as_elem_mut().mouse_wheel(e, diff)
     }
-    fn char_watch(&mut self, modifiers: ModifiersState, key: char) -> Vec<GuiAction> {
-        self.as_elem_mut().char_watch(modifiers, key)
+    fn char_watch(
+        &mut self,
+        e: &mut EventInfo,
+        modifiers: ModifiersState,
+        key: char,
+    ) -> Vec<GuiAction> {
+        self.as_elem_mut().char_watch(e, modifiers, key)
     }
-    fn char_focus(&mut self, modifiers: ModifiersState, key: char) -> Vec<GuiAction> {
-        self.as_elem_mut().char_focus(modifiers, key)
+    fn char_focus(
+        &mut self,
+        e: &mut EventInfo,
+        modifiers: ModifiersState,
+        key: char,
+    ) -> Vec<GuiAction> {
+        self.as_elem_mut().char_focus(e, modifiers, key)
     }
     fn key_watch(
         &mut self,
+        e: &mut EventInfo,
         modifiers: ModifiersState,
         down: bool,
         key: Option<VirtualKeyCode>,
         scan: KeyScancode,
     ) -> Vec<GuiAction> {
-        self.as_elem_mut().key_watch(modifiers, down, key, scan)
+        self.as_elem_mut().key_watch(e, modifiers, down, key, scan)
     }
     fn key_focus(
         &mut self,
+        e: &mut EventInfo,
         modifiers: ModifiersState,
         down: bool,
         key: Option<VirtualKeyCode>,
         scan: KeyScancode,
     ) -> Vec<GuiAction> {
-        self.as_elem_mut().key_focus(modifiers, down, key, scan)
+        self.as_elem_mut().key_focus(e, modifiers, down, key, scan)
     }
-    fn dragged(&mut self, dragged: Dragging) -> Vec<GuiAction> {
-        self.as_elem_mut().dragged(dragged)
+    fn dragged(&mut self, e: &mut EventInfo, dragged: Dragging) -> Vec<GuiAction> {
+        self.as_elem_mut().dragged(e, dragged)
     }
     fn updated_library(&mut self) {
         self.as_elem_mut().updated_library()
@@ -1106,9 +1176,13 @@ impl Default for GuiElemCfg {
 pub enum GuiAction {
     OpenMain,
     /// Add a key action (and optionally bind it) and then call the given function
-    AddKeybind(Option<KeyBinding>, KeyAction, Box<dyn FnOnce(KeyActionId)>),
+    AddKeybind(
+        Option<(KeyBinding, bool)>,
+        KeyAction,
+        Box<dyn FnOnce(KeyActionId)>,
+    ),
     /// Binds the action to the keybinding, or unbinds it entirely
-    SetKeybind(KeyActionId, Option<KeyBinding>),
+    SetKeybind(KeyActionId, Option<(KeyBinding, bool)>),
     ForceIdle,
     /// false -> prevent idling, true -> end idling even if already idle
     EndIdle(bool),
@@ -1205,8 +1279,8 @@ impl Gui {
             }
             GuiAction::AddKeybind(bind, action, func) => {
                 let id = self.key_actions.add(action);
-                if let Some(bind) = bind {
-                    self.keybinds.insert(bind, id);
+                if let Some((bind, priority)) = bind {
+                    self.keybinds.insert(bind, id.with_priority(priority));
                 }
                 func(id);
             }
@@ -1226,8 +1300,8 @@ impl Gui {
                 {
                     self.keybinds.remove(&b);
                 }
-                if let Some(bind) = bind {
-                    self.keybinds.insert(bind, action);
+                if let Some((bind, priority)) = bind {
+                    self.keybinds.insert(bind, action.with_priority(priority));
                 }
             }
             GuiAction::SendToServer(cmd) => {
@@ -1283,7 +1357,7 @@ impl Gui {
             GuiAction::SetLineHeight(h) => {
                 self.line_height = h;
                 self.gui
-                    ._recursive_all(&mut |e| e.config_mut().redraw = true);
+                    ._recursive_all(true, &mut |e| e.config_mut().redraw = true);
             }
             GuiAction::LoadCover(id) => {
                 self.covers
@@ -1447,7 +1521,10 @@ impl WindowHandler<GuiEvent> for Gui {
         }
     }
     fn on_mouse_button_down(&mut self, helper: &mut WindowHelper<GuiEvent>, button: MouseButton) {
-        if let Some(a) = self.gui._mouse_button(button, true, self.mouse_pos.clone()) {
+        if let Some(a) =
+            self.gui
+                ._mouse_button(&mut EventInfo::new(), button, true, self.mouse_pos.clone())
+        {
             for a in a {
                 self.exec_gui_action(a)
             }
@@ -1458,7 +1535,10 @@ impl WindowHandler<GuiEvent> for Gui {
         if self.dragging.is_some() {
             let (dr, _) = self.dragging.take().unwrap();
             let mut opt = Some(dr);
-            if let Some(a) = self.gui._release_drag(&mut opt, self.mouse_pos.clone()) {
+            if let Some(a) =
+                self.gui
+                    ._release_drag(&mut EventInfo::new(), &mut opt, self.mouse_pos.clone())
+            {
                 for a in a {
                     self.exec_gui_action(a)
                 }
@@ -1476,9 +1556,9 @@ impl WindowHandler<GuiEvent> for Gui {
                 }
             }
         }
-        if let Some(a) = self
-            .gui
-            ._mouse_button(button, false, self.mouse_pos.clone())
+        if let Some(a) =
+            self.gui
+                ._mouse_button(&mut EventInfo::new(), button, false, self.mouse_pos.clone())
         {
             for a in a {
                 self.exec_gui_action(a)
@@ -1506,7 +1586,10 @@ impl WindowHandler<GuiEvent> for Gui {
                     * self.last_height
             }
         };
-        if let Some(a) = self.gui._mouse_wheel(dist, self.mouse_pos.clone()) {
+        if let Some(a) = self
+            .gui
+            ._mouse_wheel(&mut EventInfo::new(), dist, self.mouse_pos.clone())
+        {
             for a in a {
                 self.exec_gui_action(a)
             }
@@ -1516,14 +1599,16 @@ impl WindowHandler<GuiEvent> for Gui {
     fn on_keyboard_char(&mut self, helper: &mut WindowHelper<GuiEvent>, unicode_codepoint: char) {
         helper.request_redraw();
         for a in self.gui._keyboard_event(
-            &mut |e, a| {
-                if e.config().keyboard_events_focus {
-                    a.append(&mut e.char_focus(self.modifiers.clone(), unicode_codepoint));
+            &mut EventInfo::new(),
+            false,
+            &mut |g, e, a| {
+                if g.config().keyboard_events_focus {
+                    a.append(&mut g.char_focus(e, self.modifiers.clone(), unicode_codepoint));
                 }
             },
-            &mut |e, a| {
-                if e.config().keyboard_events_watch {
-                    a.append(&mut e.char_watch(self.modifiers.clone(), unicode_codepoint));
+            &mut |g, e, a| {
+                if g.config().keyboard_events_watch {
+                    a.append(&mut g.char_watch(e, self.modifiers.clone(), unicode_codepoint));
                 }
             },
         ) {
@@ -1543,9 +1628,12 @@ impl WindowHandler<GuiEvent> for Gui {
             }
         }
         for a in self.gui._keyboard_event(
-            &mut |e, a| {
-                if e.config().keyboard_events_focus {
-                    a.append(&mut e.key_focus(
+            &mut EventInfo::new(),
+            false,
+            &mut |g, e, a| {
+                if g.config().keyboard_events_focus {
+                    a.append(&mut g.key_focus(
+                        e,
                         self.modifiers.clone(),
                         true,
                         virtual_key_code,
@@ -1553,9 +1641,10 @@ impl WindowHandler<GuiEvent> for Gui {
                     ));
                 }
             },
-            &mut |e, a| {
-                if e.config().keyboard_events_watch {
-                    a.append(&mut e.key_watch(
+            &mut |g, e, a| {
+                if g.config().keyboard_events_watch {
+                    a.append(&mut g.key_watch(
+                        e,
                         self.modifiers.clone(),
                         true,
                         virtual_key_code,
@@ -1575,21 +1664,30 @@ impl WindowHandler<GuiEvent> for Gui {
     ) {
         helper.request_redraw();
         // handle keybinds unless settings are open, opening or closing
+        let mut e = EventInfo::new();
+        let mut post_action = None;
         if self.gui.settings.0 == false && self.gui.settings.1.is_none() {
             if let Some(key) = virtual_key_code {
                 let keybind = KeyBinding::new(&self.modifiers, key);
                 if let Some(action) = self.keybinds.get(&keybind) {
-                    for a in self.key_actions.get(action).execute() {
-                        self.exec_gui_action(a);
+                    if action.has_priority() {
+                        e.take();
+                        for a in self.key_actions.get(&action.id()).execute() {
+                            self.exec_gui_action(a);
+                        }
+                    } else {
+                        post_action = Some(action.id());
                     }
-                    return;
                 }
             }
         }
         for a in self.gui._keyboard_event(
-            &mut |e, a| {
-                if e.config().keyboard_events_focus {
-                    a.append(&mut e.key_focus(
+            &mut EventInfo::new(),
+            true,
+            &mut |g, e, a| {
+                if g.config().keyboard_events_focus {
+                    a.append(&mut g.key_focus(
+                        e,
                         self.modifiers.clone(),
                         false,
                         virtual_key_code,
@@ -1597,9 +1695,10 @@ impl WindowHandler<GuiEvent> for Gui {
                     ));
                 }
             },
-            &mut |e, a| {
-                if e.config().keyboard_events_watch {
-                    a.append(&mut e.key_watch(
+            &mut |g, e, a| {
+                if g.config().keyboard_events_watch {
+                    a.append(&mut g.key_watch(
+                        e,
                         self.modifiers.clone(),
                         false,
                         virtual_key_code,
@@ -1609,6 +1708,13 @@ impl WindowHandler<GuiEvent> for Gui {
             },
         ) {
             self.exec_gui_action(a);
+        }
+        if let Some(post_action) = post_action.take() {
+            if e.take() {
+                for a in self.key_actions.get(&post_action).execute() {
+                    self.exec_gui_action(a);
+                }
+            }
         }
     }
     fn on_keyboard_modifiers_changed(
@@ -1636,7 +1742,7 @@ impl WindowHandler<GuiEvent> for Gui {
                 } else {
                     eprintln!("WARN: Skipping call to merscfg's library_updated because gui_config is not available");
                 }
-                self.gui._recursive_all(&mut |e| e.updated_library());
+                self.gui._recursive_all(true, &mut |e| e.updated_library());
                 helper.request_redraw();
             }
             GuiEvent::UpdatedQueue => {
@@ -1647,7 +1753,7 @@ impl WindowHandler<GuiEvent> for Gui {
                 } else {
                     eprintln!("WARN: Skipping call to merscfg's queue_updated because gui_config is not available");
                 }
-                self.gui._recursive_all(&mut |e| e.updated_queue());
+                self.gui._recursive_all(true, &mut |e| e.updated_queue());
                 helper.request_redraw();
             }
             GuiEvent::Exit => helper.terminate_loop(),
@@ -1660,7 +1766,7 @@ impl WindowHandler<GuiEvent> for Gui {
     fn on_resize(&mut self, _helper: &mut WindowHelper<GuiEvent>, size_pixels: UVec2) {
         self.size = size_pixels;
         self.gui
-            ._recursive_all(&mut |e| e.config_mut().redraw = true);
+            ._recursive_all(true, &mut |e| e.config_mut().redraw = true);
     }
 }
 
@@ -1807,9 +1913,28 @@ impl KeyAction {
 pub struct KeyActions(Vec<KeyAction>);
 #[derive(Clone, Copy)]
 pub struct KeyActionId(usize);
+#[derive(Clone, Copy)]
+pub struct KeyActionRef(usize, bool);
 impl KeyActionId {
     pub fn get_index(&self) -> usize {
         self.0
+    }
+    pub fn with_priority(&self, priority: bool) -> KeyActionRef {
+        KeyActionRef(self.0, priority)
+    }
+}
+impl KeyActionRef {
+    pub fn get_index(&self) -> usize {
+        self.0
+    }
+    pub fn id(&self) -> KeyActionId {
+        KeyActionId(self.0)
+    }
+    pub fn has_priority(&self) -> bool {
+        self.1
+    }
+    pub fn set_priority(&mut self, priority: bool) {
+        self.1 = priority;
     }
 }
 impl KeyActions {

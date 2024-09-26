@@ -3,9 +3,10 @@ use std::{
     sync::{Arc, Mutex, RwLock},
 };
 
+pub use mers_lib;
+
 use mers_lib::{
     data::{self, function::Function, Data, MersData, MersType, Type},
-    info::Info,
     prelude_extend_config::Config,
 };
 use musicdb_lib::{
@@ -25,17 +26,6 @@ pub fn add(
     cmd: &Arc<impl Fn(Command) + Sync + Send + 'static>,
     after_db_cmd: &Arc<Mutex<Option<Box<dyn FnMut(Command) + Send + Sync + 'static>>>>,
 ) -> Config {
-    macro_rules! func {
-        ($out:expr, $run:expr) => {
-            Data::new(data::function::Function {
-                info: Arc::new(Info::neverused()),
-                info_check: Arc::new(Mutex::new(Info::neverused())),
-                out: Arc::new($out),
-                run: Arc::new($run),
-                inner_statements: None,
-            })
-        };
-    }
     /// handle commands received from server (for handler functions)
     /// `T` can be used to return generated data to avoid calculating something twice if one event may call multiple handlers.
     fn handle<T>(
@@ -50,7 +40,7 @@ pub fn add(
             .downcast_ref::<Function>()
         {
             let (data, t) = gen();
-            Some((t, func.run(data)))
+            Some((t, func.run_immut(data).ok()?))
         } else {
             None
         }
@@ -143,7 +133,7 @@ pub fn add(
     // MusicDb type
     cfg = cfg
         .with_list()
-        .add_type(MusicDbIdT.to_string(), Ok(Arc::new(MusicDbIdT)));
+        .add_type(MusicDbIdT.to_string(), Ok(Arc::new(Type::new(MusicDbIdT))));
     // handler setters
     for (name, handler, in_type) in [
         ("resume", handler_resume, Type::empty_tuple()),
@@ -166,15 +156,13 @@ pub fn add(
     ] {
         cfg = cfg.add_var(
             format!("handle_event_{name}"),
-            func!(
-                move |a, _| {
+            Function::new_generic(
+                move |a| {
                     if a.types.iter().all(|a| {
                         Type::newm(vec![Arc::clone(a)]).is_zero_tuple()
                             || a.as_any()
                                 .downcast_ref::<data::function::FunctionT>()
-                                .is_some_and(|a| {
-                                    (a.0)(&in_type).is_ok_and(|opt| opt.is_zero_tuple())
-                                })
+                                .is_some_and(|a| a.o(&in_type).is_ok_and(|opt| opt.is_zero_tuple()))
                     }) {
                         Ok(Type::empty_tuple())
                     } else {
@@ -183,17 +171,17 @@ pub fn add(
                 },
                 move |a, _| {
                     *handler.write().unwrap() = a;
-                    Data::empty_tuple()
-                }
+                    Ok(Data::empty_tuple())
+                },
             ),
         );
     }
     // actions
     cfg.add_var(
         "send_server_notification".to_owned(),
-        func!(
-            |a, _| {
-                if a.is_included_in(&data::string::StringT) {
+        Function::new_generic(
+            |a| {
+                if a.is_included_in_single(&data::string::StringT) {
                     Ok(Type::empty_tuple())
                 } else {
                     Err(format!("Function argument must be `String`.").into())
@@ -211,15 +199,15 @@ pub fn add(
                             .0
                             .clone(),
                     ));
-                    Data::empty_tuple()
+                    Ok(Data::empty_tuple())
                 }
-            }
+            },
         ),
     )
     .add_var(
         "resume".to_owned(),
-        func!(
-            |a, _| {
+        Function::new_generic(
+            |a| {
                 if a.is_included_in(&Type::empty_tuple()) {
                     Ok(Type::empty_tuple())
                 } else {
@@ -230,15 +218,15 @@ pub fn add(
                 let cmd = Arc::clone(cmd);
                 move |_, _| {
                     cmd(Command::Resume);
-                    Data::empty_tuple()
+                    Ok(Data::empty_tuple())
                 }
-            }
+            },
         ),
     )
     .add_var(
         "pause".to_owned(),
-        func!(
-            |a, _| {
+        Function::new_generic(
+            |a| {
                 if a.is_included_in(&Type::empty_tuple()) {
                     Ok(Type::empty_tuple())
                 } else {
@@ -249,15 +237,15 @@ pub fn add(
                 let cmd = Arc::clone(cmd);
                 move |_, _| {
                     cmd(Command::Pause);
-                    Data::empty_tuple()
+                    Ok(Data::empty_tuple())
                 }
-            }
+            },
         ),
     )
     .add_var(
-        "stop_playback".to_owned(),
-        func!(
-            |a, _| {
+        "stop".to_owned(),
+        Function::new_generic(
+            |a| {
                 if a.is_included_in(&Type::empty_tuple()) {
                     Ok(Type::empty_tuple())
                 } else {
@@ -268,15 +256,15 @@ pub fn add(
                 let cmd = Arc::clone(cmd);
                 move |_, _| {
                     cmd(Command::Stop);
-                    Data::empty_tuple()
+                    Ok(Data::empty_tuple())
                 }
-            }
+            },
         ),
     )
     .add_var(
         "next_song".to_owned(),
-        func!(
-            |a, _| {
+        Function::new_generic(
+            |a| {
                 if a.is_included_in(&Type::empty_tuple()) {
                     Ok(Type::empty_tuple())
                 } else {
@@ -287,31 +275,31 @@ pub fn add(
                 let cmd = Arc::clone(cmd);
                 move |_, _| {
                     cmd(Command::NextSong);
-                    Data::empty_tuple()
+                    Ok(Data::empty_tuple())
                 }
-            }
+            },
         ),
     )
     .add_var(
         "get_playing".to_owned(),
-        func!(
-            |a, _| {
+        Function::new_generic(
+            |a| {
                 if a.is_included_in(&Type::empty_tuple()) {
-                    Ok(Type::new(data::bool::BoolT))
+                    Ok(data::bool::bool_type())
                 } else {
                     Err(format!("Function argument must be `()`.").into())
                 }
             },
             {
                 let db = Arc::clone(db);
-                move |_, _| Data::new(data::bool::Bool(db.lock().unwrap().playing))
-            }
+                move |_, _| Ok(Data::new(data::bool::Bool(db.lock().unwrap().playing)))
+            },
         ),
     )
     .add_var(
         "queue_get_current_song".to_owned(),
-        func!(
-            |a, _| {
+        Function::new_generic(
+            |a| {
                 if a.is_included_in(&Type::empty_tuple()) {
                     Ok(Type::newm(vec![
                         Arc::new(MusicDbIdT),
@@ -323,17 +311,19 @@ pub fn add(
             },
             {
                 let db = Arc::clone(db);
-                move |_, _| match db.lock().unwrap().queue.get_current_song() {
-                    Some(id) => Data::new(MusicDbId(*id)),
-                    None => Data::empty_tuple(),
+                move |_, _| {
+                    Ok(match db.lock().unwrap().queue.get_current_song() {
+                        Some(id) => Data::new(MusicDbId(*id)),
+                        None => Data::empty_tuple(),
+                    })
                 }
-            }
+            },
         ),
     )
     .add_var(
         "queue_get_next_song".to_owned(),
-        func!(
-            |a, _| {
+        Function::new_generic(
+            |a| {
                 if a.is_included_in(&Type::empty_tuple()) {
                     Ok(Type::newm(vec![
                         Arc::new(MusicDbIdT),
@@ -345,21 +335,23 @@ pub fn add(
             },
             {
                 let db = Arc::clone(db);
-                move |_, _| match db.lock().unwrap().queue.get_next_song() {
-                    Some(id) => Data::new(MusicDbId(*id)),
-                    None => Data::empty_tuple(),
+                move |_, _| {
+                    Ok(match db.lock().unwrap().queue.get_next_song() {
+                        Some(id) => Data::new(MusicDbId(*id)),
+                        None => Data::empty_tuple(),
+                    })
                 }
-            }
+            },
         ),
     )
     .add_var(
         "queue_get_elem".to_owned(),
-        func!(
-            |a, _| {
-                if a.is_included_in(&mers_lib::program::configs::with_list::ListT(Type::new(
-                    data::int::IntT,
-                ))) {
-                    Ok(gen_queue_elem_type())
+        Function::new_generic(
+            |a| {
+                if a.is_included_in_single(&mers_lib::program::configs::with_list::ListT(
+                    Type::new(data::int::IntT),
+                )) {
+                    Ok(gen_queue_elem_type_or_empty_tuple())
                 } else {
                     Err(format!("Function argument must be `List<Int>`.").into())
                 }
@@ -368,22 +360,24 @@ pub fn add(
                 let db = Arc::clone(db);
                 move |a, _| {
                     let a = int_list_to_usize_vec(&a);
-                    if let Some(elem) = db.lock().unwrap().queue.get_item_at_index(&a, 0) {
-                        gen_queue_elem(elem)
-                    } else {
-                        Data::empty_tuple()
-                    }
+                    Ok(
+                        if let Some(elem) = db.lock().unwrap().queue.get_item_at_index(&a, 0) {
+                            gen_queue_elem(elem)
+                        } else {
+                            Data::empty_tuple()
+                        },
+                    )
                 }
-            }
+            },
         ),
     )
     .add_var(
         "queue_goto".to_owned(),
-        func!(
-            |a, _| {
-                if a.is_included_in(&mers_lib::program::configs::with_list::ListT(Type::new(
-                    data::int::IntT,
-                ))) {
+        Function::new_generic(
+            |a| {
+                if a.is_included_in_single(&mers_lib::program::configs::with_list::ListT(
+                    Type::new(data::int::IntT),
+                )) {
                     Ok(Type::empty_tuple())
                 } else {
                     Err(format!("Function argument must be `List<Int>`.").into())
@@ -393,15 +387,15 @@ pub fn add(
                 let cmd = Arc::clone(cmd);
                 move |a, _| {
                     cmd(Command::QueueGoto(int_list_to_usize_vec(&a)));
-                    Data::empty_tuple()
+                    Ok(Data::empty_tuple())
                 }
-            }
+            },
         ),
     )
     .add_var(
         "queue_clear".to_owned(),
-        func!(
-            |a, _| {
+        Function::new_generic(
+            |a| {
                 if a.is_included_in(&Type::empty_tuple()) {
                     Ok(Type::empty_tuple())
                 } else {
@@ -415,133 +409,134 @@ pub fn add(
                         vec![],
                         QueueContent::Folder(QueueFolder::default()).into(),
                     ));
-                    Data::empty_tuple()
-                }
-            }
-        ),
-    )
-    .add_var(
-        "queue_add_song".to_owned(),
-        func!(
-            |a, _| {
-                if a.is_included_in(&data::tuple::TupleT(vec![
-                    Type::new(mers_lib::program::configs::with_list::ListT(Type::new(
-                        data::int::IntT,
-                    ))),
-                    Type::new(MusicDbIdT),
-                ])) {
-                    Ok(Type::empty_tuple())
-                } else {
-                    Err(format!("Function argument must be `(List<Int>, MusicDbId)`.").into())
+                    Ok(Data::empty_tuple())
                 }
             },
-            {
-                let cmd = Arc::clone(cmd);
-                move |a, _| {
-                    let a = a.get();
-                    let a = &a.as_any().downcast_ref::<data::tuple::Tuple>().unwrap().0;
-                    let path = int_list_to_usize_vec(&a[0]);
-                    let song_id = a[1].get().as_any().downcast_ref::<MusicDbId>().unwrap().0;
-                    cmd(Command::QueueAdd(
-                        path,
-                        vec![QueueContent::Song(song_id).into()],
-                    ));
-                    Data::empty_tuple()
-                }
-            }
         ),
     )
-    .add_var(
-        "queue_add_loop".to_owned(),
-        func!(
-            |a, _| {
-                if a.is_included_in(&data::tuple::TupleT(vec![
-                    Type::new(mers_lib::program::configs::with_list::ListT(Type::new(
-                        data::int::IntT,
-                    ))),
-                    Type::new(data::int::IntT),
-                ])) {
-                    Ok(Type::empty_tuple())
-                } else {
-                    Err(format!("Function argument must be `(List<Int>, Int)`.").into())
-                }
-            },
-            {
-                let cmd = Arc::clone(cmd);
-                move |a, _| {
-                    let a = a.get();
-                    let a = &a.as_any().downcast_ref::<data::tuple::Tuple>().unwrap().0;
-                    let path = int_list_to_usize_vec(&a[0]);
-                    let repeat_count = a[1]
-                        .get()
-                        .as_any()
-                        .downcast_ref::<data::int::Int>()
-                        .unwrap()
-                        .0;
-                    cmd(Command::QueueAdd(
-                        path,
-                        vec![QueueContent::Loop(
-                            repeat_count.max(0) as _,
-                            0,
-                            Box::new(QueueContent::Folder(QueueFolder::default()).into()),
-                        )
-                        .into()],
-                    ));
-                    Data::empty_tuple()
-                }
-            }
-        ),
-    )
-    .add_var(
-        "queue_add_folder".to_owned(),
-        func!(
-            |a, _| {
-                if a.is_included_in(&data::tuple::TupleT(vec![
-                    Type::new(mers_lib::program::configs::with_list::ListT(Type::new(
-                        data::int::IntT,
-                    ))),
-                    Type::new(data::string::StringT),
-                ])) {
-                    Ok(Type::empty_tuple())
-                } else {
-                    Err(format!("Function argument must be `(List<Int>, String)`.").into())
-                }
-            },
-            {
-                let cmd = Arc::clone(cmd);
-                move |a, _| {
-                    let a = a.get();
-                    let a = &a.as_any().downcast_ref::<data::tuple::Tuple>().unwrap().0;
-                    let path = int_list_to_usize_vec(&a[0]);
-                    let name = a[1]
-                        .get()
-                        .as_any()
-                        .downcast_ref::<data::string::String>()
-                        .unwrap()
-                        .0
-                        .clone();
-                    cmd(Command::QueueAdd(
-                        path,
-                        vec![QueueContent::Folder(QueueFolder {
-                            index: 0,
-                            content: vec![],
-                            name,
-                            order: None,
-                        })
-                        .into()],
-                    ));
-                    Data::empty_tuple()
-                }
-            }
-        ),
-    )
+    // TODO: `queue_add`, which takes any queue element as defined in `gen_queue_elem_type`
+    // .add_var(
+    //     "queue_add_song".to_owned(),
+    //     Function::new_generic(
+    //         |a| {
+    //             if a.is_included_in_single(&data::tuple::TupleT(vec![
+    //                 Type::new(mers_lib::program::configs::with_list::ListT(Type::new(
+    //                     data::int::IntT,
+    //                 ))),
+    //                 Type::new(MusicDbIdT),
+    //             ])) {
+    //                 Ok(Type::empty_tuple())
+    //             } else {
+    //                 Err(format!("Function argument must be `(List<Int>, MusicDbId)`.").into())
+    //             }
+    //         },
+    //         {
+    //             let cmd = Arc::clone(cmd);
+    //             move |a, _| {
+    //                 let a = a.get();
+    //                 let a = &a.as_any().downcast_ref::<data::tuple::Tuple>().unwrap().0;
+    //                 let path = int_list_to_usize_vec(&a[0]);
+    //                 let song_id = a[1].get().as_any().downcast_ref::<MusicDbId>().unwrap().0;
+    //                 cmd(Command::QueueAdd(
+    //                     path,
+    //                     vec![QueueContent::Song(song_id).into()],
+    //                 ));
+    //                 Ok(Data::empty_tuple())
+    //             }
+    //         },
+    //     ),
+    // )
+    // .add_var(
+    //     "queue_add_loop".to_owned(),
+    //     Function::new_generic(
+    //         |a| {
+    //             if a.is_included_in_single(&data::tuple::TupleT(vec![
+    //                 Type::new(mers_lib::program::configs::with_list::ListT(Type::new(
+    //                     data::int::IntT,
+    //                 ))),
+    //                 Type::new(data::int::IntT),
+    //             ])) {
+    //                 Ok(Type::empty_tuple())
+    //             } else {
+    //                 Err(format!("Function argument must be `(List<Int>, Int)`.").into())
+    //             }
+    //         },
+    //         {
+    //             let cmd = Arc::clone(cmd);
+    //             move |a, _| {
+    //                 let a = a.get();
+    //                 let a = &a.as_any().downcast_ref::<data::tuple::Tuple>().unwrap().0;
+    //                 let path = int_list_to_usize_vec(&a[0]);
+    //                 let repeat_count = a[1]
+    //                     .get()
+    //                     .as_any()
+    //                     .downcast_ref::<data::int::Int>()
+    //                     .unwrap()
+    //                     .0;
+    //                 cmd(Command::QueueAdd(
+    //                     path,
+    //                     vec![QueueContent::Loop(
+    //                         repeat_count.max(0) as _,
+    //                         0,
+    //                         Box::new(QueueContent::Folder(QueueFolder::default()).into()),
+    //                     )
+    //                     .into()],
+    //                 ));
+    //                 Ok(Data::empty_tuple())
+    //             }
+    //         },
+    //     ),
+    // )
+    // .add_var(
+    //     "queue_add_folder".to_owned(),
+    //     Function::new_generic(
+    //         |a| {
+    //             if a.is_included_in_single(&data::tuple::TupleT(vec![
+    //                 Type::new(mers_lib::program::configs::with_list::ListT(Type::new(
+    //                     data::int::IntT,
+    //                 ))),
+    //                 Type::new(data::string::StringT),
+    //             ])) {
+    //                 Ok(Type::empty_tuple())
+    //             } else {
+    //                 Err(format!("Function argument must be `(List<Int>, String)`.").into())
+    //             }
+    //         },
+    //         {
+    //             let cmd = Arc::clone(cmd);
+    //             move |a, _| {
+    //                 let a = a.get();
+    //                 let a = &a.as_any().downcast_ref::<data::tuple::Tuple>().unwrap().0;
+    //                 let path = int_list_to_usize_vec(&a[0]);
+    //                 let name = a[1]
+    //                     .get()
+    //                     .as_any()
+    //                     .downcast_ref::<data::string::String>()
+    //                     .unwrap()
+    //                     .0
+    //                     .clone();
+    //                 cmd(Command::QueueAdd(
+    //                     path,
+    //                     vec![QueueContent::Folder(QueueFolder {
+    //                         index: 0,
+    //                         content: vec![],
+    //                         name,
+    //                         order: None,
+    //                     })
+    //                     .into()],
+    //                 ));
+    //                 Ok(Data::empty_tuple())
+    //             }
+    //         },
+    //     ),
+    // )
     .add_var(
         "all_songs".to_owned(),
-        func!(
-            |a, _| {
+        Function::new_generic(
+            |a| {
                 if a.is_zero_tuple() {
                     Ok(Type::new(mers_lib::program::configs::with_list::ListT(
-                        gen_song_type(),
+                        Type::new(gen_song_type()),
                     )))
                 } else {
                     Err(format!("Function argument must be `()`.").into())
@@ -550,23 +545,23 @@ pub fn add(
             {
                 let db = Arc::clone(db);
                 move |_, _| {
-                    Data::new(mers_lib::program::configs::with_list::List(
+                    Ok(Data::new(mers_lib::program::configs::with_list::List(
                         db.lock()
                             .unwrap()
                             .songs()
                             .values()
                             .map(|s| Arc::new(RwLock::new(gen_song(s))))
                             .collect(),
-                    ))
+                    )))
                 }
-            }
+            },
         ),
     )
     .add_var(
         "get_song".to_owned(),
-        func!(
-            |a, _| {
-                if a.is_included_in(&MusicDbIdT) {
+        Function::new_generic(
+            |a| {
+                if a.is_included_in_single(&MusicDbIdT) {
                     Ok(Type::newm(vec![
                         Arc::new(gen_song_type()),
                         Arc::new(data::tuple::TupleT(vec![])),
@@ -579,19 +574,19 @@ pub fn add(
                 let db = Arc::clone(db);
                 move |a, _| {
                     let id = a.get().as_any().downcast_ref::<MusicDbId>().unwrap().0;
-                    match db.lock().unwrap().get_song(&id) {
+                    Ok(match db.lock().unwrap().get_song(&id) {
                         Some(song) => gen_song(song),
                         None => Data::empty_tuple(),
-                    }
+                    })
                 }
-            }
+            },
         ),
     )
     .add_var(
         "get_album".to_owned(),
-        func!(
-            |a, _| {
-                if a.is_included_in(&MusicDbIdT) {
+        Function::new_generic(
+            |a| {
+                if a.is_included_in_single(&MusicDbIdT) {
                     Ok(Type::newm(vec![
                         Arc::new(gen_album_type()),
                         Arc::new(data::tuple::TupleT(vec![])),
@@ -604,19 +599,19 @@ pub fn add(
                 let db = Arc::clone(db);
                 move |a, _| {
                     let id = a.get().as_any().downcast_ref::<MusicDbId>().unwrap().0;
-                    match db.lock().unwrap().albums().get(&id) {
+                    Ok(match db.lock().unwrap().albums().get(&id) {
                         Some(album) => gen_album(album),
                         None => Data::empty_tuple(),
-                    }
+                    })
                 }
-            }
+            },
         ),
     )
     .add_var(
         "get_artist".to_owned(),
-        func!(
-            |a, _| {
-                if a.is_included_in(&MusicDbIdT) {
+        Function::new_generic(
+            |a| {
+                if a.is_included_in_single(&MusicDbIdT) {
                     Ok(Type::newm(vec![
                         Arc::new(gen_artist_type()),
                         Arc::new(data::tuple::TupleT(vec![])),
@@ -629,19 +624,19 @@ pub fn add(
                 let db = Arc::clone(db);
                 move |a, _| {
                     let id = a.get().as_any().downcast_ref::<MusicDbId>().unwrap().0;
-                    match db.lock().unwrap().artists().get(&id) {
+                    Ok(match db.lock().unwrap().artists().get(&id) {
                         Some(artist) => gen_artist(artist),
                         None => Data::empty_tuple(),
-                    }
+                    })
                 }
-            }
+            },
         ),
     )
     .add_var(
         "get_song_tags".to_owned(),
-        func!(
-            |a, _| {
-                if a.is_included_in(&MusicDbIdT) {
+        Function::new_generic(
+            |a| {
+                if a.is_included_in_single(&MusicDbIdT) {
                     Ok(Type::newm(vec![
                         Arc::new(mers_lib::program::configs::with_list::ListT(Type::new(
                             data::string::StringT,
@@ -656,7 +651,7 @@ pub fn add(
                 let db = Arc::clone(db);
                 move |a, _| {
                     let id = a.get().as_any().downcast_ref::<MusicDbId>().unwrap().0;
-                    match db.lock().unwrap().get_song(&id) {
+                    Ok(match db.lock().unwrap().get_song(&id) {
                         Some(song) => Data::new(mers_lib::program::configs::with_list::List(
                             song.general
                                 .tags
@@ -669,16 +664,16 @@ pub fn add(
                                 .collect(),
                         )),
                         None => Data::empty_tuple(),
-                    }
+                    })
                 }
-            }
+            },
         ),
     )
     .add_var(
         "get_album_tags".to_owned(),
-        func!(
-            |a, _| {
-                if a.is_included_in(&MusicDbIdT) {
+        Function::new_generic(
+            |a| {
+                if a.is_included_in_single(&MusicDbIdT) {
                     Ok(Type::newm(vec![
                         Arc::new(mers_lib::program::configs::with_list::ListT(Type::new(
                             data::string::StringT,
@@ -693,7 +688,7 @@ pub fn add(
                 let db = Arc::clone(db);
                 move |a, _| {
                     let id = a.get().as_any().downcast_ref::<MusicDbId>().unwrap().0;
-                    match db.lock().unwrap().albums().get(&id) {
+                    Ok(match db.lock().unwrap().albums().get(&id) {
                         Some(album) => Data::new(mers_lib::program::configs::with_list::List(
                             album
                                 .general
@@ -707,16 +702,16 @@ pub fn add(
                                 .collect(),
                         )),
                         None => Data::empty_tuple(),
-                    }
+                    })
                 }
-            }
+            },
         ),
     )
     .add_var(
         "get_artist_tags".to_owned(),
-        func!(
-            |a, _| {
-                if a.is_included_in(&MusicDbIdT) {
+        Function::new_generic(
+            |a| {
+                if a.is_included_in_single(&MusicDbIdT) {
                     Ok(Type::newm(vec![
                         Arc::new(mers_lib::program::configs::with_list::ListT(Type::new(
                             data::string::StringT,
@@ -731,7 +726,7 @@ pub fn add(
                 let db = Arc::clone(db);
                 move |a, _| {
                     let id = a.get().as_any().downcast_ref::<MusicDbId>().unwrap().0;
-                    match db.lock().unwrap().artists().get(&id) {
+                    Ok(match db.lock().unwrap().artists().get(&id) {
                         Some(artist) => Data::new(mers_lib::program::configs::with_list::List(
                             artist
                                 .general
@@ -745,15 +740,15 @@ pub fn add(
                                 .collect(),
                         )),
                         None => Data::empty_tuple(),
-                    }
+                    })
                 }
-            }
+            },
         ),
     )
 }
 
-fn gen_song_type() -> Type {
-    Type::new(data::object::ObjectT(vec![
+fn gen_song_type() -> data::object::ObjectT {
+    data::object::ObjectT(vec![
         ("id".to_owned(), Type::new(MusicDbIdT)),
         ("title".to_owned(), Type::new(data::string::StringT)),
         (
@@ -771,7 +766,7 @@ fn gen_song_type() -> Type {
                 Arc::new(data::tuple::TupleT(vec![])),
             ]),
         ),
-    ]))
+    ])
 }
 fn gen_song(song: &Song) -> Data {
     Data::new(data::object::Object(vec![
@@ -799,8 +794,8 @@ fn gen_song(song: &Song) -> Data {
         ),
     ]))
 }
-fn gen_album_type() -> Type {
-    Type::new(data::object::ObjectT(vec![
+fn gen_album_type() -> data::object::ObjectT {
+    data::object::ObjectT(vec![
         ("id".to_owned(), Type::new(MusicDbIdT)),
         ("name".to_owned(), Type::new(data::string::StringT)),
         ("artist".to_owned(), Type::new(MusicDbIdT)),
@@ -817,7 +812,7 @@ fn gen_album_type() -> Type {
                 MusicDbIdT,
             ))),
         ),
-    ]))
+    ])
 }
 fn gen_album(album: &Album) -> Data {
     Data::new(data::object::Object(vec![
@@ -847,8 +842,8 @@ fn gen_album(album: &Album) -> Data {
         ),
     ]))
 }
-fn gen_artist_type() -> Type {
-    Type::new(data::object::ObjectT(vec![
+fn gen_artist_type() -> data::object::ObjectT {
+    data::object::ObjectT(vec![
         ("id".to_owned(), Type::new(MusicDbIdT)),
         ("name".to_owned(), Type::new(data::string::StringT)),
         (
@@ -870,7 +865,7 @@ fn gen_artist_type() -> Type {
                 MusicDbIdT,
             ))),
         ),
-    ]))
+    ])
 }
 fn gen_artist(artist: &Artist) -> Data {
     Data::new(data::object::Object(vec![
@@ -910,15 +905,15 @@ fn gen_artist(artist: &Artist) -> Data {
     ]))
 }
 
-fn gen_queue_elem_type() -> Type {
+fn gen_queue_elem_type_or_empty_tuple() -> Type {
     Type::newm(vec![
         Arc::new(data::tuple::TupleT(vec![])),
         Arc::new(data::object::ObjectT(vec![
-            ("enabled".to_owned(), Type::new(data::bool::BoolT)),
+            ("enabled".to_owned(), data::bool::bool_type()),
             ("song".to_owned(), Type::new(MusicDbIdT)),
         ])),
         Arc::new(data::object::ObjectT(vec![
-            ("enabled".to_owned(), Type::new(data::bool::BoolT)),
+            ("enabled".to_owned(), data::bool::bool_type()),
             (
                 "loop".to_owned(),
                 Type::new(data::object::ObjectT(vec![
@@ -928,11 +923,11 @@ fn gen_queue_elem_type() -> Type {
             ),
         ])),
         Arc::new(data::object::ObjectT(vec![
-            ("enabled".to_owned(), Type::new(data::bool::BoolT)),
+            ("enabled".to_owned(), data::bool::bool_type()),
             ("random".to_owned(), Type::empty_tuple()),
         ])),
         Arc::new(data::object::ObjectT(vec![
-            ("enabled".to_owned(), Type::new(data::bool::BoolT)),
+            ("enabled".to_owned(), data::bool::bool_type()),
             (
                 "folder".to_owned(),
                 Type::new(data::object::ObjectT(vec![
@@ -943,7 +938,7 @@ fn gen_queue_elem_type() -> Type {
             ),
         ])),
         Arc::new(data::object::ObjectT(vec![
-            ("enabled".to_owned(), Type::new(data::bool::BoolT)),
+            ("enabled".to_owned(), data::bool::bool_type()),
             ("shuffle".to_owned(), Type::empty_tuple()),
         ])),
     ])
@@ -1038,7 +1033,7 @@ impl MersType for MusicDbIdT {
     fn is_same_type_as(&self, other: &dyn MersType) -> bool {
         other.as_any().is::<Self>()
     }
-    fn is_included_in_single(&self, target: &dyn MersType) -> bool {
+    fn is_included_in(&self, target: &dyn MersType) -> bool {
         target.as_any().is::<Self>()
     }
     fn subtypes(&self, acc: &mut Type) {

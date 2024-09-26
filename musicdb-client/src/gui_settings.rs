@@ -11,8 +11,8 @@ use speedy2d::{
 
 use crate::{
     gui::{
-        DrawInfo, GuiAction, GuiElem, GuiElemCfg, GuiElemChildren, KeyAction, KeyActionId,
-        KeyBinding,
+        DrawInfo, EventInfo, GuiAction, GuiElem, GuiElemCfg, GuiElemChildren, KeyAction,
+        KeyActionId, KeyBinding,
     },
     gui_base::{Button, Panel, ScrollBox, Slider},
     gui_text::{AdvancedContent, AdvancedLabel, Content, Label},
@@ -139,8 +139,8 @@ impl KeybindInput {
     }
 }
 impl GuiElem for KeybindInput {
-    fn mouse_pressed(&mut self, button: MouseButton) -> Vec<GuiAction> {
-        if let MouseButton::Left = button {
+    fn mouse_pressed(&mut self, e: &mut EventInfo, button: MouseButton) -> Vec<GuiAction> {
+        if MouseButton::Left == button && e.take() {
             if !self.has_keyboard_focus {
                 self.changing = true;
                 self.config.request_keyboard_focus = true;
@@ -154,6 +154,7 @@ impl GuiElem for KeybindInput {
     }
     fn key_focus(
         &mut self,
+        e: &mut EventInfo,
         modifiers: ModifiersState,
         down: bool,
         key: Option<VirtualKeyCode>,
@@ -171,13 +172,14 @@ impl GuiElem for KeybindInput {
                         | VirtualKeyCode::RAlt
                         | VirtualKeyCode::LWin
                         | VirtualKeyCode::RWin
-                ) {
+                ) && e.take()
+                {
                     self.changing = false;
                     let bind = KeyBinding::new(&modifiers, key);
                     self.keybinds_should_be_updated
                         .store(true, std::sync::atomic::Ordering::Relaxed);
                     vec![
-                        GuiAction::SetKeybind(self.id, Some(bind)),
+                        GuiAction::SetKeybind(self.id, Some((bind, true))),
                         GuiAction::ResetKeyboardFocus,
                     ]
                 } else {
