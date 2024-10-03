@@ -214,50 +214,54 @@ fn main() {
             }
         })
     };
-    match mode {
-        #[cfg(feature = "speedy2d")]
-        Mode::Gui | Mode::GuiSyncplayerLocal { .. } | Mode::GuiSyncplayerNetwork => {
-            {
-                let get_con: Arc<
-                    Mutex<musicdb_lib::server::get::Client<Box<dyn ClientIo + 'static>>>,
-                > = Arc::new(Mutex::new(
+    macro_rules! gui_modes {
+        () => {{
+            let get_con: Arc<Mutex<musicdb_lib::server::get::Client<Box<dyn ClientIo + 'static>>>> =
+                Arc::new(Mutex::new(
                     musicdb_lib::server::get::Client::new(BufReader::new(Box::new(
                         TcpStream::connect(addr).expect("opening get client connection"),
-                    )
-                        as _))
+                    ) as _))
                     .expect("initializing get client connection"),
                 ));
-                'anotherifstatement: {
-                    #[cfg(feature = "playback")]
-                    if let Mode::GuiSyncplayerLocal { lib_dir } = mode {
-                        database.lock().unwrap().lib_directory = lib_dir;
-                        break 'anotherifstatement;
-                    }
-                    #[cfg(feature = "playback")]
-                    if let Mode::GuiSyncplayerNetwork = mode {
-                        break 'anotherifstatement;
-                    }
-                    // if not using syncplayer-local
-                    database.lock().unwrap().remote_server_as_song_file_source =
-                        Some(Arc::clone(&get_con));
+            #[allow(unused_labels)]
+            'anotherifstatement: {
+                #[cfg(feature = "playback")]
+                if let Mode::GuiSyncplayerLocal { lib_dir } = mode {
+                    database.lock().unwrap().lib_directory = lib_dir;
+                    break 'anotherifstatement;
                 }
-                let occasional_refresh_sender = Arc::clone(&sender);
-                thread::spawn(move || loop {
-                    std::thread::sleep(std::time::Duration::from_secs(1));
-                    if let Some(v) = &*occasional_refresh_sender.lock().unwrap() {
-                        v.send_event(GuiEvent::Refresh).unwrap();
-                    }
-                });
-                gui::main(
-                    database,
-                    con,
-                    get_con,
-                    sender,
-                    #[cfg(feature = "merscfg")]
-                    &mers_after_db_updated_action,
-                )
-            };
-        }
+                #[cfg(feature = "playback")]
+                if let Mode::GuiSyncplayerNetwork = mode {
+                    break 'anotherifstatement;
+                }
+                // if not using syncplayer-local
+                database.lock().unwrap().remote_server_as_song_file_source =
+                    Some(Arc::clone(&get_con));
+            }
+            let occasional_refresh_sender = Arc::clone(&sender);
+            thread::spawn(move || loop {
+                std::thread::sleep(std::time::Duration::from_secs(1));
+                if let Some(v) = &*occasional_refresh_sender.lock().unwrap() {
+                    v.send_event(GuiEvent::Refresh).unwrap();
+                }
+            });
+            gui::main(
+                database,
+                con,
+                get_con,
+                sender,
+                #[cfg(feature = "merscfg")]
+                &mers_after_db_updated_action,
+            )
+        }};
+    }
+    match mode {
+        #[cfg(feature = "speedy2d")]
+        #[cfg(feature = "playback")]
+        Mode::Gui | Mode::GuiSyncplayerLocal { .. } | Mode::GuiSyncplayerNetwork => gui_modes!(),
+        #[cfg(feature = "speedy2d")]
+        #[cfg(not(feature = "playback"))]
+        Mode::Gui => gui_modes!(),
         #[cfg(feature = "playback")]
         Mode::SyncplayerLocal { .. } | Mode::SyncplayerNetwork => {
             con_thread.join().unwrap();
