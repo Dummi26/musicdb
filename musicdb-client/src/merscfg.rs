@@ -12,6 +12,7 @@ use musicdb_lib::{data::database::Database, server::Command};
 use musicdb_mers::mers_lib::{
     data::{Data, Type},
     errors::CheckError,
+    info::DisplayInfo,
 };
 use speedy2d::{color::Color, dimen::Vec2, shape::Rectangle, window::UserEventSender};
 
@@ -165,11 +166,11 @@ impl MersCfg {
             let es = event_sender.clone();
             let v = Arc::clone(&self.updated_playing_status);
             musicdb_mers::mers_lib::data::function::Function::new_generic(
-                |a| {
+                |a, i| {
                     if a.is_zero_tuple() {
                         Ok(Type::empty_tuple())
                     } else {
-                        Err(format!("Can't call `playback_resume` with argument of type `{a}` (must be `()`).").into())
+                        Err(format!("Can't call `playback_resume` with argument of type `{}` (must be `()`).", a.with_info(i)).into())
                     }
                 },
                 move |_, _| {
@@ -183,11 +184,11 @@ impl MersCfg {
             let es = event_sender.clone();
             let v = Arc::clone(&self.updated_playing_status);
             musicdb_mers::mers_lib::data::function::Function::new_generic(
-                |a| {
+                |a, i| {
                     if a.is_zero_tuple() {
                         Ok(Type::empty_tuple())
                     } else {
-                        Err(format!("Can't call `playback_pause` with argument of type `{a}` (must be `()`).").into())
+                        Err(format!("Can't call `playback_pause` with argument of type `{}` (must be `()`).", a.with_info(i)).into())
                     }
                 },
                 move |_, _| {
@@ -201,11 +202,11 @@ impl MersCfg {
             let es = event_sender.clone();
             let v = Arc::clone(&self.updated_playing_status);
             musicdb_mers::mers_lib::data::function::Function::new_generic(
-                |a| {
+                |a,i| {
                     if a.is_zero_tuple() {
                         Ok(Type::empty_tuple())
                     } else {
-                        Err(format!("Can't call `playback_stop` with argument of type `{a}` (must be `()`).").into())
+                        Err(format!("Can't call `playback_stop` with argument of type `{}` (must be `()`).", a.with_info(i)).into())
                     }
                 },
                 move |_, _| {
@@ -219,11 +220,11 @@ impl MersCfg {
             let es = event_sender.clone();
             let v = Arc::clone(&self.updated_idle_status);
             musicdb_mers::mers_lib::data::function::Function::new_generic(
-                |a| {
+                |a, i| {
                     if a.is_zero_tuple() {
                         Ok(Type::empty_tuple())
                     } else {
-                        Err(format!("Can't call `idle_start` with argument of type `{a}` (must be `()`).").into())
+                        Err(format!("Can't call `idle_start` with argument of type `{}` (must be `()`).",a.with_info(i)).into())
                     }
                 },
                 move |_, _| {
@@ -237,11 +238,11 @@ impl MersCfg {
             let es = event_sender.clone();
             let v = Arc::clone(&self.updated_idle_status);
             musicdb_mers::mers_lib::data::function::Function::new_generic(
-                |a| {
+                |a,i| {
                     if a.is_zero_tuple() {
                         Ok(Type::empty_tuple())
                     } else {
-                        Err(format!("Can't call `idle_stop` with argument of type `{a}` (must be `()`).").into())
+                        Err(format!("Can't call `idle_stop` with argument of type `{}` (must be `()`).", a.with_info(i)).into())
                     }
                 },
                 move |_, _| {
@@ -255,11 +256,11 @@ impl MersCfg {
             let es = event_sender.clone();
             let v = Arc::clone(&self.updated_idle_status);
             musicdb_mers::mers_lib::data::function::Function::new_generic(
-                |a | {
+                |a, i| {
                     if a.is_zero_tuple() {
                         Ok(Type::empty_tuple())
                     } else {
-                        Err(format!("Can't call `idle_prevent` with argument of type `{a}` (must be `()`).").into())
+                        Err(format!("Can't call `idle_prevent` with argument of type `{}` (must be `()`).", a.with_info(i)).into())
                     }
                 },
                 move |_, _| {
@@ -272,18 +273,18 @@ impl MersCfg {
         .add_var("send_notification".to_owned(),{
             let es = event_sender.clone();
             musicdb_mers::mers_lib::data::function::Function::new_generic(
-                |a| {
+                |a, i| {
                     if a.is_included_in_single(&musicdb_mers::mers_lib::data::tuple::TupleT(vec![
                         musicdb_mers::mers_lib::data::Type::new(musicdb_mers::mers_lib::data::string::StringT),
                         musicdb_mers::mers_lib::data::Type::new(musicdb_mers::mers_lib::data::string::StringT),
                         musicdb_mers::mers_lib::data::Type::newm(vec![
-                            Arc::new(musicdb_mers::mers_lib::data::int::IntT),
+                            Arc::new(musicdb_mers::mers_lib::data::int::IntT(musicdb_mers::mers_lib::data::int::INT_MIN,musicdb_mers::mers_lib::data::int::INT_MAX)),
                             Arc::new(musicdb_mers::mers_lib::data::float::FloatT)
                         ]),
                     ])) {
                         Ok(Type::empty_tuple())
                     } else {
-                        Err(format!("Can't call `send_notification` with argument of type `{a}` (must be `String`).").into())
+                        Err(format!("Can't call `send_notification` with argument of type `{}` (must be `String`).", a.with_info(i)).into())
                     }
                 },
                 move |a, _| {
@@ -335,7 +336,7 @@ impl MersCfg {
             let es = event_sender.clone();
             let update = Arc::clone(&self.updated_idle_screen_cover_pos);
             musicdb_mers::mers_lib::data::function::Function::new_generic(
-                |a| {
+                |a, i| {
                     if a.is_included_in(&musicdb_mers::mers_lib::data::Type::newm(vec![
                         Arc::new(musicdb_mers::mers_lib::data::tuple::TupleT(vec![])),
                         Arc::new(musicdb_mers::mers_lib::data::tuple::TupleT(vec![
@@ -347,7 +348,7 @@ impl MersCfg {
                     ])) {
                         Ok(Type::empty_tuple())
                     } else {
-                        Err(format!("Can't call `set_idle_screen_cover_pos` with argument of type `{a}` (must be `()` or `(Float, Float, Float, Float)`).").into())
+                        Err(format!("Can't call `set_idle_screen_cover_pos` with argument of type `{}` (must be `()` or `(Float, Float, Float, Float)`).", a.with_info(i)).into())
                     }
                 },
                 move |a, _| {
@@ -365,7 +366,7 @@ impl MersCfg {
             let es = event_sender.clone();
             let update = Arc::clone(&self.updated_idle_screen_artist_image_pos);
             musicdb_mers::mers_lib::data::function::Function::new_generic(
-                |a| {
+                |a, i| {
                     if a.is_included_in(&musicdb_mers::mers_lib::data::Type::newm(vec![
                         Arc::new(musicdb_mers::mers_lib::data::tuple::TupleT(vec![])),
                         Arc::new(musicdb_mers::mers_lib::data::tuple::TupleT(vec![
@@ -377,7 +378,7 @@ impl MersCfg {
                     ])) {
                         Ok(Type::empty_tuple())
                     } else {
-                        Err(format!("Can't call `set_idle_screen_artist_image_pos` with argument of type `{a}` (must be `()` or `(Float, Float, Float, Float)`).").into())
+                        Err(format!("Can't call `set_idle_screen_artist_image_pos` with argument of type `{}` (must be `()` or `(Float, Float, Float, Float)`).", a.with_info(i)).into())
                     }
                 },
                 move |a, _| {
@@ -401,14 +402,14 @@ impl MersCfg {
             let es = event_sender.clone();
             let update = Arc::clone(&self.updated_statusbar_text_format);
             musicdb_mers::mers_lib::data::function::Function::new_generic(
-                |a| {
+                |a, i| {
                     if a.is_included_in_single(&musicdb_mers::mers_lib::data::string::StringT) {
                         Ok(Type::newm(vec![
                             Arc::new(musicdb_mers::mers_lib::data::tuple::TupleT(vec![])),
                             Arc::new(musicdb_mers::mers_lib::data::string::StringT),
                         ]))
                     } else {
-                        Err(format!("Can't call `set_statusbar_text_format` with argument of type `{a}` (must be `String`).").into())
+                        Err(format!("Can't call `set_statusbar_text_format` with argument of type `{}` (must be `String`).", a.with_info(i)).into())
                     }
                 },
                 move |a, _| {
@@ -429,14 +430,14 @@ impl MersCfg {
             let es = event_sender.clone();
             let update = Arc::clone(&self.updated_idle_screen_top_text_format);
             musicdb_mers::mers_lib::data::function::Function::new_generic(
-                |a| {
+                |a, i| {
                     if a.is_included_in_single(&musicdb_mers::mers_lib::data::string::StringT) {
                         Ok(Type::newm(vec![
                             Arc::new(musicdb_mers::mers_lib::data::tuple::TupleT(vec![])),
                             Arc::new(musicdb_mers::mers_lib::data::string::StringT),
                         ]))
                     } else {
-                        Err(format!("Can't call `set_idle_screen_top_text_format` with argument of type `{a}` (must be `String`).").into())
+                        Err(format!("Can't call `set_idle_screen_top_text_format` with argument of type `{}` (must be `String`).", a.with_info(i)).into())
                     }
                 },
                 move |a, _| {
@@ -456,14 +457,14 @@ impl MersCfg {
             let es = event_sender.clone();
             let update = Arc::clone(&self.updated_idle_screen_side_text_1_format);
             musicdb_mers::mers_lib::data::function::Function::new_generic(
-                |a| {
+                |a, i| {
                     if a.is_included_in_single(&musicdb_mers::mers_lib::data::string::StringT) {
                         Ok(Type::newm(vec![
                             Arc::new(musicdb_mers::mers_lib::data::tuple::TupleT(vec![])),
                             Arc::new(musicdb_mers::mers_lib::data::string::StringT),
                         ]))
                     } else {
-                        Err(format!("Can't call `set_idle_screen_side_text_1_format` with argument of type `{a}` (must be `String`).").into())
+                        Err(format!("Can't call `set_idle_screen_side_text_1_format` with argument of type `{}` (must be `String`).", a.with_info(i)).into())
                     }
                 },
                 move |a, _| {
@@ -483,14 +484,14 @@ impl MersCfg {
             let es = event_sender.clone();
             let update = Arc::clone(&self.updated_idle_screen_side_text_2_format);
             musicdb_mers::mers_lib::data::function::Function::new_generic(
-                |a| {
+                |a, i| {
                     if a.is_included_in_single(&musicdb_mers::mers_lib::data::string::StringT) {
                         Ok(Type::newm(vec![
                             Arc::new(musicdb_mers::mers_lib::data::tuple::TupleT(vec![])),
                             Arc::new(musicdb_mers::mers_lib::data::string::StringT),
                         ]))
                     } else {
-                        Err(format!("Can't call `set_idle_screen_side_text_2_format` with argument of type `{a}` (must be `String`).").into())
+                        Err(format!("Can't call `set_idle_screen_side_text_2_format` with argument of type `{}` (must be `String`).", a.with_info(i)).into())
                     }
                 },
                 move |a, _| {
@@ -691,18 +692,20 @@ impl MersCfg {
             .compile(&mut i1, Default::default())?;
         let _ = compiled.check(&mut i3, None)?;
         let out = compiled.run(&mut i2)?;
-        Ok(self.load3(out))
+        Ok(self.load3(out, i2.display_info()))
     }
     fn load3(
         &mut self,
         out: musicdb_mers::mers_lib::data::Data,
+        i: DisplayInfo,
     ) -> Result<(), (String, Option<CheckError>)> {
         if let Some(obj) = out
             .get()
             .as_any()
             .downcast_ref::<musicdb_mers::mers_lib::data::object::Object>()
         {
-            for (name, val) in obj.0.iter() {
+            for (name, val) in obj.iter() {
+                let name = i.get_object_field_name(*name).to_string();
                 let name = name.as_str();
                 match name {
                     "before_draw" => {
@@ -750,7 +753,7 @@ fn gen_set_pos_func(
     update: Arc<Updatable<Rectangle>>,
 ) -> musicdb_mers::mers_lib::data::function::Function {
     musicdb_mers::mers_lib::data::function::Function::new_generic(
-        move |a| {
+        move |a, i| {
             if a.is_included_in(&musicdb_mers::mers_lib::data::Type::newm(vec![Arc::new(
                 musicdb_mers::mers_lib::data::tuple::TupleT(vec![
                     musicdb_mers::mers_lib::data::Type::new(
@@ -769,7 +772,7 @@ fn gen_set_pos_func(
             )])) {
                 Ok(Type::empty_tuple())
             } else {
-                Err(format!("Can't call `{name}` with argument of type `{a}` (must be `(Float, Float, Float, Float)`).").into())
+                Err(format!("Can't call `{name}` with argument of type `{}` (must be `(Float, Float, Float, Float)`).", a.with_info(i)).into())
             }
         },
         move |a, _| {

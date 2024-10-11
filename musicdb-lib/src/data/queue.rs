@@ -34,10 +34,10 @@ impl Queue {
         &mut self.content
     }
 
-    pub fn add_to_end(&mut self, v: Vec<Self>) -> Option<usize> {
+    pub fn add_to_end(&mut self, v: Vec<Self>, skip_init: bool) -> Option<usize> {
         match &mut self.content {
             QueueContent::Song(_) => None,
-            QueueContent::Folder(folder) => folder.add_to_end(v),
+            QueueContent::Folder(folder) => folder.add_to_end(v, skip_init),
             QueueContent::Loop(..) => None,
         }
     }
@@ -56,10 +56,10 @@ impl Queue {
             QueueContent::Loop(_, _, inner) => index[0] == 0 && inner.is_current(&index[1..]),
         }
     }
-    pub fn insert(&mut self, v: Vec<Self>, index: usize) -> bool {
+    pub fn insert(&mut self, v: Vec<Self>, index: usize, skip_init: bool) -> bool {
         match &mut self.content {
             QueueContent::Song(_) => false,
-            QueueContent::Folder(folder) => folder.insert(v, index),
+            QueueContent::Folder(folder) => folder.insert(v, index, skip_init),
             QueueContent::Loop(..) => false,
         }
     }
@@ -215,9 +215,15 @@ impl Queue {
 
     pub fn set_index_db(db: &mut Database, index: &[usize]) {
         db.queue.reset_index();
-        db.queue.set_index_inner(index, 0, vec![]);
+        db.queue.set_index_inner(index, 0, vec![], false);
     }
-    pub fn set_index_inner(&mut self, index: &[usize], depth: usize, mut build_index: Vec<usize>) {
+    pub fn set_index_inner(
+        &mut self,
+        index: &[usize],
+        depth: usize,
+        mut build_index: Vec<usize>,
+        keep_child_indices: bool,
+    ) {
         let i = if let Some(i) = index.get(depth) {
             *i
         } else {
@@ -229,13 +235,17 @@ impl Queue {
             QueueContent::Folder(folder) => {
                 folder.index = i;
                 if let Some(c) = folder.get_current_mut() {
-                    c.init();
-                    c.set_index_inner(index, depth + 1, build_index);
+                    if !keep_child_indices {
+                        c.init();
+                    }
+                    c.set_index_inner(index, depth + 1, build_index, keep_child_indices);
                 }
             }
             QueueContent::Loop(_, _, inner) => {
-                inner.init();
-                inner.set_index_inner(index, depth + 1, build_index)
+                if !keep_child_indices {
+                    inner.init();
+                }
+                inner.set_index_inner(index, depth + 1, build_index, keep_child_indices)
             }
         }
     }
@@ -347,11 +357,13 @@ impl QueueFolder {
             index: 0,
         }
     }
-    pub fn add_to_end(&mut self, v: Vec<Queue>) -> Option<usize> {
+    pub fn add_to_end(&mut self, v: Vec<Queue>, skip_init: bool) -> Option<usize> {
         let add_len = v.len();
         let len = self.content.len();
         for mut v in v.into_iter() {
-            v.init();
+            if !skip_init {
+                v.init();
+            }
             self.content.push(v);
         }
         if let Some(order) = &mut self.order {
@@ -361,7 +373,7 @@ impl QueueFolder {
         }
         Some(len)
     }
-    pub fn insert(&mut self, v: Vec<Queue>, index: usize) -> bool {
+    pub fn insert(&mut self, v: Vec<Queue>, index: usize, skip_init: bool) -> bool {
         if index <= self.content.len() {
             if self.index >= index {
                 self.index += v.len();
@@ -377,7 +389,9 @@ impl QueueFolder {
                 vec.extend(end);
             }
             let mapfunc = |mut v: Queue| {
-                v.init();
+                if !skip_init {
+                    v.init();
+                }
                 v
             };
             if let Some(order) = &mut self.order {

@@ -6,7 +6,8 @@ use std::{
 pub use mers_lib;
 
 use mers_lib::{
-    data::{self, function::Function, Data, MersData, MersType, Type},
+    data::{self, function::Function, object::ObjectFieldsMap, Data, MersData, MersType, Type},
+    info::DisplayInfo,
     prelude_extend_config::Config,
 };
 use musicdb_lib::{
@@ -157,7 +158,7 @@ pub fn add(
         cfg = cfg.add_var(
             format!("handle_event_{name}"),
             Function::new_generic(
-                move |a| {
+                move |a, i| {
                     if a.types.iter().all(|a| {
                         Type::newm(vec![Arc::clone(a)]).is_zero_tuple()
                             || a.as_any()
@@ -166,7 +167,10 @@ pub fn add(
                     }) {
                         Ok(Type::empty_tuple())
                     } else {
-                        Err(format!("Handler function must be `{in_type} -> ()`").into())
+                        Err(
+                            format!("Handler function must be `{} -> ()`", in_type.with_info(i))
+                                .into(),
+                        )
                     }
                 },
                 move |a, _| {
@@ -180,7 +184,7 @@ pub fn add(
     cfg.add_var(
         "send_server_notification".to_owned(),
         Function::new_generic(
-            |a| {
+            |a, _| {
                 if a.is_included_in_single(&data::string::StringT) {
                     Ok(Type::empty_tuple())
                 } else {
@@ -207,7 +211,7 @@ pub fn add(
     .add_var(
         "resume".to_owned(),
         Function::new_generic(
-            |a| {
+            |a, _| {
                 if a.is_included_in(&Type::empty_tuple()) {
                     Ok(Type::empty_tuple())
                 } else {
@@ -226,7 +230,7 @@ pub fn add(
     .add_var(
         "pause".to_owned(),
         Function::new_generic(
-            |a| {
+            |a, _| {
                 if a.is_included_in(&Type::empty_tuple()) {
                     Ok(Type::empty_tuple())
                 } else {
@@ -245,7 +249,7 @@ pub fn add(
     .add_var(
         "stop".to_owned(),
         Function::new_generic(
-            |a| {
+            |a, _| {
                 if a.is_included_in(&Type::empty_tuple()) {
                     Ok(Type::empty_tuple())
                 } else {
@@ -264,7 +268,7 @@ pub fn add(
     .add_var(
         "next_song".to_owned(),
         Function::new_generic(
-            |a| {
+            |a, _| {
                 if a.is_included_in(&Type::empty_tuple()) {
                     Ok(Type::empty_tuple())
                 } else {
@@ -283,7 +287,7 @@ pub fn add(
     .add_var(
         "get_playing".to_owned(),
         Function::new_generic(
-            |a| {
+            |a, _| {
                 if a.is_included_in(&Type::empty_tuple()) {
                     Ok(data::bool::bool_type())
                 } else {
@@ -299,7 +303,7 @@ pub fn add(
     .add_var(
         "queue_get_current_song".to_owned(),
         Function::new_generic(
-            |a| {
+            |a, _| {
                 if a.is_included_in(&Type::empty_tuple()) {
                     Ok(Type::newm(vec![
                         Arc::new(MusicDbIdT),
@@ -323,7 +327,7 @@ pub fn add(
     .add_var(
         "queue_get_next_song".to_owned(),
         Function::new_generic(
-            |a| {
+            |a, _| {
                 if a.is_included_in(&Type::empty_tuple()) {
                     Ok(Type::newm(vec![
                         Arc::new(MusicDbIdT),
@@ -347,22 +351,22 @@ pub fn add(
     .add_var(
         "queue_get_elem".to_owned(),
         Function::new_generic(
-            |a| {
+            |a, i| {
                 if a.is_included_in_single(&mers_lib::program::configs::with_list::ListT(
-                    Type::new(data::int::IntT),
+                    Type::new(data::int::IntT(data::int::INT_MIN, data::int::INT_MAX)),
                 )) {
-                    Ok(gen_queue_elem_type_or_empty_tuple())
+                    Ok(gen_queue_elem_type_or_empty_tuple(i.display_info()))
                 } else {
                     Err(format!("Function argument must be `List<Int>`.").into())
                 }
             },
             {
                 let db = Arc::clone(db);
-                move |a, _| {
+                move |a, i| {
                     let a = int_list_to_usize_vec(&a);
                     Ok(
                         if let Some(elem) = db.lock().unwrap().queue.get_item_at_index(&a, 0) {
-                            gen_queue_elem(elem)
+                            gen_queue_elem(elem, i.display_info())
                         } else {
                             Data::empty_tuple()
                         },
@@ -374,9 +378,9 @@ pub fn add(
     .add_var(
         "queue_goto".to_owned(),
         Function::new_generic(
-            |a| {
+            |a, _| {
                 if a.is_included_in_single(&mers_lib::program::configs::with_list::ListT(
-                    Type::new(data::int::IntT),
+                    Type::new(data::int::IntT(data::int::INT_MIN, data::int::INT_MAX)),
                 )) {
                     Ok(Type::empty_tuple())
                 } else {
@@ -395,7 +399,7 @@ pub fn add(
     .add_var(
         "queue_clear".to_owned(),
         Function::new_generic(
-            |a| {
+            |a, _| {
                 if a.is_included_in(&Type::empty_tuple()) {
                     Ok(Type::empty_tuple())
                 } else {
@@ -533,10 +537,10 @@ pub fn add(
     .add_var(
         "all_songs".to_owned(),
         Function::new_generic(
-            |a| {
+            |a, i| {
                 if a.is_zero_tuple() {
                     Ok(Type::new(mers_lib::program::configs::with_list::ListT(
-                        Type::new(gen_song_type()),
+                        Type::new(gen_song_type(i.display_info())),
                     )))
                 } else {
                     Err(format!("Function argument must be `()`.").into())
@@ -544,13 +548,13 @@ pub fn add(
             },
             {
                 let db = Arc::clone(db);
-                move |_, _| {
+                move |_, i| {
                     Ok(Data::new(mers_lib::program::configs::with_list::List(
                         db.lock()
                             .unwrap()
                             .songs()
                             .values()
-                            .map(|s| Arc::new(RwLock::new(gen_song(s))))
+                            .map(|s| Arc::new(RwLock::new(gen_song(s, i.display_info()))))
                             .collect(),
                     )))
                 }
@@ -560,10 +564,10 @@ pub fn add(
     .add_var(
         "get_song".to_owned(),
         Function::new_generic(
-            |a| {
+            |a, i| {
                 if a.is_included_in_single(&MusicDbIdT) {
                     Ok(Type::newm(vec![
-                        Arc::new(gen_song_type()),
+                        Arc::new(gen_song_type(i.display_info())),
                         Arc::new(data::tuple::TupleT(vec![])),
                     ]))
                 } else {
@@ -572,10 +576,10 @@ pub fn add(
             },
             {
                 let db = Arc::clone(db);
-                move |a, _| {
+                move |a, i| {
                     let id = a.get().as_any().downcast_ref::<MusicDbId>().unwrap().0;
                     Ok(match db.lock().unwrap().get_song(&id) {
-                        Some(song) => gen_song(song),
+                        Some(song) => gen_song(song, i.display_info()),
                         None => Data::empty_tuple(),
                     })
                 }
@@ -585,10 +589,10 @@ pub fn add(
     .add_var(
         "get_album".to_owned(),
         Function::new_generic(
-            |a| {
+            |a, i| {
                 if a.is_included_in_single(&MusicDbIdT) {
                     Ok(Type::newm(vec![
-                        Arc::new(gen_album_type()),
+                        Arc::new(gen_album_type(i.display_info())),
                         Arc::new(data::tuple::TupleT(vec![])),
                     ]))
                 } else {
@@ -597,10 +601,10 @@ pub fn add(
             },
             {
                 let db = Arc::clone(db);
-                move |a, _| {
+                move |a, i| {
                     let id = a.get().as_any().downcast_ref::<MusicDbId>().unwrap().0;
                     Ok(match db.lock().unwrap().albums().get(&id) {
-                        Some(album) => gen_album(album),
+                        Some(album) => gen_album(album, i.display_info()),
                         None => Data::empty_tuple(),
                     })
                 }
@@ -610,10 +614,10 @@ pub fn add(
     .add_var(
         "get_artist".to_owned(),
         Function::new_generic(
-            |a| {
+            |a, i| {
                 if a.is_included_in_single(&MusicDbIdT) {
                     Ok(Type::newm(vec![
-                        Arc::new(gen_artist_type()),
+                        Arc::new(gen_artist_type(i.display_info())),
                         Arc::new(data::tuple::TupleT(vec![])),
                     ]))
                 } else {
@@ -622,10 +626,10 @@ pub fn add(
             },
             {
                 let db = Arc::clone(db);
-                move |a, _| {
+                move |a, i| {
                     let id = a.get().as_any().downcast_ref::<MusicDbId>().unwrap().0;
                     Ok(match db.lock().unwrap().artists().get(&id) {
-                        Some(artist) => gen_artist(artist),
+                        Some(artist) => gen_artist(artist, i.display_info()),
                         None => Data::empty_tuple(),
                     })
                 }
@@ -635,7 +639,7 @@ pub fn add(
     .add_var(
         "get_song_tags".to_owned(),
         Function::new_generic(
-            |a| {
+            |a, _| {
                 if a.is_included_in_single(&MusicDbIdT) {
                     Ok(Type::newm(vec![
                         Arc::new(mers_lib::program::configs::with_list::ListT(Type::new(
@@ -672,7 +676,7 @@ pub fn add(
     .add_var(
         "get_album_tags".to_owned(),
         Function::new_generic(
-            |a| {
+            |a, _| {
                 if a.is_included_in_single(&MusicDbIdT) {
                     Ok(Type::newm(vec![
                         Arc::new(mers_lib::program::configs::with_list::ListT(Type::new(
@@ -710,7 +714,7 @@ pub fn add(
     .add_var(
         "get_artist_tags".to_owned(),
         Function::new_generic(
-            |a| {
+            |a, _| {
                 if a.is_included_in_single(&MusicDbIdT) {
                     Ok(Type::newm(vec![
                         Arc::new(mers_lib::program::configs::with_list::ListT(Type::new(
@@ -747,20 +751,29 @@ pub fn add(
     )
 }
 
-fn gen_song_type() -> data::object::ObjectT {
-    data::object::ObjectT(vec![
-        ("id".to_owned(), Type::new(MusicDbIdT)),
-        ("title".to_owned(), Type::new(data::string::StringT)),
+fn gen_song_type(i: DisplayInfo) -> data::object::ObjectT {
+    data::object::ObjectT::new(vec![
         (
-            "album".to_owned(),
+            i.object_fields.get_or_add_field("id"),
+            Type::new(MusicDbIdT),
+        ),
+        (
+            i.object_fields.get_or_add_field("title"),
+            Type::new(data::string::StringT),
+        ),
+        (
+            i.object_fields.get_or_add_field("album"),
             Type::newm(vec![
                 Arc::new(MusicDbIdT),
                 Arc::new(data::tuple::TupleT(vec![])),
             ]),
         ),
-        ("artist".to_owned(), Type::new(MusicDbIdT)),
         (
-            "cover".to_owned(),
+            i.object_fields.get_or_add_field("artist"),
+            Type::new(MusicDbIdT),
+        ),
+        (
+            i.object_fields.get_or_add_field("cover"),
             Type::newm(vec![
                 Arc::new(MusicDbIdT),
                 Arc::new(data::tuple::TupleT(vec![])),
@@ -768,24 +781,30 @@ fn gen_song_type() -> data::object::ObjectT {
         ),
     ])
 }
-fn gen_song(song: &Song) -> Data {
-    Data::new(data::object::Object(vec![
-        ("id".to_owned(), Data::new(MusicDbId(song.id))),
+fn gen_song(song: &Song, i: DisplayInfo) -> Data {
+    Data::new(data::object::Object::new(vec![
         (
-            "title".to_owned(),
+            i.object_fields.get_or_add_field("id"),
+            Data::new(MusicDbId(song.id)),
+        ),
+        (
+            i.object_fields.get_or_add_field("title"),
             Data::new(data::string::String(song.title.clone())),
         ),
         (
-            "album".to_owned(),
+            i.object_fields.get_or_add_field("album"),
             if let Some(album) = song.album {
                 Data::new(MusicDbId(album))
             } else {
                 Data::empty_tuple()
             },
         ),
-        ("artist".to_owned(), Data::new(MusicDbId(song.artist))),
         (
-            "cover".to_owned(),
+            i.object_fields.get_or_add_field("artist"),
+            Data::new(MusicDbId(song.artist)),
+        ),
+        (
+            i.object_fields.get_or_add_field("cover"),
             if let Some(cover) = song.cover {
                 Data::new(MusicDbId(cover))
             } else {
@@ -794,36 +813,51 @@ fn gen_song(song: &Song) -> Data {
         ),
     ]))
 }
-fn gen_album_type() -> data::object::ObjectT {
-    data::object::ObjectT(vec![
-        ("id".to_owned(), Type::new(MusicDbIdT)),
-        ("name".to_owned(), Type::new(data::string::StringT)),
-        ("artist".to_owned(), Type::new(MusicDbIdT)),
+fn gen_album_type(i: DisplayInfo) -> data::object::ObjectT {
+    data::object::ObjectT::new(vec![
         (
-            "cover".to_owned(),
+            i.object_fields.get_or_add_field("id"),
+            Type::new(MusicDbIdT),
+        ),
+        (
+            i.object_fields.get_or_add_field("name"),
+            Type::new(data::string::StringT),
+        ),
+        (
+            i.object_fields.get_or_add_field("artist"),
+            Type::new(MusicDbIdT),
+        ),
+        (
+            i.object_fields.get_or_add_field("cover"),
             Type::newm(vec![
                 Arc::new(MusicDbIdT),
                 Arc::new(data::tuple::TupleT(vec![])),
             ]),
         ),
         (
-            "songs".to_owned(),
+            i.object_fields.get_or_add_field("songs"),
             Type::new(mers_lib::program::configs::with_list::ListT(Type::new(
                 MusicDbIdT,
             ))),
         ),
     ])
 }
-fn gen_album(album: &Album) -> Data {
-    Data::new(data::object::Object(vec![
-        ("id".to_owned(), Data::new(MusicDbId(album.id))),
+fn gen_album(album: &Album, i: DisplayInfo) -> Data {
+    Data::new(data::object::Object::new(vec![
         (
-            "name".to_owned(),
+            i.object_fields.get_or_add_field("id"),
+            Data::new(MusicDbId(album.id)),
+        ),
+        (
+            i.object_fields.get_or_add_field("name"),
             Data::new(data::string::String(album.name.clone())),
         ),
-        ("artist".to_owned(), Data::new(MusicDbId(album.artist))),
         (
-            "cover".to_owned(),
+            i.object_fields.get_or_add_field("artist"),
+            Data::new(MusicDbId(album.artist)),
+        ),
+        (
+            i.object_fields.get_or_add_field("cover"),
             if let Some(cover) = album.cover {
                 Data::new(MusicDbId(cover))
             } else {
@@ -831,7 +865,7 @@ fn gen_album(album: &Album) -> Data {
             },
         ),
         (
-            "songs".to_owned(),
+            i.object_fields.get_or_add_field("songs"),
             Data::new(mers_lib::program::configs::with_list::List(
                 album
                     .songs
@@ -842,40 +876,49 @@ fn gen_album(album: &Album) -> Data {
         ),
     ]))
 }
-fn gen_artist_type() -> data::object::ObjectT {
-    data::object::ObjectT(vec![
-        ("id".to_owned(), Type::new(MusicDbIdT)),
-        ("name".to_owned(), Type::new(data::string::StringT)),
+fn gen_artist_type(i: DisplayInfo) -> data::object::ObjectT {
+    data::object::ObjectT::new(vec![
         (
-            "cover".to_owned(),
+            i.object_fields.get_or_add_field("id"),
+            Type::new(MusicDbIdT),
+        ),
+        (
+            i.object_fields.get_or_add_field("name"),
+            Type::new(data::string::StringT),
+        ),
+        (
+            i.object_fields.get_or_add_field("cover"),
             Type::newm(vec![
                 Arc::new(MusicDbIdT),
                 Arc::new(data::tuple::TupleT(vec![])),
             ]),
         ),
         (
-            "albums".to_owned(),
+            i.object_fields.get_or_add_field("albums"),
             Type::new(mers_lib::program::configs::with_list::ListT(Type::new(
                 MusicDbIdT,
             ))),
         ),
         (
-            "singles".to_owned(),
+            i.object_fields.get_or_add_field("singles"),
             Type::new(mers_lib::program::configs::with_list::ListT(Type::new(
                 MusicDbIdT,
             ))),
         ),
     ])
 }
-fn gen_artist(artist: &Artist) -> Data {
-    Data::new(data::object::Object(vec![
-        ("id".to_owned(), Data::new(MusicDbId(artist.id))),
+fn gen_artist(artist: &Artist, i: DisplayInfo) -> Data {
+    Data::new(data::object::Object::new(vec![
         (
-            "name".to_owned(),
+            i.object_fields.get_or_add_field("id"),
+            Data::new(MusicDbId(artist.id)),
+        ),
+        (
+            i.object_fields.get_or_add_field("name"),
             Data::new(data::string::String(artist.name.clone())),
         ),
         (
-            "cover".to_owned(),
+            i.object_fields.get_or_add_field("cover"),
             if let Some(cover) = artist.cover {
                 Data::new(MusicDbId(cover))
             } else {
@@ -883,7 +926,7 @@ fn gen_artist(artist: &Artist) -> Data {
             },
         ),
         (
-            "albums".to_owned(),
+            i.object_fields.get_or_add_field("albums"),
             Data::new(mers_lib::program::configs::with_list::List(
                 artist
                     .albums
@@ -893,7 +936,7 @@ fn gen_artist(artist: &Artist) -> Data {
             )),
         ),
         (
-            "singles".to_owned(),
+            i.object_fields.get_or_add_field("singles"),
             Data::new(mers_lib::program::configs::with_list::List(
                 artist
                     .singles
@@ -905,72 +948,120 @@ fn gen_artist(artist: &Artist) -> Data {
     ]))
 }
 
-fn gen_queue_elem_type_or_empty_tuple() -> Type {
+fn gen_queue_elem_type_or_empty_tuple(i: DisplayInfo) -> Type {
     Type::newm(vec![
         Arc::new(data::tuple::TupleT(vec![])),
-        Arc::new(data::object::ObjectT(vec![
-            ("enabled".to_owned(), data::bool::bool_type()),
-            ("song".to_owned(), Type::new(MusicDbIdT)),
-        ])),
-        Arc::new(data::object::ObjectT(vec![
-            ("enabled".to_owned(), data::bool::bool_type()),
+        Arc::new(data::object::ObjectT::new(vec![
             (
-                "loop".to_owned(),
-                Type::new(data::object::ObjectT(vec![
-                    ("total".to_owned(), Type::new(data::int::IntT)),
-                    ("done".to_owned(), Type::new(data::int::IntT)),
+                i.object_fields.get_or_add_field("enabled"),
+                data::bool::bool_type(),
+            ),
+            (
+                i.object_fields.get_or_add_field("song"),
+                Type::new(MusicDbIdT),
+            ),
+        ])),
+        Arc::new(data::object::ObjectT::new(vec![
+            (
+                i.object_fields.get_or_add_field("enabled"),
+                data::bool::bool_type(),
+            ),
+            (
+                i.object_fields.get_or_add_field("loop"),
+                Type::new(data::object::ObjectT::new(vec![
+                    (
+                        i.object_fields.get_or_add_field("total"),
+                        Type::new(data::int::IntT(data::int::INT_MIN, data::int::INT_MAX)),
+                    ),
+                    (
+                        i.object_fields.get_or_add_field("done"),
+                        Type::new(data::int::IntT(data::int::INT_MIN, data::int::INT_MAX)),
+                    ),
                 ])),
             ),
         ])),
-        Arc::new(data::object::ObjectT(vec![
-            ("enabled".to_owned(), data::bool::bool_type()),
-            ("random".to_owned(), Type::empty_tuple()),
-        ])),
-        Arc::new(data::object::ObjectT(vec![
-            ("enabled".to_owned(), data::bool::bool_type()),
+        Arc::new(data::object::ObjectT::new(vec![
             (
-                "folder".to_owned(),
-                Type::new(data::object::ObjectT(vec![
-                    ("index".to_owned(), Type::new(data::int::IntT)),
-                    ("length".to_owned(), Type::new(data::int::IntT)),
-                    ("name".to_owned(), Type::new(data::string::StringT)),
+                i.object_fields.get_or_add_field("enabled"),
+                data::bool::bool_type(),
+            ),
+            (
+                i.object_fields.get_or_add_field("random"),
+                Type::empty_tuple(),
+            ),
+        ])),
+        Arc::new(data::object::ObjectT::new(vec![
+            (
+                i.object_fields.get_or_add_field("enabled"),
+                data::bool::bool_type(),
+            ),
+            (
+                i.object_fields.get_or_add_field("folder"),
+                Type::new(data::object::ObjectT::new(vec![
+                    (
+                        i.object_fields.get_or_add_field("index"),
+                        Type::new(data::int::IntT(data::int::INT_MIN, data::int::INT_MAX)),
+                    ),
+                    (
+                        i.object_fields.get_or_add_field("length"),
+                        Type::new(data::int::IntT(data::int::INT_MIN, data::int::INT_MAX)),
+                    ),
+                    (
+                        i.object_fields.get_or_add_field("name"),
+                        Type::new(data::string::StringT),
+                    ),
                 ])),
             ),
         ])),
-        Arc::new(data::object::ObjectT(vec![
-            ("enabled".to_owned(), data::bool::bool_type()),
-            ("shuffle".to_owned(), Type::empty_tuple()),
+        Arc::new(data::object::ObjectT::new(vec![
+            (
+                i.object_fields.get_or_add_field("enabled"),
+                data::bool::bool_type(),
+            ),
+            (
+                i.object_fields.get_or_add_field("shuffle"),
+                Type::empty_tuple(),
+            ),
         ])),
     ])
 }
-fn gen_queue_elem(queue_elem: &Queue) -> Data {
-    Data::new(data::object::Object(vec![
+fn gen_queue_elem(queue_elem: &Queue, i: DisplayInfo) -> Data {
+    Data::new(data::object::Object::new(vec![
         (
-            "enabled".to_owned(),
+            i.object_fields.get_or_add_field("enabled"),
             Data::new(data::bool::Bool(queue_elem.enabled())),
         ),
         match queue_elem.content() {
-            QueueContent::Song(id) => ("song".to_owned(), Data::new(MusicDbId(*id))),
+            QueueContent::Song(id) => (
+                i.object_fields.get_or_add_field("song"),
+                Data::new(MusicDbId(*id)),
+            ),
             QueueContent::Loop(total, done, _inner) => (
-                "loop".to_owned(),
-                Data::new(data::object::Object(vec![
-                    ("total".to_owned(), Data::new(data::int::Int(*total as _))),
-                    ("done".to_owned(), Data::new(data::int::Int(*done as _))),
+                i.object_fields.get_or_add_field("loop"),
+                Data::new(data::object::Object::new(vec![
+                    (
+                        i.object_fields.get_or_add_field("total"),
+                        Data::new(data::int::Int(*total as _)),
+                    ),
+                    (
+                        i.object_fields.get_or_add_field("done"),
+                        Data::new(data::int::Int(*done as _)),
+                    ),
                 ])),
             ),
             QueueContent::Folder(folder) => (
-                "folder".to_owned(),
-                Data::new(data::object::Object(vec![
+                i.object_fields.get_or_add_field("folder"),
+                Data::new(data::object::Object::new(vec![
                     (
-                        "index".to_owned(),
+                        i.object_fields.get_or_add_field("index"),
                         Data::new(data::int::Int(folder.index as _)),
                     ),
                     (
-                        "length".to_owned(),
+                        i.object_fields.get_or_add_field("length"),
                         Data::new(data::int::Int(folder.content.len() as _)),
                     ),
                     (
-                        "name".to_owned(),
+                        i.object_fields.get_or_add_field("name"),
                         Data::new(data::string::String(folder.name.clone())),
                     ),
                 ])),
@@ -1009,6 +1100,13 @@ impl MersData for MusicDbId {
     fn as_type(&self) -> Type {
         Type::new(MusicDbIdT)
     }
+    fn display(
+        &self,
+        _info: &mers_lib::info::DisplayInfo<'_>,
+        f: &mut std::fmt::Formatter,
+    ) -> std::fmt::Result {
+        write!(f, "{}", self)
+    }
     fn is_eq(&self, other: &dyn MersData) -> bool {
         if let Some(other) = other.as_any().downcast_ref::<Self>() {
             self.0 == other.0
@@ -1030,6 +1128,13 @@ impl MersData for MusicDbId {
     }
 }
 impl MersType for MusicDbIdT {
+    fn display(
+        &self,
+        _info: &mers_lib::info::DisplayInfo<'_>,
+        f: &mut std::fmt::Formatter,
+    ) -> std::fmt::Result {
+        write!(f, "{}", self)
+    }
     fn is_same_type_as(&self, other: &dyn MersType) -> bool {
         other.as_any().is::<Self>()
     }

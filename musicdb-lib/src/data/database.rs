@@ -552,12 +552,12 @@ impl Database {
             }
             Command::QueueAdd(index, new_data) => {
                 if let Some(v) = self.queue.get_item_at_index_mut(&index, 0) {
-                    v.add_to_end(new_data);
+                    v.add_to_end(new_data, false);
                 }
             }
             Command::QueueInsert(index, pos, new_data) => {
                 if let Some(v) = self.queue.get_item_at_index_mut(&index, 0) {
-                    v.insert(new_data, pos);
+                    v.insert(new_data, pos, false);
                 }
             }
             Command::QueueRemove(index) => {
@@ -598,9 +598,9 @@ impl Database {
                         .queue
                         .get_item_at_index_mut(&index_to[0..index_to.len() - 1], 0)
                     {
-                        parent.insert(vec![elem], index_to[index_to.len() - 1]);
+                        parent.insert(vec![elem], index_to[index_to.len() - 1], true);
                         if was_current {
-                            self.queue.set_index_inner(&index_to, 0, vec![]);
+                            self.queue.set_index_inner(&index_to, 0, vec![], true);
                         }
                     }
                 }
@@ -619,10 +619,10 @@ impl Database {
                         parent_to[index_from.len() - 1] -= 1;
                     }
                     if let Some(parent) = self.queue.get_item_at_index_mut(&parent_to, 0) {
-                        if let Some(i) = parent.add_to_end(vec![elem]) {
+                        if let Some(i) = parent.add_to_end(vec![elem], true) {
                             if was_current {
                                 parent_to.push(i);
-                                self.queue.set_index_inner(&parent_to, 0, vec![]);
+                                self.queue.set_index_inner(&parent_to, 0, vec![], true);
                             }
                         }
                     }
