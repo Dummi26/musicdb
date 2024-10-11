@@ -143,24 +143,32 @@ impl MersCfg {
     ) -> musicdb_mers::mers_lib::prelude_extend_config::Config {
         let cmd_es = event_sender.clone();
         let cmd_ga = self.channel_gui_actions.0.clone();
-        musicdb_mers::add(cfg, db, &Arc::new(move |cmd| {
-            cmd_ga.send(cmd).unwrap();
-            cmd_es.send_event(GuiEvent::RefreshMers).unwrap();
-        }), after_db_cmd)
+        fn get_type(d: &RwLock<Data>) -> Type {
+            d.read().unwrap().get().as_type()
+        }
+        musicdb_mers::add(
+            cfg,
+            db,
+            &Arc::new(move |cmd| {
+                cmd_ga.send(cmd).unwrap();
+                cmd_es.send_event(GuiEvent::RefreshMers).unwrap();
+            }),
+            after_db_cmd,
+        )
         .add_var_from_arc(
             "is_idle".to_owned(),
             Arc::clone(&self.var_is_idle),
-            self.var_is_idle.read().unwrap().get().as_type(),
+            get_type(&self.var_is_idle),
         )
         .add_var_from_arc(
             "window_size_in_pixels".to_owned(),
             Arc::clone(&self.var_window_size_in_pixels),
-            self.var_window_size_in_pixels.read().unwrap().get().as_type(),
+            get_type(&self.var_window_size_in_pixels),
         )
         .add_var_from_arc(
             "idle_screen_cover_aspect_ratio".to_owned(),
             Arc::clone(&self.var_idle_screen_cover_aspect_ratio),
-            self.var_idle_screen_cover_aspect_ratio.read().unwrap().get().as_type(),
+            get_type(&self.var_idle_screen_cover_aspect_ratio),
         )
         .add_var("playback_resume".to_owned(),{
             let es = event_sender.clone();
