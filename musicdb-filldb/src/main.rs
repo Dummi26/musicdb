@@ -107,16 +107,18 @@ fn main() {
     let mut prev_perc = 999;
     songs.sort_by(|(path1, _, tags1), (path2, _, tags2)| {
         // Sort by Disc->Track->Path
-        if let (Some(d1), Some(d2)) = (tags1.disc(), tags2.disc()) {
-            d1.cmp(&d2)
-        } else {
-            Ordering::Equal
+        match (tags1.disc(), tags2.disc()) {
+            (Some(d1), Some(d2)) => d1.cmp(&d2),
+            (Some(_), None) => Ordering::Greater,
+            (None, Some(_)) => Ordering::Less,
+            (None, None) => Ordering::Equal,
         }
         .then_with(|| {
-            if let (Some(t1), Some(t2)) = (tags1.track(), tags2.track()) {
-                t1.cmp(&t2)
-            } else {
-                Ordering::Equal
+            match (tags1.track(), tags2.track()) {
+                (Some(t1), Some(t2)) => t1.cmp(&t2),
+                (Some(_), None) => Ordering::Greater,
+                (None, Some(_)) => Ordering::Less,
+                (None, None) => Ordering::Equal,
             }
             .then_with(|| path1.cmp(&path2))
         })
