@@ -88,28 +88,25 @@ impl<T> PlayerBackend<T> for PlayerBackendPlaybackRs<T> {
     }
     fn next(&mut self, play: bool, _load_duration: bool) {
         self.pause();
+        self.player.stop();
         self.player.skip();
         self.current = self.next.take();
-        if self.player.has_current_song() {
-            self.player.set_playing(play);
-        } else {
-            if let Some((id, song, _)) = &self.current {
-                if let Some(song) = song {
-                    if let Err(e) = self.player.play_song_now(song, None) {
-                        if let Some(s) = &self.command_sender {
-                            s.send(Command::ErrorInfo(
-                                format!("Couldn't play song #{id}!"),
-                                format!("Error: {e}"),
-                            ))
-                            .unwrap();
-                            s.send(Command::NextSong).unwrap();
-                        }
-                    } else {
-                        self.player.set_playing(play);
+        if let Some((id, song, _)) = &self.current {
+            if let Some(song) = song {
+                if let Err(e) = self.player.play_song_now(song, None) {
+                    if let Some(s) = &self.command_sender {
+                        s.send(Command::ErrorInfo(
+                            format!("Couldn't play song #{id}!"),
+                            format!("Error: {e}"),
+                        ))
+                        .unwrap();
+                        s.send(Command::NextSong).unwrap();
                     }
-                } else if let Some(s) = &self.command_sender {
-                    s.send(Command::NextSong).unwrap();
+                } else {
+                    self.player.set_playing(play);
                 }
+            } else if let Some(s) = &self.command_sender {
+                s.send(Command::NextSong).unwrap();
             }
         }
     }
