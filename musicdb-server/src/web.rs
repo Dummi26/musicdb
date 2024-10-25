@@ -4,7 +4,7 @@ use std::sync::{mpsc, Arc, Mutex};
 use musicdb_lib::data::album::Album;
 use musicdb_lib::data::artist::Artist;
 use musicdb_lib::data::database::Database;
-use musicdb_lib::data::queue::{QueueContent, QueueFolder};
+use musicdb_lib::data::queue::{Queue, QueueContent, QueueFolder};
 use musicdb_lib::data::song::Song;
 use musicdb_lib::data::SongId;
 use musicdb_lib::server::Command;
@@ -34,7 +34,7 @@ use rocket::{get, routes, Config, State};
 */
 
 const HTML_START: &'static str =
-    "<!DOCTYPE html><html><head><meta name=\"color-scheme\" content=\"light dark\">";
+    "<!DOCTYPE html><html><head><meta charset=\"UTF-8\"><meta name=\"color-scheme\" content=\"light dark\">";
 const HTML_SEP: &'static str = "</head><body>";
 const HTML_END: &'static str = "</body></html>";
 
@@ -44,8 +44,10 @@ struct Data {
 }
 
 #[get("/")]
-async fn index(data: &State<Data>) -> RawHtml<String> {
+fn index(data: &State<Data>) -> RawHtml<String> {
+    dbg!(());
     let script = r#"<script>
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function performSearch() {
     var searchResultDiv = document.getElementById("searchResultDiv");
     searchResultDiv.innerHTML = "Loading...";
@@ -68,7 +70,7 @@ async function performSearch() {
         }
         query += "title=" + encodeURIComponent(sfTitle);
     }
-    if (query || confirm("You didn't search for anything specific. If you continue, the whole library will be loaded, which can take a while and use a lot of bandwidth!")) {
+    if (query || confirm("You didn't search for anything specific. If you continue, the whole library will be loaded, which can take a while, use a lot of bandwidth, and may crash your browser!")) {
         console.log("Performing search with query '" + query + "'.");
         var r1 = await fetch("/search?" + query);
         var r2 = await r1.text();
@@ -81,39 +83,206 @@ async function addSong(id) {
     await fetch("/add-song/" + id);
 }
 </script>"#;
-    let buttons = "<button onclick=\"fetch('/play').then(() => location.reload())\">play</button><button onclick=\"fetch('/pause').then(() => location.reload())\">pause</button><button onclick=\"fetch('/skip').then(() => location.reload())\">skip</button><button onclick=\"fetch('/clear-queue').then(() => location.reload())\">clear queue</button><button onclick=\"location.reload()\">reload</button>";
+    let script2 = r#"<script>
+const searchDiv = document.getElementById("searchDiv");
+searchDiv.style.display = "";
+document.getElementById("warnLag").innerText = "connecting...";
+const nowPlayingDiv = document.getElementById("nowPlayingDiv");
+const queueDiv = document.getElementById("queueDiv");
+var didFinish = false;
+var averageLoopTimeMs = 250;
+async function runLoop() {
+    while (true) {
+        await sleep(1000);
+        didFinish = false;
+        var startTime = new Date();
+        sleep(averageLoopTimeMs*2).then(async function() {
+            while (!didFinish) {
+                var elapsed = new Date() - startTime;
+                document.getElementById("warnLag").innerText = "Warning: slow connection, server may be busy. be patient. (" + Math.round(averageLoopTimeMs) + "ms exceeded by " + Math.round((elapsed-averageLoopTimeMs)/averageLoopTimeMs) + "x)";
+                await sleep(100);
+            }
+        });
+        nowPlayingDiv.innerHTML = await (await fetch("/now-playing-html")).text();
+        queueDiv.innerHTML = await (await fetch("/queue-html")).text();
+        var elapsedTime = new Date() - startTime;
+        didFinish = true;
+        averageLoopTimeMs = ((averageLoopTimeMs * 4) + elapsedTime) / 5;
+        document.getElementById("warnLag").innerText = "Average update time: " + Math.round(averageLoopTimeMs) + "ms";
+    }
+}
+runLoop();</script>"#;
+    let buttons = "<button onclick=\"fetch('/play')\">play</button><button onclick=\"fetch('/pause')\">pause</button><button onclick=\"fetch('/skip')\">skip</button><button onclick=\"fetch('/clear-queue')\">clear queue</button>";
     let search = "<input id=\"searchFieldArtist\" placeholder=\"artist\"><input id=\"searchFieldAlbum\" placeholder=\"album\"><input id=\"searchFieldTitle\" placeholder=\"title\">
 <button onclick=\"performSearch()\">search</button><div id=\"searchResultDiv\"></div>";
     let db = data.db.lock().unwrap();
-    let now_playing =
-        if let Some(current_song) = db.queue.get_current_song().and_then(|id| db.get_song(id)) {
-            format!(
-                "<h1>Now Playing</h1><h4>{}</h4>",
-                html_escape::encode_safe(&current_song.title),
-            )
-        } else {
-            format!("<h1>Now Playing</h1><p>nothing</p>",)
-        };
+    let now_playing = gen_now_playing(&db);
+    let mut queue = String::new();
+    gen_queue_html(&db.queue, &mut queue, &db);
+    dbg!(&queue);
     drop(db);
     RawHtml(format!(
-        "{HTML_START}<title>MusicDb</title>{script}{HTML_SEP}{now_playing}<div>{buttons}</div><div>{search}</div>{HTML_END}",
+        "{HTML_START}<title>MusicDb</title>{script}{HTML_SEP}<div id=\"warnLag\">no javascript? reload to see updated information.</div><div id=\"nowPlayingDiv\">{now_playing}</div><div>{buttons}</div><div id=\"searchDiv\" style=\"display:none;\">{search}</div><div id=\"queueDiv\">{queue}</div>{script2}{HTML_END}",
     ))
+}
+#[get("/now-playing-html")]
+fn now_playing_html(data: &State<Data>) -> RawHtml<String> {
+    RawHtml(gen_now_playing(&*data.db.lock().unwrap()))
+}
+#[get("/queue-html")]
+fn queue_html(data: &State<Data>) -> RawHtml<String> {
+    let mut str = String::new();
+    let db = data.db.lock().unwrap();
+    gen_queue_html(&db.queue, &mut str, &db);
+    RawHtml(str)
+}
+fn gen_now_playing(db: &Database) -> String {
+    if let Some(current_song) = db.queue.get_current_song().and_then(|id| db.get_song(id)) {
+        format!(
+            "<h1>Now Playing</h1><h4>{}</h4>",
+            html_escape::encode_safe(&current_song.title),
+        )
+    } else {
+        format!("<h1>Now Playing</h1><p>nothing</p>",)
+    }
+}
+fn gen_queue_html(queue: &Queue, str: &mut String, db: &Database) {
+    gen_queue_html_impl(queue, str, db, true, &mut "".to_owned());
+}
+fn gen_queue_html_impl(
+    queue: &Queue,
+    str: &mut String,
+    db: &Database,
+    active_highlight: bool,
+    path: &mut String,
+) {
+    match queue.content() {
+        QueueContent::Song(id) => {
+            if let Some(song) = db.songs().get(id) {
+                str.push_str("<div>");
+                if active_highlight {
+                    str.push_str("<b>");
+                }
+                str.push_str(&format!("<button onclick=\"fetch('/queue-goto/{path}')\">"));
+                str.push_str(&html_escape::encode_text(&song.title));
+                str.push_str("</button>");
+                if active_highlight {
+                    str.push_str("</b>");
+                }
+                str.push_str("<small>");
+                if let Some(artist) = db.artists().get(&song.artist) {
+                    str.push_str(" by ");
+                    str.push_str(&html_escape::encode_text(&artist.name));
+                }
+                if let Some(album) = song.album.as_ref().and_then(|id| db.albums().get(id)) {
+                    str.push_str(" on ");
+                    str.push_str(&html_escape::encode_text(&album.name));
+                }
+                str.push_str(&format!(
+                    "<button onclick=\"fetch('/queue-remove/{path}')\">rm</button>"
+                ));
+                str.push_str("</small></div>");
+            } else {
+                str.push_str("<div><small>unknown song</small></div>");
+            }
+        }
+        QueueContent::Folder(f) => {
+            let html_shuf: &'static str = " <small><small>shuffled</small></small>";
+            if f.content.is_empty() {
+                str.push_str("[0/0] ");
+                if active_highlight {
+                    str.push_str("<b>");
+                }
+                str.push_str(&html_escape::encode_text(&f.name));
+                if active_highlight {
+                    str.push_str("</b>");
+                }
+                if f.order.is_some() {
+                    str.push_str(html_shuf);
+                }
+            } else {
+                str.push_str(&format!("[{}/{}] ", f.index + 1, f.content.len(),));
+                if active_highlight {
+                    str.push_str("<b>");
+                }
+                str.push_str(&html_escape::encode_text(&f.name));
+                if active_highlight {
+                    str.push_str("</b>");
+                }
+                if f.order.is_some() {
+                    str.push_str(html_shuf);
+                }
+                str.push_str("<ol>");
+                for (i, v) in f.iter().enumerate() {
+                    str.push_str("<li>");
+                    if !path.is_empty() {
+                        path.push('_');
+                    }
+                    path.push_str(&format!("{i}"));
+                    gen_queue_html_impl(v, str, db, active_highlight && i == f.index, path);
+                    while !(path.is_empty() || path.ends_with('_')) {
+                        path.pop();
+                    }
+                    path.pop();
+                    str.push_str("</li>");
+                }
+                str.push_str("</ol>");
+            }
+        }
+        QueueContent::Loop(d, t, i) => {
+            if active_highlight {
+                str.push_str("<b>");
+            }
+            if *t == 0 {
+                str.push_str(&format!("<small>[{}/&infin;]</small>", d + 1));
+            } else {
+                str.push_str(&format!("<small>[{}/{}]</small>", d + 1, t));
+            }
+            if active_highlight {
+                str.push_str("</b>");
+            }
+            if !path.is_empty() {
+                path.push('_');
+            }
+            path.push('0');
+            gen_queue_html_impl(i, str, db, active_highlight, path);
+            while !(path.is_empty() || path.ends_with('_')) {
+                path.pop();
+            }
+            path.pop();
+        }
+    }
+}
+
+#[get("/queue-remove/<path>")]
+fn queue_remove(data: &State<Data>, path: &str) {
+    if let Some(path) = path.split('_').map(|v| v.parse().ok()).collect() {
+        data.command_sender
+            .send(Command::QueueRemove(path))
+            .unwrap();
+    }
+}
+#[get("/queue-goto/<path>")]
+fn queue_goto(data: &State<Data>, path: &str) {
+    if let Some(path) = path.split('_').map(|v| v.parse().ok()).collect() {
+        data.command_sender.send(Command::QueueGoto(path)).unwrap();
+    }
 }
 
 #[get("/play")]
-async fn play(data: &State<Data>) {
+fn play(data: &State<Data>) {
     data.command_sender.send(Command::Resume).unwrap();
 }
 #[get("/pause")]
-async fn pause(data: &State<Data>) {
+fn pause(data: &State<Data>) {
     data.command_sender.send(Command::Pause).unwrap();
 }
 #[get("/skip")]
-async fn skip(data: &State<Data>) {
+fn skip(data: &State<Data>) {
     data.command_sender.send(Command::NextSong).unwrap();
 }
 #[get("/clear-queue")]
-async fn clear_queue(data: &State<Data>) {
+fn clear_queue(data: &State<Data>) {
     data.command_sender
         .send(Command::QueueUpdate(
             vec![],
@@ -129,7 +298,7 @@ async fn clear_queue(data: &State<Data>) {
 }
 
 #[get("/add-song/<id>")]
-async fn add_song(data: &State<Data>, id: SongId) {
+fn add_song(data: &State<Data>, id: SongId) {
     data.command_sender
         .send(Command::QueueAdd(
             vec![],
@@ -139,7 +308,7 @@ async fn add_song(data: &State<Data>, id: SongId) {
 }
 
 #[get("/search?<artist>&<album>&<title>&<artist_tags>&<album_tags>&<song_tags>")]
-async fn search(
+fn search(
     data: &State<Data>,
     artist: Option<&str>,
     album: Option<&str>,
@@ -371,7 +540,19 @@ pub async fn main(
         .manage(Data { db, command_sender })
         .mount(
             "/",
-            routes![index, play, pause, skip, clear_queue, add_song, search],
+            routes![
+                index,
+                play,
+                pause,
+                skip,
+                clear_queue,
+                queue_goto,
+                queue_remove,
+                add_song,
+                search,
+                now_playing_html,
+                queue_html
+            ],
         )
         .launch()
         .await
