@@ -112,7 +112,7 @@ async function runLoop() {
     }
 }
 runLoop();</script>"#;
-    let buttons = "<button onclick=\"fetch('/play')\">play</button><button onclick=\"fetch('/pause')\">pause</button><button onclick=\"fetch('/skip')\">skip</button><button onclick=\"fetch('/clear-queue')\">clear queue</button>";
+    let buttons = "<button onclick=\"fetch('/play')\">play</button><button onclick=\"fetch('/pause')\">pause</button><button onclick=\"fetch('/stop')\">stop</button><button onclick=\"fetch('/skip')\">skip</button><button onclick=\"fetch('/clear-queue')\">clear queue</button>";
     let search = "<input id=\"searchFieldArtist\" placeholder=\"artist\"><input id=\"searchFieldAlbum\" placeholder=\"album\"><input id=\"searchFieldTitle\" placeholder=\"title\">
 <button onclick=\"performSearch()\">search</button><div id=\"searchResultDiv\"></div>";
     let db = data.db.lock().unwrap();
@@ -276,6 +276,10 @@ fn play(data: &State<Data>) {
 #[get("/pause")]
 fn pause(data: &State<Data>) {
     data.command_sender.send(Command::Pause).unwrap();
+}
+#[get("/stop")]
+fn stop(data: &State<Data>) {
+    data.command_sender.send(Command::Stop).unwrap();
 }
 #[get("/skip")]
 fn skip(data: &State<Data>) {
@@ -544,6 +548,7 @@ pub async fn main(
                 index,
                 play,
                 pause,
+                stop,
                 skip,
                 clear_queue,
                 queue_goto,
