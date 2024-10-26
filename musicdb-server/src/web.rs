@@ -122,7 +122,7 @@ runLoop();</script>"#;
     dbg!(&queue);
     drop(db);
     RawHtml(format!(
-        "{HTML_START}<title>MusicDb</title>{script}{HTML_SEP}<div id=\"warnLag\">no javascript? reload to see updated information.</div><div id=\"nowPlayingDiv\">{now_playing}</div><div>{buttons}</div><div id=\"searchDiv\" style=\"display:none;\">{search}</div><div id=\"queueDiv\">{queue}</div>{script2}{HTML_END}",
+        "{HTML_START}<title>MusicDb</title>{script}{HTML_SEP}<small><small><div id=\"warnLag\">no javascript? reload to see updated information.</div></small></small><div id=\"nowPlayingDiv\">{now_playing}</div><div>{buttons}</div><div id=\"searchDiv\" style=\"display:none;\">{search}</div><div id=\"queueDiv\">{queue}</div>{script2}{HTML_END}",
     ))
 }
 #[get("/now-playing-html")]
@@ -160,15 +160,15 @@ fn gen_queue_html_impl(
         QueueContent::Song(id) => {
             if let Some(song) = db.songs().get(id) {
                 str.push_str("<div>");
+                str.push_str(&format!("<button onclick=\"fetch('/queue-goto/{path}')\">"));
                 if active_highlight {
                     str.push_str("<b>");
                 }
-                str.push_str(&format!("<button onclick=\"fetch('/queue-goto/{path}')\">"));
                 str.push_str(&html_escape::encode_text(&song.title));
-                str.push_str("</button>");
                 if active_highlight {
                     str.push_str("</b>");
                 }
+                str.push_str("</button>");
                 str.push_str("<small>");
                 if let Some(artist) = db.artists().get(&song.artist) {
                     str.push_str(" by ");
