@@ -1,6 +1,6 @@
 use std::sync::{atomic::AtomicBool, Arc, Mutex};
 
-use musicdb_lib::server::Command;
+use musicdb_lib::server::Action;
 use speedy2d::{
     color::Color,
     dimen::Vec2,
@@ -450,7 +450,7 @@ impl SettingsContent {
             ),
             save_button: Button::new(
                 GuiElemCfg::default(),
-                |_| vec![GuiAction::SendToServer(Command::Save)],
+                |_| vec![GuiAction::SendToServer(Action::Save)],
                 [Label::new(
                     GuiElemCfg::default(),
                     "Server: Save Changes".to_string(),

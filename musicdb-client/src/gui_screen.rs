@@ -2,7 +2,7 @@ use std::time::Instant;
 
 use musicdb_lib::{
     data::queue::{QueueContent, QueueFolder},
-    server::Command,
+    server::Action,
 };
 use speedy2d::{color::Color, dimen::Vec2, shape::Rectangle, window::VirtualKeyCode, Graphics2D};
 use uianimator::{default_animator_f64_quadratic::DefaultAnimatorF64Quadratic, Animator};
@@ -120,15 +120,13 @@ impl GuiScreen {
                     button_clear_queue: Button::new(
                         GuiElemCfg::at(Rectangle::from_tuples((0.5, 0.0), (0.75, 0.03))),
                         |_| {
-                            vec![GuiAction::SendToServer(
-                                musicdb_lib::server::Command::QueueUpdate(
-                                    vec![],
-                                    musicdb_lib::data::queue::QueueContent::Folder(
-                                        musicdb_lib::data::queue::QueueFolder::default(),
-                                    )
-                                    .into(),
-                                ),
-                            )]
+                            vec![GuiAction::SendToServer(Action::QueueUpdate(
+                                vec![],
+                                musicdb_lib::data::queue::QueueContent::Folder(
+                                    musicdb_lib::data::queue::QueueFolder::default(),
+                                )
+                                .into(),
+                            ))]
                         },
                         [Label::new(
                             GuiElemCfg::default(),
@@ -305,9 +303,9 @@ impl GuiElem for GuiScreen {
         if key == ' ' && !(modifiers.ctrl() || modifiers.alt() || modifiers.logo()) && e.take() {
             vec![GuiAction::Build(Box::new(|db| {
                 vec![GuiAction::SendToServer(if db.playing {
-                    Command::Pause
+                    Action::Pause
                 } else {
-                    Command::Resume
+                    Action::Resume
                 })]
             }))]
         } else {

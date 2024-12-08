@@ -26,7 +26,54 @@ use crate::{
 };
 
 #[derive(Clone, Debug)]
-pub enum Command {
+pub struct Command {
+    /// when sending to the server, this should be the most recent sequence number,
+    /// or `0xFF` to indicate that the action should be performed regardless of if the sequence number would be up to date or not.
+    /// when receiving from the server, this contains the most recent sequence number. It is never `0xFF`.
+    /// used to avoid issues due to desynchronization
+    pub seq: u8,
+    pub action: Action,
+}
+impl Command {
+    pub fn new(seq: u8, action: Action) -> Self {
+        Self { seq, action }
+    }
+}
+impl Action {
+    pub fn cmd(self, seq: u8) -> Command {
+        Command::new(seq, self)
+    }
+}
+/// Should be stored in the same lock as the database
+pub struct Commander {
+    seq: u8,
+}
+impl Commander {
+    pub fn new(ff: bool) -> Self {
+        Self {
+            seq: if ff { 0xFFu8 } else { 0u8 },
+        }
+    }
+    pub fn inc(&mut self) {
+        if self.seq < 0xFEu8 {
+            self.seq += 1;
+        } else {
+            self.seq = 0;
+        }
+    }
+    pub fn pack(&self, action: Action) -> Command {
+        Command::new(self.seq, action)
+    }
+    pub fn recv(&mut self, command: Command) -> Action {
+        self.seq = command.seq;
+        command.action
+    }
+    pub fn seq(&self) -> u8 {
+        self.seq
+    }
+}
+#[derive(Clone, Debug)]
+pub enum Action {
     Resume,
     Pause,
     Stop,
@@ -269,7 +316,7 @@ pub fn run_server_caching_thread_opt(
             checkf = true;
             #[cfg(feature = "playback")]
             if let Some(player) = &mut player {
-                player.handle_command(&command);
+                player.handle_action(&command.action);
             }
             database.lock().unwrap().apply_command(command);
         }
@@ -365,6 +412,26 @@ const SUBBYTE_TAG_ARTIST_PROPERTY_SET: u8 = 0b10_100_010;
 const SUBBYTE_TAG_ARTIST_PROPERTY_UNSET: u8 = 0b10_100_100;
 
 impl ToFromBytes for Command {
+    fn to_bytes<T>(&self, s: &mut T) -> Result<(), std::io::Error>
+    where
+        T: Write,
+    {
+        s.write_all(&[self.seq])?;
+        self.action.to_bytes(s)
+    }
+    fn from_bytes<T>(s: &mut T) -> Result<Self, std::io::Error>
+    where
+        T: Read,
+    {
+        Ok(Self {
+            seq: ToFromBytes::from_bytes(s)?,
+            action: Action::from_bytes(s)?,
+        })
+    }
+}
+
+// impl ToFromBytes for Action {
+impl Action {
     fn to_bytes<T>(&self, s: &mut T) -> Result<(), std::io::Error>
     where
         T: Write,

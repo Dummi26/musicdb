@@ -3,7 +3,10 @@ use std::{ffi::OsStr, sync::Arc};
 use rc_u8_reader::ArcU8Reader;
 use rodio::{decoder::DecoderError, Decoder, OutputStream, OutputStreamHandle, Sink, Source};
 
-use crate::{data::SongId, server::Command};
+use crate::{
+    data::SongId,
+    server::{Action, Command},
+};
 
 use super::PlayerBackend;
 
@@ -57,10 +60,13 @@ impl<T> PlayerBackend<T> for PlayerBackendRodio<T> {
         let decoder = decoder_from_bytes(Arc::clone(&bytes));
         if let Err(e) = &decoder {
             if let Some(s) = &self.command_sender {
-                s.send(Command::ErrorInfo(
-                    format!("Couldn't decode song #{id}!"),
-                    format!("Error: '{e}'"),
-                ))
+                s.send(
+                    Action::ErrorInfo(
+                        format!("Couldn't decode song #{id}!"),
+                        format!("Error: '{e}'"),
+                    )
+                    .cmd(0xFFu8),
+                )
                 .unwrap();
             }
         }

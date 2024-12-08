@@ -16,7 +16,7 @@ use musicdb_lib::{
         AlbumId, ArtistId, CoverId, SongId,
     },
     load::ToFromBytes,
-    server::{get, Command},
+    server::{get, Action},
 };
 use speedy2d::{
     color::Color,
@@ -363,84 +363,86 @@ impl Gui {
             Ok(Ok(Ok(()))) => eprintln!("Info: using merscfg"),
         }
         database.lock().unwrap().update_endpoints.push(
-            musicdb_lib::data::database::UpdateEndpoint::Custom(Box::new(move |cmd| match cmd {
-                Command::Resume
-                | Command::Pause
-                | Command::Stop
-                | Command::Save
-                | Command::InitComplete => {}
-                Command::NextSong
-                | Command::QueueUpdate(..)
-                | Command::QueueAdd(..)
-                | Command::QueueInsert(..)
-                | Command::QueueRemove(..)
-                | Command::QueueMove(..)
-                | Command::QueueMoveInto(..)
-                | Command::QueueGoto(..)
-                | Command::QueueShuffle(..)
-                | Command::QueueSetShuffle(..)
-                | Command::QueueUnshuffle(..) => {
-                    if let Some(s) = &*event_sender_arc.lock().unwrap() {
-                        _ = s.send_event(GuiEvent::UpdatedQueue);
+            musicdb_lib::data::database::UpdateEndpoint::Custom(Box::new(move |cmd| {
+                match &cmd.action {
+                    Action::Resume
+                    | Action::Pause
+                    | Action::Stop
+                    | Action::Save
+                    | Action::InitComplete => {}
+                    Action::NextSong
+                    | Action::QueueUpdate(..)
+                    | Action::QueueAdd(..)
+                    | Action::QueueInsert(..)
+                    | Action::QueueRemove(..)
+                    | Action::QueueMove(..)
+                    | Action::QueueMoveInto(..)
+                    | Action::QueueGoto(..)
+                    | Action::QueueShuffle(..)
+                    | Action::QueueSetShuffle(..)
+                    | Action::QueueUnshuffle(..) => {
+                        if let Some(s) = &*event_sender_arc.lock().unwrap() {
+                            _ = s.send_event(GuiEvent::UpdatedQueue);
+                        }
                     }
-                }
-                Command::SyncDatabase(..)
-                | Command::AddSong(_)
-                | Command::AddAlbum(_)
-                | Command::AddArtist(_)
-                | Command::AddCover(_)
-                | Command::ModifySong(_)
-                | Command::ModifyAlbum(_)
-                | Command::ModifyArtist(_)
-                | Command::RemoveSong(_)
-                | Command::RemoveAlbum(_)
-                | Command::RemoveArtist(_)
-                | Command::TagSongFlagSet(..)
-                | Command::TagSongFlagUnset(..)
-                | Command::TagAlbumFlagSet(..)
-                | Command::TagAlbumFlagUnset(..)
-                | Command::TagArtistFlagSet(..)
-                | Command::TagArtistFlagUnset(..)
-                | Command::TagSongPropertySet(..)
-                | Command::TagSongPropertyUnset(..)
-                | Command::TagAlbumPropertySet(..)
-                | Command::TagAlbumPropertyUnset(..)
-                | Command::TagArtistPropertySet(..)
-                | Command::TagArtistPropertyUnset(..)
-                | Command::SetSongDuration(..) => {
-                    if let Some(s) = &*event_sender_arc.lock().unwrap() {
-                        _ = s.send_event(GuiEvent::UpdatedLibrary);
+                    Action::SyncDatabase(..)
+                    | Action::AddSong(_)
+                    | Action::AddAlbum(_)
+                    | Action::AddArtist(_)
+                    | Action::AddCover(_)
+                    | Action::ModifySong(_)
+                    | Action::ModifyAlbum(_)
+                    | Action::ModifyArtist(_)
+                    | Action::RemoveSong(_)
+                    | Action::RemoveAlbum(_)
+                    | Action::RemoveArtist(_)
+                    | Action::TagSongFlagSet(..)
+                    | Action::TagSongFlagUnset(..)
+                    | Action::TagAlbumFlagSet(..)
+                    | Action::TagAlbumFlagUnset(..)
+                    | Action::TagArtistFlagSet(..)
+                    | Action::TagArtistFlagUnset(..)
+                    | Action::TagSongPropertySet(..)
+                    | Action::TagSongPropertyUnset(..)
+                    | Action::TagAlbumPropertySet(..)
+                    | Action::TagAlbumPropertyUnset(..)
+                    | Action::TagArtistPropertySet(..)
+                    | Action::TagArtistPropertyUnset(..)
+                    | Action::SetSongDuration(..) => {
+                        if let Some(s) = &*event_sender_arc.lock().unwrap() {
+                            _ = s.send_event(GuiEvent::UpdatedLibrary);
+                        }
                     }
-                }
-                Command::ErrorInfo(t, d) => {
-                    let (t, d) = (t.clone(), d.clone());
-                    notif_sender_two
-                        .send(Box::new(move |_| {
-                            (
-                                Box::new(Panel::with_background(
-                                    GuiElemCfg::default(),
-                                    [Label::new(
+                    Action::ErrorInfo(t, d) => {
+                        let (t, d) = (t.clone(), d.clone());
+                        notif_sender_two
+                            .send(Box::new(move |_| {
+                                (
+                                    Box::new(Panel::with_background(
                                         GuiElemCfg::default(),
-                                        if t.is_empty() {
-                                            format!("Server message\n{d}")
-                                        } else {
-                                            format!("Server error ({t})\n{d}")
-                                        },
-                                        Color::WHITE,
-                                        None,
-                                        Vec2::new(0.5, 0.5),
-                                    )],
-                                    Color::from_rgba(0.0, 0.0, 0.0, 0.8),
-                                )),
-                                if t.is_empty() {
-                                    NotifInfo::new(Duration::from_secs(2))
-                                } else {
-                                    NotifInfo::new(Duration::from_secs(5))
-                                        .with_highlight(Color::RED)
-                                },
-                            )
-                        }))
-                        .unwrap();
+                                        [Label::new(
+                                            GuiElemCfg::default(),
+                                            if t.is_empty() {
+                                                format!("Server message\n{d}")
+                                            } else {
+                                                format!("Server error ({t})\n{d}")
+                                            },
+                                            Color::WHITE,
+                                            None,
+                                            Vec2::new(0.5, 0.5),
+                                        )],
+                                        Color::from_rgba(0.0, 0.0, 0.0, 0.8),
+                                    )),
+                                    if t.is_empty() {
+                                        NotifInfo::new(Duration::from_secs(2))
+                                    } else {
+                                        NotifInfo::new(Duration::from_secs(5))
+                                            .with_highlight(Color::RED)
+                                    },
+                                )
+                            }))
+                            .unwrap();
+                    }
                 }
             })),
         );
@@ -1191,7 +1193,7 @@ pub enum GuiAction {
     ShowNotification(Box<dyn FnOnce(&NotifOverlay) -> (Box<dyn GuiElem>, NotifInfo) + Send>),
     /// Build the GuiAction(s) later, when we have access to the Database (can turn an AlbumId into a QueueContent::Folder, etc)
     Build(Box<dyn FnOnce(&mut Database) -> Vec<Self>>),
-    SendToServer(Command),
+    SendToServer(Action),
     ContextMenu(Option<(Vec<Box<dyn GuiElem>>)>),
     /// unfocuses all gui elements, then assigns keyboard focus to one with config().request_keyboard_focus == true if there is one.
     ResetKeyboardFocus,
@@ -1304,10 +1306,17 @@ impl Gui {
                     self.keybinds.insert(bind, action.with_priority(priority));
                 }
             }
-            GuiAction::SendToServer(cmd) => {
+            GuiAction::SendToServer(action) => {
                 #[cfg(debug_assertions)]
-                eprintln!("[DEBUG] Sending command to server: {cmd:?}");
-                if let Err(e) = cmd.to_bytes(&mut self.connection) {
+                eprintln!("[DEBUG] Sending command to server: {action:?}");
+                if let Err(e) = self
+                    .database
+                    .lock()
+                    .unwrap()
+                    .seq
+                    .pack(action)
+                    .to_bytes(&mut self.connection)
+                {
                     eprintln!("Error sending command to server: {e}");
                 }
             }
@@ -1551,7 +1560,7 @@ impl WindowHandler<GuiEvent> for Gui {
                     | Dragging::Queue(Ok(_))
                     | Dragging::Queues(_) => (),
                     Dragging::Queue(Err(path)) => {
-                        self.exec_gui_action(GuiAction::SendToServer(Command::QueueRemove(path)))
+                        self.exec_gui_action(GuiAction::SendToServer(Action::QueueRemove(path)))
                     }
                 }
             }

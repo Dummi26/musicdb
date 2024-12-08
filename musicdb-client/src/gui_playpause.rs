@@ -1,6 +1,6 @@
 use std::sync::{atomic::AtomicBool, Arc};
 
-use musicdb_lib::server::Command;
+use musicdb_lib::server::Action;
 use speedy2d::{color::Color, dimen::Vec2, shape::Rectangle, Graphics2D};
 
 use crate::{
@@ -28,9 +28,9 @@ impl PlayPause {
                             if let Some(song) = db.get_song(song_id) {
                                 vec![GuiAction::SendToServer(
                                     if song.general.tags.iter().any(|v| v == "Fav") {
-                                        Command::TagSongFlagUnset(*song_id, "Fav".to_owned())
+                                        Action::TagSongFlagUnset(*song_id, "Fav".to_owned())
                                     } else {
-                                        Command::TagSongFlagSet(*song_id, "Fav".to_owned())
+                                        Action::TagSongFlagSet(*song_id, "Fav".to_owned())
                                     },
                                 )]
                             } else {
@@ -48,7 +48,7 @@ impl PlayPause {
             ),
             to_zero: Button::new(
                 GuiElemCfg::at(Rectangle::from_tuples((0.26, 0.01), (0.49, 0.99))),
-                |_| vec![GuiAction::SendToServer(Command::Stop)],
+                |_| vec![GuiAction::SendToServer(Action::Stop)],
                 [Panel::with_background(
                     GuiElemCfg::at(Rectangle::from_tuples((0.2, 0.2), (0.8, 0.8))),
                     (),
@@ -59,9 +59,9 @@ impl PlayPause {
                 GuiElemCfg::at(Rectangle::from_tuples((0.51, 0.01), (0.74, 0.99))),
                 |btn| {
                     vec![GuiAction::SendToServer(if btn.children[0].is_playing {
-                        Command::Pause
+                        Action::Pause
                     } else {
-                        Command::Resume
+                        Action::Resume
                     })]
                 },
                 [PlayPauseDisplay::new(GuiElemCfg::at(
@@ -70,7 +70,7 @@ impl PlayPause {
             ),
             to_end: Button::new(
                 GuiElemCfg::at(Rectangle::from_tuples((0.76, 0.01), (0.99, 0.99))),
-                |_| vec![GuiAction::SendToServer(Command::NextSong)],
+                |_| vec![GuiAction::SendToServer(Action::NextSong)],
                 [NextSongShape::new(GuiElemCfg::at(Rectangle::from_tuples(
                     (0.2, 0.2),
                     (0.8, 0.8),

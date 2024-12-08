@@ -149,8 +149,8 @@ fn main() {
             writeln!(con, "main").unwrap();
             loop {
                 let cmd = musicdb_lib::server::Command::from_bytes(&mut con).unwrap();
-                use musicdb_lib::server::Command::*;
-                match &cmd {
+                use musicdb_lib::server::Action::*;
+                match &cmd.action {
                     // ignore playback and queue commands
                     Resume | Pause | Stop | NextSong | QueueUpdate(..) | QueueAdd(..)
                     | QueueInsert(..) | QueueRemove(..) | QueueMove(..) | QueueMoveInto(..)

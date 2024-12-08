@@ -1,3 +1,5 @@
+// #![allow(unused)]
+
 use std::{
     io::{BufReader, Write},
     net::{SocketAddr, TcpStream},
@@ -12,7 +14,7 @@ use gui::GuiEvent;
 #[cfg(feature = "playback")]
 use musicdb_lib::data::cache_manager::CacheManager;
 #[cfg(feature = "playback")]
-use musicdb_lib::player::{playback_rs::PlayerBackendPlaybackRs, Player};
+use musicdb_lib::player::{Player, PlayerBackendFeat};
 use musicdb_lib::{
     data::{
         database::{ClientIo, Database},
@@ -152,7 +154,7 @@ fn main() {
                 cm.set_cache_songs_count(20);
                 cache_manager = Some(cm);
                 Some(Player::new_client(
-                    PlayerBackendPlaybackRs::new_without_command_sending().unwrap(),
+                    PlayerBackendFeat::new_without_command_sending().unwrap(),
                 ))
             } else {
                 None
@@ -186,21 +188,22 @@ fn main() {
                 )));
             }
             loop {
-                let update = Command::from_bytes(&mut con).unwrap();
+                let command = Command::from_bytes(&mut con).unwrap();
                 let mut db = database.lock().unwrap();
+                let action = db.seq.recv(command);
                 #[cfg(feature = "playback")]
                 if let Some(player) = &mut player {
-                    player.handle_command(&update);
+                    player.handle_action(&action);
                 }
                 #[allow(unused_labels)]
                 'feature_if: {
                     #[cfg(any(feature = "mers", feature = "merscfg"))]
                     if let Some(action) = &mut *mers_after_db_updated_action.lock().unwrap() {
-                        db.apply_command(update.clone());
-                        action(update);
+                        db.apply_command(action.clone());
+                        action(action);
                         break 'feature_if;
                     }
-                    db.apply_command(update);
+                    db.apply_action_unchecked_seq(action);
                 }
                 #[cfg(feature = "playback")]
                 if let Some(player) = &mut player {

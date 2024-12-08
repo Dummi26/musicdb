@@ -2,12 +2,16 @@
 pub mod playback_rs;
 #[cfg(feature = "playback-via-rodio")]
 pub mod rodio;
+#[cfg(feature = "playback-via-playback-rs")]
+pub type PlayerBackendFeat<T> = playback_rs::PlayerBackendPlaybackRs<T>;
+#[cfg(feature = "playback-via-rodio")]
+pub type PlayerBackendFeat<T> = rodio::PlayerBackendRodio<T>;
 
 use std::{collections::HashMap, ffi::OsStr, sync::Arc};
 
 use crate::{
     data::{database::Database, song::CachedData, SongId},
-    server::Command,
+    server::Action,
 };
 
 pub struct Player<T: PlayerBackend<SongCustomData>> {
@@ -94,11 +98,11 @@ impl<T: PlayerBackend<SongCustomData>> Player<T> {
             allow_sending_commands: false,
         }
     }
-    pub fn handle_command(&mut self, command: &Command) {
-        match command {
-            Command::Resume => self.resume(),
-            Command::Pause => self.pause(),
-            Command::Stop => self.stop(),
+    pub fn handle_action(&mut self, action: &Action) {
+        match action {
+            Action::Resume => self.resume(),
+            Action::Pause => self.pause(),
+            Action::Stop => self.stop(),
             _ => {}
         }
     }
@@ -122,7 +126,7 @@ impl<T: PlayerBackend<SongCustomData>> Player<T> {
     pub fn update_uncache_opt(&mut self, db: &mut Database, allow_uncaching: bool) {
         if self.allow_sending_commands {
             if self.allow_sending_commands && self.backend.song_finished() {
-                db.apply_command(Command::NextSong);
+                db.apply_action_unchecked_seq(Action::NextSong);
             }
         }
 
@@ -141,7 +145,7 @@ impl<T: PlayerBackend<SongCustomData>> Player<T> {
                     self.backend.next(db.playing, load_duration);
                     if self.allow_sending_commands && load_duration {
                         if let Some(dur) = self.backend.current_song_duration() {
-                            db.apply_command(Command::SetSongDuration(id, dur))
+                            db.apply_action_unchecked_seq(Action::SetSongDuration(id, dur))
                         }
                     }
                 } else if let Some(song) = db.get_song(&id) {
@@ -165,21 +169,21 @@ impl<T: PlayerBackend<SongCustomData>> Player<T> {
                         self.backend.next(db.playing, load_duration);
                         if self.allow_sending_commands && load_duration {
                             if let Some(dur) = self.backend.current_song_duration() {
-                                db.apply_command(Command::SetSongDuration(id, dur))
+                                db.apply_action_unchecked_seq(Action::SetSongDuration(id, dur))
                             }
                         }
                     } else {
                         // only show an error if the user tries to play the song.
                         // otherwise, the error might be spammed.
                         if self.allow_sending_commands && db.playing {
-                            db.apply_command(Command::ErrorInfo(
+                            db.apply_action_unchecked_seq(Action::ErrorInfo(
                                 format!("Couldn't load bytes for song {id}"),
                                 format!(
                                     "Song: {}\nby {:?} on {:?}",
                                     song.title, song.artist, song.album
                                 ),
                             ));
-                            db.apply_command(Command::NextSong);
+                            db.apply_action_unchecked_seq(Action::NextSong);
                         }
                         self.backend.clear();
                     }

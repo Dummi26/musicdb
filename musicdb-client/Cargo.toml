@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-musicdb-lib = { path = "../musicdb-lib" }
+musicdb-lib = { path = "../musicdb-lib", default-features = false }
 clap = { version = "4.4.6", features = ["derive"] }
 directories = "5.0.1"
 regex = "1.9.3"
@@ -16,7 +16,7 @@ musicdb-mers = { version = "0.1.0", path = "../musicdb-mers", optional = true }
 uianimator = "0.1.1"
 
 [features]
-default = ["gui", "playback", "merscfg"]
+default = ["gui", "default-playback"]
 # gui:
 #   enables the gui modes
 # merscfg:
@@ -26,6 +26,9 @@ default = ["gui", "playback", "merscfg"]
 # playback:
 #   enables syncplayer modes, where the client mirrors the server's playback
 gui = ["speedy2d"]
-merscfg = ["mers", "speedy2d"]
+merscfg = ["mers", "gui"]
 mers = ["musicdb-mers"]
-playback = ["musicdb-lib/playback"]
+playback = []
+default-playback = ["playback", "musicdb-lib/default-playback"]
+playback-via-playback-rs = ["playback", "musicdb-lib/playback-via-playback-rs"]
+playback-via-rodio = ["playback", "musicdb-lib/playback-via-rodio"]

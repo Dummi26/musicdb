@@ -2,7 +2,10 @@ use std::{ffi::OsStr, io::Cursor, path::Path, sync::Arc, time::Duration};
 
 use playback_rs::Hint;
 
-use crate::{data::SongId, server::Command};
+use crate::{
+    data::SongId,
+    server::{Action, Command},
+};
 
 use super::PlayerBackend;
 
@@ -52,10 +55,13 @@ impl<T> PlayerBackend<T> for PlayerBackendPlaybackRs<T> {
             Ok(v) => Some(v),
             Err(e) => {
                 if let Some(s) = &self.command_sender {
-                    s.send(Command::ErrorInfo(
-                        format!("Couldn't decode song #{id}!"),
-                        format!("Error: {e}"),
-                    ))
+                    s.send(
+                        Action::ErrorInfo(
+                            format!("Couldn't decode song #{id}!"),
+                            format!("Error: {e}"),
+                        )
+                        .cmd(0xFFu8),
+                    )
                     .unwrap();
                 }
                 None
@@ -95,18 +101,21 @@ impl<T> PlayerBackend<T> for PlayerBackendPlaybackRs<T> {
             if let Some(song) = song {
                 if let Err(e) = self.player.play_song_now(song, None) {
                     if let Some(s) = &self.command_sender {
-                        s.send(Command::ErrorInfo(
-                            format!("Couldn't play song #{id}!"),
-                            format!("Error: {e}"),
-                        ))
+                        s.send(
+                            Action::ErrorInfo(
+                                format!("Couldn't play song #{id}!"),
+                                format!("Error: {e}"),
+                            )
+                            .cmd(0xFFu8),
+                        )
                         .unwrap();
-                        s.send(Command::NextSong).unwrap();
+                        s.send(Action::NextSong.cmd(0xFFu8)).unwrap();
                     }
                 } else {
                     self.player.set_playing(play);
                 }
             } else if let Some(s) = &self.command_sender {
-                s.send(Command::NextSong).unwrap();
+                s.send(Action::NextSong.cmd(0xFFu8)).unwrap();
             }
         }
     }

@@ -64,6 +64,39 @@ impl Queue {
         }
     }
 
+    pub fn is_empty(&self) -> bool {
+        if !self.enabled {
+            return true;
+        }
+        match &self.content {
+            QueueContent::Song(_) => false,
+            QueueContent::Folder(folder) => folder.content.iter().all(|v| v.is_empty()),
+            QueueContent::Loop(_total, _done, inner) => inner.is_empty(),
+        }
+    }
+    /// returns true if there is at most one song in the queue
+    pub fn is_almost_empty(&self) -> bool {
+        self.is_almost_empty_int() < 2
+    }
+    fn is_almost_empty_int(&self) -> u8 {
+        if !self.enabled {
+            return 0;
+        }
+        match &self.content {
+            QueueContent::Song(_) => 1,
+            QueueContent::Folder(folder) => {
+                let mut o = 0;
+                for v in folder.content.iter() {
+                    o += v.is_almost_empty_int();
+                    if o >= 2 {
+                        return 2;
+                    }
+                }
+                o
+            }
+            QueueContent::Loop(_total, _done, inner) => inner.is_almost_empty_int(),
+        }
+    }
     pub fn len(&self) -> usize {
         if !self.enabled {
             return 0;

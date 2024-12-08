@@ -5,7 +5,7 @@ use musicdb_lib::{
         song::Song,
         AlbumId, ArtistId,
     },
-    server::Command,
+    server::Action,
 };
 use speedy2d::{
     color::Color,
@@ -404,8 +404,8 @@ impl GuiElem for QueueEmptySpaceDragHandler {
         dragged_add_to_queue(
             dragged,
             (),
-            |_, q| Command::QueueAdd(vec![], q),
-            |_, q| Command::QueueMoveInto(q, vec![]),
+            |_, q| Action::QueueAdd(vec![], q),
+            |_, q| Action::QueueMoveInto(q, vec![]),
         )
     }
 }
@@ -563,7 +563,7 @@ impl GuiElem for QueueSong {
         if self.mouse && button == MouseButton::Left {
             self.mouse = false;
             if e.take() && !self.always_copy {
-                vec![GuiAction::SendToServer(Command::QueueGoto(
+                vec![GuiAction::SendToServer(Action::QueueGoto(
                     self.path.clone(),
                 ))]
             } else {
@@ -631,9 +631,9 @@ impl GuiElem for QueueSong {
                 self.path.clone(),
                 move |mut p: Vec<usize>, q| {
                     if let Some(j) = p.pop() {
-                        Command::QueueInsert(p, if insert_below { j + 1 } else { j }, q)
+                        Action::QueueInsert(p, if insert_below { j + 1 } else { j }, q)
                     } else {
-                        Command::QueueAdd(p, q)
+                        Action::QueueAdd(p, q)
                     }
                 },
                 move |mut p, q| {
@@ -642,7 +642,7 @@ impl GuiElem for QueueSong {
                             *l += 1;
                         }
                     }
-                    Command::QueueMove(q, p)
+                    Action::QueueMove(q, p)
                 },
             )
         } else {
@@ -787,9 +787,9 @@ impl GuiElem for QueueFolder {
             //     Panel::with_background(GuiElemCfg::default(), (), Color::DARK_GRAY),
             // )]))];
             return vec![GuiAction::SendToServer(if self.queue.order.is_some() {
-                Command::QueueUnshuffle(self.path.clone())
+                Action::QueueUnshuffle(self.path.clone())
             } else {
-                Command::QueueShuffle(self.path.clone())
+                Action::QueueShuffle(self.path.clone())
             })];
         }
         vec![]
@@ -798,7 +798,7 @@ impl GuiElem for QueueFolder {
         if self.mouse && button == MouseButton::Left {
             self.mouse = false;
             if e.take() && !self.always_copy {
-                vec![GuiAction::SendToServer(Command::QueueGoto(
+                vec![GuiAction::SendToServer(Action::QueueGoto(
                     self.path.clone(),
                 ))]
             } else {
@@ -826,8 +826,8 @@ impl GuiElem for QueueFolder {
                 dragged_add_to_queue(
                     dragged,
                     self.path.clone(),
-                    |p, q| Command::QueueAdd(p, q),
-                    |p, q| Command::QueueMoveInto(q, p),
+                    |p, q| Action::QueueAdd(p, q),
+                    |p, q| Action::QueueMoveInto(q, p),
                 )
             } else {
                 dragged_add_to_queue(
@@ -835,9 +835,9 @@ impl GuiElem for QueueFolder {
                     self.path.clone(),
                     |mut p, q| {
                         let j = p.pop().unwrap_or(0);
-                        Command::QueueInsert(p, j, q)
+                        Action::QueueInsert(p, j, q)
                     },
-                    |p, q| Command::QueueMove(q, p),
+                    |p, q| Action::QueueMove(q, p),
                 )
             }
         } else {
@@ -903,10 +903,10 @@ impl GuiElem for QueueIndentEnd {
         dragged_add_to_queue(
             dragged,
             self.path_insert.clone(),
-            |(p, j), q| Command::QueueInsert(p, j, q),
+            |(p, j), q| Action::QueueInsert(p, j, q),
             |(mut p, j), q| {
                 p.push(j);
-                Command::QueueMove(q, p)
+                Action::QueueMove(q, p)
             },
         )
     }
@@ -1037,7 +1037,7 @@ impl GuiElem for QueueLoop {
         if self.mouse && button == MouseButton::Left {
             self.mouse = false;
             if e.take() && !self.always_copy {
-                vec![GuiAction::SendToServer(Command::QueueGoto(
+                vec![GuiAction::SendToServer(Action::QueueGoto(
                     self.path.clone(),
                 ))]
             } else {
@@ -1066,8 +1066,8 @@ impl GuiElem for QueueLoop {
             dragged_add_to_queue(
                 dragged,
                 p,
-                |p, q| Command::QueueAdd(p, q),
-                |p, q| Command::QueueMoveInto(q, p),
+                |p, q| Action::QueueAdd(p, q),
+                |p, q| Action::QueueMoveInto(q, p),
             )
         } else {
             vec![]
@@ -1078,8 +1078,8 @@ impl GuiElem for QueueLoop {
 fn dragged_add_to_queue<T: 'static>(
     dragged: Dragging,
     data: T,
-    f_queues: impl FnOnce(T, Vec<Queue>) -> Command + 'static,
-    f_queue_by_path: impl FnOnce(T, Vec<usize>) -> Command + 'static,
+    f_queues: impl FnOnce(T, Vec<Queue>) -> Action + 'static,
+    f_queue_by_path: impl FnOnce(T, Vec<usize>) -> Action + 'static,
 ) -> Vec<GuiAction> {
     match dragged {
         Dragging::Artist(id) => {
