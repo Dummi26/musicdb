@@ -4,18 +4,18 @@ use crate::load::ToFromBytes;
 
 use super::{database::Database, SongId};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Queue {
     enabled: bool,
     content: QueueContent,
 }
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum QueueContent {
     Song(SongId),
     Folder(QueueFolder),
     Loop(usize, usize, Box<Queue>),
 }
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct QueueFolder {
     pub index: usize,
     pub content: Vec<Queue>,

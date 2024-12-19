@@ -13,7 +13,7 @@ use rand::thread_rng;
 
 use crate::{
     load::ToFromBytes,
-    server::{Action, Command, Commander},
+    server::{Action, Command, Commander, Req},
 };
 
 use super::{
@@ -45,10 +45,11 @@ pub struct Database {
     pub queue: Queue,
     /// if the database receives an update, it will inform all of its clients so they can stay in sync.
     /// this is a list containing all the clients.
-    pub update_endpoints: Vec<UpdateEndpoint>,
+    pub update_endpoints: Vec<(u64, UpdateEndpoint)>,
+    pub update_endpoints_id: u64,
     /// true if a song is/should be playing
     pub playing: bool,
-    pub command_sender: Option<mpsc::Sender<Command>>,
+    pub command_sender: Option<mpsc::Sender<(Command, Option<u64>)>>,
     pub remote_server_as_song_file_source:
         Option<Arc<Mutex<crate::server::get::Client<Box<dyn ClientIo>>>>>,
     /// only relevant for clients. true if init is done
@@ -65,7 +66,7 @@ pub enum UpdateEndpoint {
     Bytes(Box<dyn Write + Sync + Send>),
     CmdChannel(mpsc::Sender<Arc<Command>>),
     Custom(Box<dyn FnMut(&Command) + Send>),
-    CustomArc(Box<dyn FnMut(&Arc<Command>) + Send>),
+    CustomArc(Box<dyn FnMut(Arc<Command>) + Send>),
     CustomBytes(Box<dyn FnMut(&[u8]) + Send>),
 }
 
@@ -507,7 +508,7 @@ impl Database {
             ))
             .to_bytes(con)?;
         self.seq
-            .pack(Action::QueueUpdate(vec![], self.queue.clone()))
+            .pack(Action::QueueUpdate(vec![], self.queue.clone(), Req::none()))
             .to_bytes(con)?;
         if self.playing {
             self.seq.pack(Action::Resume).to_bytes(con)?;
@@ -521,8 +522,29 @@ impl Database {
     }
 
     /// `apply_action_unchecked_seq(command.action)` if `command.seq` is correct or `0xFF`
-    pub fn apply_command(&mut self, command: Command) {
+    pub fn apply_command(&mut self, mut command: Command, client: Option<u64>) {
         if command.seq != self.seq.seq() && command.seq != 0xFF {
+            if let Some(client) = client {
+                for (udepid, udep) in &mut self.update_endpoints {
+                    if client == *udepid {
+                        let denied =
+                            Action::Denied(command.action.get_req().unwrap_or_else(Req::none))
+                                .cmd(0xFFu8);
+                        match udep {
+                            UpdateEndpoint::Bytes(w) => {
+                                let _ = w.write(&denied.to_bytes_vec());
+                            }
+                            UpdateEndpoint::CmdChannel(w) => {
+                                let _ = w.send(Arc::new(denied));
+                            }
+                            UpdateEndpoint::Custom(w) => w(&denied),
+                            UpdateEndpoint::CustomArc(w) => w(Arc::new(denied)),
+                            UpdateEndpoint::CustomBytes(w) => w(&denied.to_bytes_vec()),
+                        }
+                        return;
+                    }
+                }
+            }
             eprintln!(
                 "Invalid sequence number: got {} but expected {}.",
                 command.seq,
@@ -530,9 +552,9 @@ impl Database {
             );
             return;
         }
-        self.apply_action_unchecked_seq(command.action)
+        self.apply_action_unchecked_seq(command.action, client)
     }
-    pub fn apply_action_unchecked_seq(&mut self, mut action: Action) {
+    pub fn apply_action_unchecked_seq(&mut self, mut action: Action, client: Option<u64>) {
         if !self.is_client() {
             if let Action::ErrorInfo(t, _) = &mut action {
                 // clients can send ErrorInfo to the server and it will show up on other clients,
@@ -548,7 +570,7 @@ impl Database {
             Action::Pause if !self.playing => (),
             Action::Resume if self.playing => (),
             // since db.update_endpoints is empty for clients, this won't cause unwanted back and forth
-            _ => action = self.broadcast_update(action),
+            _ => action = self.broadcast_update(action, client),
         }
         match action {
             Action::Resume => self.playing = true,
@@ -557,7 +579,7 @@ impl Database {
             Action::NextSong => {
                 if !Queue::advance_index_db(self) {
                     // end of queue
-                    self.apply_action_unchecked_seq(Action::Pause);
+                    self.apply_action_unchecked_seq(Action::Pause, client);
                     self.queue.init();
                 }
             }
@@ -567,17 +589,17 @@ impl Database {
                 }
             }
             Action::SyncDatabase(a, b, c) => self.sync(a, b, c),
-            Action::QueueUpdate(index, new_data) => {
+            Action::QueueUpdate(index, new_data, _) => {
                 if let Some(v) = self.queue.get_item_at_index_mut(&index, 0) {
                     *v = new_data;
                 }
             }
-            Action::QueueAdd(index, new_data) => {
+            Action::QueueAdd(index, new_data, _) => {
                 if let Some(v) = self.queue.get_item_at_index_mut(&index, 0) {
                     v.add_to_end(new_data, false);
                 }
             }
-            Action::QueueInsert(index, pos, new_data) => {
+            Action::QueueInsert(index, pos, new_data, _) => {
                 if let Some(v) = self.queue.get_item_at_index_mut(&index, 0) {
                     v.insert(new_data, pos, false);
                 }
@@ -662,7 +684,7 @@ impl Database {
                     {
                         let mut ord: Vec<usize> = (0..content.len()).collect();
                         ord.shuffle(&mut thread_rng());
-                        self.apply_action_unchecked_seq(Action::QueueSetShuffle(path, ord));
+                        self.apply_action_unchecked_seq(Action::QueueSetShuffle(path, ord), client);
                     } else {
                         eprintln!("(QueueShuffle) QueueElement at {path:?} not a folder!");
                     }
@@ -719,23 +741,23 @@ impl Database {
                     }
                 }
             }
-            Action::AddSong(song) => {
+            Action::AddSong(song, _) => {
                 self.add_song_new(song);
             }
-            Action::AddAlbum(album) => {
+            Action::AddAlbum(album, _) => {
                 self.add_album_new(album);
             }
-            Action::AddArtist(artist) => {
+            Action::AddArtist(artist, _) => {
                 self.add_artist_new(artist);
             }
-            Action::AddCover(cover) => _ = self.add_cover_new(cover),
-            Action::ModifySong(song) => {
+            Action::AddCover(cover, _) => _ = self.add_cover_new(cover),
+            Action::ModifySong(song, _) => {
                 _ = self.update_song(song);
             }
-            Action::ModifyAlbum(album) => {
+            Action::ModifyAlbum(album, _) => {
                 _ = self.update_album(album);
             }
-            Action::ModifyArtist(artist) => {
+            Action::ModifyArtist(artist, _) => {
                 _ = self.update_artist(artist);
             }
             Action::RemoveSong(song) => {
@@ -846,6 +868,7 @@ impl Database {
                 self.client_is_init = true;
             }
             Action::ErrorInfo(..) => {}
+            Action::Denied(..) => {}
         }
     }
 }
@@ -875,6 +898,7 @@ impl Database {
             custom_files: None,
             queue: QueueContent::Folder(QueueFolder::default()).into(),
             update_endpoints: vec![],
+            update_endpoints_id: 0,
             playing: false,
             command_sender: None,
             remote_server_as_song_file_source: None,
@@ -896,6 +920,7 @@ impl Database {
             custom_files: None,
             queue: QueueContent::Folder(QueueFolder::default()).into(),
             update_endpoints: vec![],
+            update_endpoints_id: 0,
             playing: false,
             command_sender: None,
             remote_server_as_song_file_source: None,
@@ -922,6 +947,7 @@ impl Database {
             custom_files: None,
             queue: QueueContent::Folder(QueueFolder::default()).into(),
             update_endpoints: vec![],
+            update_endpoints_id: 0,
             playing: false,
             command_sender: None,
             remote_server_as_song_file_source: None,
@@ -973,7 +999,7 @@ impl Database {
         self.times_data_modified = None;
         Ok(path)
     }
-    pub fn broadcast_update(&mut self, update: Action) -> Action {
+    pub fn broadcast_update(&mut self, update: Action, client: Option<u64>) -> Action {
         match update {
             Action::InitComplete => return update,
             _ => {}
@@ -981,11 +1007,36 @@ impl Database {
         if !self.is_client() {
             self.seq.inc();
         }
-        let update = self.seq.pack(update);
+        let mut update = self.seq.pack(update);
+        let req = update.action.take_req();
         let mut remove = vec![];
         let mut bytes = None;
         let mut arc = None;
-        for (i, udep) in self.update_endpoints.iter_mut().enumerate() {
+        for (i, (udepid, udep)) in self.update_endpoints.iter_mut().enumerate() {
+            if req.is_some_and(|r| r.is_some()) && client.is_some_and(|v| *udepid == v) {
+                update.action.put_req(req.unwrap());
+                match udep {
+                    UpdateEndpoint::Bytes(writer) => {
+                        if writer.write_all(&update.to_bytes_vec()).is_err() {
+                            remove.push(i);
+                        }
+                    }
+                    UpdateEndpoint::CmdChannel(sender) => {
+                        if sender.send(Arc::new(update.clone())).is_err() {
+                            remove.push(i);
+                        }
+                    }
+                    UpdateEndpoint::Custom(func) => func(&update),
+                    UpdateEndpoint::CustomArc(func) => func(Arc::new(update.clone())),
+                    UpdateEndpoint::CustomBytes(func) => {
+                        if bytes.is_none() {
+                            bytes = Some(update.to_bytes_vec());
+                        }
+                        func(bytes.as_ref().unwrap())
+                    }
+                }
+                update.action.take_req();
+            }
             match udep {
                 UpdateEndpoint::Bytes(writer) => {
                     if bytes.is_none() {
@@ -1008,7 +1059,7 @@ impl Database {
                     if arc.is_none() {
                         arc = Some(Arc::new(update.clone()));
                     }
-                    func(arc.as_ref().unwrap())
+                    func(Arc::clone(arc.as_ref().unwrap()))
                 }
                 UpdateEndpoint::CustomBytes(func) => {
                     if bytes.is_none() {
@@ -1027,6 +1078,9 @@ impl Database {
             for i in remove.into_iter().rev() {
                 self.update_endpoints.remove(i);
             }
+        }
+        if let Some(req) = req {
+            update.action.put_req(req);
         }
         update.action
     }
@@ -1077,6 +1131,11 @@ impl Database {
 pub struct Cover {
     pub location: DatabaseLocation,
     pub data: Arc<Mutex<(bool, Option<(Instant, Vec<u8>)>)>>,
+}
+impl PartialEq for Cover {
+    fn eq(&self, other: &Self) -> bool {
+        self.location == other.location
+    }
 }
 impl Cover {
     pub fn get_bytes_from_file<O>(

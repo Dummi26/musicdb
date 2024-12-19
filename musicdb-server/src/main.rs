@@ -151,11 +151,11 @@ fn main() {
                 let cmd = musicdb_lib::server::Command::from_bytes(&mut con).unwrap();
                 use musicdb_lib::server::Action::*;
                 match &cmd.action {
-                    // ignore playback and queue commands
+                    // ignore playback and queue commands, and denials
                     Resume | Pause | Stop | NextSong | QueueUpdate(..) | QueueAdd(..)
                     | QueueInsert(..) | QueueRemove(..) | QueueMove(..) | QueueMoveInto(..)
                     | QueueGoto(..) | QueueShuffle(..) | QueueSetShuffle(..)
-                    | QueueUnshuffle(..) => continue,
+                    | QueueUnshuffle(..) | Denied(..) => continue,
                     SyncDatabase(..)
                     | AddSong(..)
                     | AddAlbum(..)
@@ -184,7 +184,7 @@ fn main() {
                     | Save
                     | ErrorInfo(..) => (),
                 }
-                database.lock().unwrap().apply_command(cmd);
+                database.lock().unwrap().apply_command(cmd, None);
             }
         });
     }

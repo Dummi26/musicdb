@@ -2,7 +2,7 @@ use std::time::Instant;
 
 use musicdb_lib::{
     data::queue::{QueueContent, QueueFolder},
-    server::Action,
+    server::{Action, Req},
 };
 use speedy2d::{color::Color, dimen::Vec2, shape::Rectangle, window::VirtualKeyCode, Graphics2D};
 use uianimator::{default_animator_f64_quadratic::DefaultAnimatorF64Quadratic, Animator};
@@ -126,6 +126,7 @@ impl GuiScreen {
                                     musicdb_lib::data::queue::QueueFolder::default(),
                                 )
                                 .into(),
+                                Req::none(),
                             ))]
                         },
                         [Label::new(

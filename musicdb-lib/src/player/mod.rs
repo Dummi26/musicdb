@@ -126,7 +126,7 @@ impl<T: PlayerBackend<SongCustomData>> Player<T> {
     pub fn update_uncache_opt(&mut self, db: &mut Database, allow_uncaching: bool) {
         if self.allow_sending_commands {
             if self.allow_sending_commands && self.backend.song_finished() {
-                db.apply_action_unchecked_seq(Action::NextSong);
+                db.apply_action_unchecked_seq(Action::NextSong, None);
             }
         }
 
@@ -145,7 +145,7 @@ impl<T: PlayerBackend<SongCustomData>> Player<T> {
                     self.backend.next(db.playing, load_duration);
                     if self.allow_sending_commands && load_duration {
                         if let Some(dur) = self.backend.current_song_duration() {
-                            db.apply_action_unchecked_seq(Action::SetSongDuration(id, dur))
+                            db.apply_action_unchecked_seq(Action::SetSongDuration(id, dur), None)
                         }
                     }
                 } else if let Some(song) = db.get_song(&id) {
@@ -169,21 +169,27 @@ impl<T: PlayerBackend<SongCustomData>> Player<T> {
                         self.backend.next(db.playing, load_duration);
                         if self.allow_sending_commands && load_duration {
                             if let Some(dur) = self.backend.current_song_duration() {
-                                db.apply_action_unchecked_seq(Action::SetSongDuration(id, dur))
+                                db.apply_action_unchecked_seq(
+                                    Action::SetSongDuration(id, dur),
+                                    None,
+                                )
                             }
                         }
                     } else {
                         // only show an error if the user tries to play the song.
                         // otherwise, the error might be spammed.
                         if self.allow_sending_commands && db.playing {
-                            db.apply_action_unchecked_seq(Action::ErrorInfo(
-                                format!("Couldn't load bytes for song {id}"),
-                                format!(
-                                    "Song: {}\nby {:?} on {:?}",
-                                    song.title, song.artist, song.album
+                            db.apply_action_unchecked_seq(
+                                Action::ErrorInfo(
+                                    format!("Couldn't load bytes for song {id}"),
+                                    format!(
+                                        "Song: {}\nby {:?} on {:?}",
+                                        song.title, song.artist, song.album
+                                    ),
                                 ),
-                            ));
-                            db.apply_action_unchecked_seq(Action::NextSong);
+                                None,
+                            );
+                            db.apply_action_unchecked_seq(Action::NextSong, None);
                         }
                         self.backend.clear();
                     }

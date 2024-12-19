@@ -17,7 +17,7 @@ use super::{
     AlbumId, ArtistId, CoverId, DatabaseLocation, GeneralData, SongId,
 };
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Song {
     pub id: SongId,
     pub location: DatabaseLocation,
@@ -303,6 +303,12 @@ pub struct CachedData(
         )>,
     >,
 );
+impl PartialEq for CachedData {
+    fn eq(&self, _other: &Self) -> bool {
+        // for testing
+        true
+    }
+}
 impl Clone for CachedData {
     fn clone(&self) -> Self {
         Self(Arc::clone(&self.0))

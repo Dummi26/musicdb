@@ -13,12 +13,12 @@ pub struct PlayerBackendPlaybackRs<T> {
     player: playback_rs::Player,
     current: Option<(SongId, Option<playback_rs::Song>, T)>,
     next: Option<(SongId, Option<playback_rs::Song>, T)>,
-    command_sender: Option<std::sync::mpsc::Sender<Command>>,
+    command_sender: Option<std::sync::mpsc::Sender<(Command, Option<u64>)>>,
 }
 
 impl<T> PlayerBackendPlaybackRs<T> {
     pub fn new(
-        command_sender: std::sync::mpsc::Sender<Command>,
+        command_sender: std::sync::mpsc::Sender<(Command, Option<u64>)>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         Self::new_with_optional_command_sending(Some(command_sender))
     }
@@ -26,7 +26,7 @@ impl<T> PlayerBackendPlaybackRs<T> {
         Self::new_with_optional_command_sending(None)
     }
     pub fn new_with_optional_command_sending(
-        command_sender: Option<std::sync::mpsc::Sender<Command>>,
+        command_sender: Option<std::sync::mpsc::Sender<(Command, Option<u64>)>>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         Ok(Self {
             player: playback_rs::Player::new(None)?,
@@ -55,13 +55,14 @@ impl<T> PlayerBackend<T> for PlayerBackendPlaybackRs<T> {
             Ok(v) => Some(v),
             Err(e) => {
                 if let Some(s) = &self.command_sender {
-                    s.send(
+                    s.send((
                         Action::ErrorInfo(
                             format!("Couldn't decode song #{id}!"),
                             format!("Error: {e}"),
                         )
                         .cmd(0xFFu8),
-                    )
+                        None,
+                    ))
                     .unwrap();
                 }
                 None
@@ -101,21 +102,22 @@ impl<T> PlayerBackend<T> for PlayerBackendPlaybackRs<T> {
             if let Some(song) = song {
                 if let Err(e) = self.player.play_song_now(song, None) {
                     if let Some(s) = &self.command_sender {
-                        s.send(
+                        s.send((
                             Action::ErrorInfo(
                                 format!("Couldn't play song #{id}!"),
                                 format!("Error: {e}"),
                             )
                             .cmd(0xFFu8),
-                        )
+                            None,
+                        ))
                         .unwrap();
-                        s.send(Action::NextSong.cmd(0xFFu8)).unwrap();
+                        s.send((Action::NextSong.cmd(0xFFu8), None)).unwrap();
                     }
                 } else {
                     self.player.set_playing(play);
                 }
             } else if let Some(s) = &self.command_sender {
-                s.send(Action::NextSong.cmd(0xFFu8)).unwrap();
+                s.send((Action::NextSong.cmd(0xFFu8), None)).unwrap();
             }
         }
     }

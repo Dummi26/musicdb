@@ -7,7 +7,7 @@ use musicdb_lib::data::database::Database;
 use musicdb_lib::data::queue::{Queue, QueueContent, QueueFolder};
 use musicdb_lib::data::song::Song;
 use musicdb_lib::data::SongId;
-use musicdb_lib::server::{Action, Command};
+use musicdb_lib::server::{Action, Command, Req};
 use rocket::response::content::RawHtml;
 use rocket::{get, routes, Config, State};
 
@@ -40,7 +40,7 @@ const HTML_END: &'static str = "</body></html>";
 
 struct Data {
     db: Arc<Mutex<Database>>,
-    command_sender: mpsc::Sender<Command>,
+    command_sender: mpsc::Sender<(Command, Option<u64>)>,
 }
 
 #[get("/")]
@@ -258,7 +258,7 @@ fn gen_queue_html_impl(
 fn queue_remove(data: &State<Data>, path: &str) {
     if let Some(path) = path.split('_').map(|v| v.parse().ok()).collect() {
         data.command_sender
-            .send(Action::QueueRemove(path).cmd(0xFFu8))
+            .send((Action::QueueRemove(path).cmd(0xFFu8), None))
             .unwrap();
     }
 }
@@ -266,7 +266,7 @@ fn queue_remove(data: &State<Data>, path: &str) {
 fn queue_goto(data: &State<Data>, path: &str) {
     if let Some(path) = path.split('_').map(|v| v.parse().ok()).collect() {
         data.command_sender
-            .send(Action::QueueGoto(path).cmd(0xFFu8))
+            .send((Action::QueueGoto(path).cmd(0xFFu8), None))
             .unwrap();
     }
 }
@@ -274,27 +274,31 @@ fn queue_goto(data: &State<Data>, path: &str) {
 #[get("/play")]
 fn play(data: &State<Data>) {
     data.command_sender
-        .send(Action::Resume.cmd(0xFFu8))
+        .send((Action::Resume.cmd(0xFFu8), None))
         .unwrap();
 }
 #[get("/pause")]
 fn pause(data: &State<Data>) {
-    data.command_sender.send(Action::Pause.cmd(0xFFu8)).unwrap();
+    data.command_sender
+        .send((Action::Pause.cmd(0xFFu8), None))
+        .unwrap();
 }
 #[get("/stop")]
 fn stop(data: &State<Data>) {
-    data.command_sender.send(Action::Stop.cmd(0xFFu8)).unwrap();
+    data.command_sender
+        .send((Action::Stop.cmd(0xFFu8), None))
+        .unwrap();
 }
 #[get("/skip")]
 fn skip(data: &State<Data>) {
     data.command_sender
-        .send(Action::NextSong.cmd(0xFFu8))
+        .send((Action::NextSong.cmd(0xFFu8), None))
         .unwrap();
 }
 #[get("/clear-queue")]
 fn clear_queue(data: &State<Data>) {
     data.command_sender
-        .send(
+        .send((
             Action::QueueUpdate(
                 vec![],
                 QueueContent::Folder(QueueFolder {
@@ -304,16 +308,21 @@ fn clear_queue(data: &State<Data>) {
                     order: None,
                 })
                 .into(),
+                Req::none(),
             )
             .cmd(0xFFu8),
-        )
+            None,
+        ))
         .unwrap();
 }
 
 #[get("/add-song/<id>")]
 fn add_song(data: &State<Data>, id: SongId) {
     data.command_sender
-        .send(Action::QueueAdd(vec![], vec![QueueContent::Song(id).into()]).cmd(0xFFu8))
+        .send((
+            Action::QueueAdd(vec![], vec![QueueContent::Song(id).into()], Req::none()).cmd(0xFFu8),
+            None,
+        ))
         .unwrap();
 }
 
@@ -538,7 +547,7 @@ fn search(
 
 pub async fn main(
     db: Arc<Mutex<Database>>,
-    command_sender: mpsc::Sender<Command>,
+    command_sender: mpsc::Sender<(Command, Option<u64>)>,
     addr: SocketAddr,
 ) {
     rocket::build()

@@ -5,7 +5,7 @@ use musicdb_lib::{
         song::Song,
         AlbumId, ArtistId,
     },
-    server::Action,
+    server::{Action, Req},
 };
 use speedy2d::{
     color::Color,
@@ -404,7 +404,7 @@ impl GuiElem for QueueEmptySpaceDragHandler {
         dragged_add_to_queue(
             dragged,
             (),
-            |_, q| Action::QueueAdd(vec![], q),
+            |_, q| Action::QueueAdd(vec![], q, Req::none()),
             |_, q| Action::QueueMoveInto(q, vec![]),
         )
     }
@@ -631,9 +631,9 @@ impl GuiElem for QueueSong {
                 self.path.clone(),
                 move |mut p: Vec<usize>, q| {
                     if let Some(j) = p.pop() {
-                        Action::QueueInsert(p, if insert_below { j + 1 } else { j }, q)
+                        Action::QueueInsert(p, if insert_below { j + 1 } else { j }, q, Req::none())
                     } else {
-                        Action::QueueAdd(p, q)
+                        Action::QueueAdd(p, q, Req::none())
                     }
                 },
                 move |mut p, q| {
@@ -826,7 +826,7 @@ impl GuiElem for QueueFolder {
                 dragged_add_to_queue(
                     dragged,
                     self.path.clone(),
-                    |p, q| Action::QueueAdd(p, q),
+                    |p, q| Action::QueueAdd(p, q, Req::none()),
                     |p, q| Action::QueueMoveInto(q, p),
                 )
             } else {
@@ -835,7 +835,7 @@ impl GuiElem for QueueFolder {
                     self.path.clone(),
                     |mut p, q| {
                         let j = p.pop().unwrap_or(0);
-                        Action::QueueInsert(p, j, q)
+                        Action::QueueInsert(p, j, q, Req::none())
                     },
                     |p, q| Action::QueueMove(q, p),
                 )
@@ -903,7 +903,7 @@ impl GuiElem for QueueIndentEnd {
         dragged_add_to_queue(
             dragged,
             self.path_insert.clone(),
-            |(p, j), q| Action::QueueInsert(p, j, q),
+            |(p, j), q| Action::QueueInsert(p, j, q, Req::none()),
             |(mut p, j), q| {
                 p.push(j);
                 Action::QueueMove(q, p)
@@ -1066,7 +1066,7 @@ impl GuiElem for QueueLoop {
             dragged_add_to_queue(
                 dragged,
                 p,
-                |p, q| Action::QueueAdd(p, q),
+                |p, q| Action::QueueAdd(p, q, Req::none()),
                 |p, q| Action::QueueMoveInto(q, p),
             )
         } else {

@@ -4,7 +4,7 @@ use crate::load::ToFromBytes;
 
 use super::{AlbumId, ArtistId, CoverId, GeneralData, SongId};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Album {
     pub id: AlbumId,
     pub name: String,

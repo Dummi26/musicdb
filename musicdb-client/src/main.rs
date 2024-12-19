@@ -203,7 +203,7 @@ fn main() {
                         action(action);
                         break 'feature_if;
                     }
-                    db.apply_action_unchecked_seq(action);
+                    db.apply_action_unchecked_seq(action, None);
                 }
                 #[cfg(feature = "playback")]
                 if let Some(player) = &mut player {

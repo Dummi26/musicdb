@@ -2,7 +2,7 @@ use std::time::Instant;
 
 use musicdb_lib::{
     data::{song::Song, ArtistId},
-    server::Action,
+    server::{Action, Req},
 };
 use speedy2d::{color::Color, dimen::Vec2, shape::Rectangle};
 
@@ -189,7 +189,10 @@ impl GuiElem for EditorForSongs {
                                 song.album = None;
                             }
                             info.actions
-                                .push(GuiAction::SendToServer(Action::ModifySong(song)));
+                                .push(GuiAction::SendToServer(Action::ModifySong(
+                                    song,
+                                    Req::none(),
+                                )));
                         }
                     }
                     Event::SetArtist(name, id) => {

@@ -43,10 +43,72 @@ impl Action {
     pub fn cmd(self, seq: u8) -> Command {
         Command::new(seq, self)
     }
+    pub fn take_req(&mut self) -> Option<Req> {
+        self.req_mut()
+            .map(|r| std::mem::replace(r, Req::none()))
+            .filter(|r| r.is_some())
+    }
+    pub fn get_req(&mut self) -> Option<Req> {
+        self.req_mut().map(|r| *r).filter(|r| r.is_some())
+    }
+    pub fn put_req(&mut self, req: Req) {
+        if let Some(r) = self.req_mut() {
+            *r = req;
+        }
+    }
+    fn req_mut(&mut self) -> Option<&mut Req> {
+        match self {
+            Self::QueueUpdate(_, _, req)
+            | Self::QueueAdd(_, _, req)
+            | Self::QueueInsert(_, _, _, req)
+            | Self::AddSong(_, req)
+            | Self::AddAlbum(_, req)
+            | Self::AddArtist(_, req)
+            | Self::AddCover(_, req)
+            | Self::ModifySong(_, req)
+            | Self::ModifyAlbum(_, req)
+            | Self::ModifyArtist(_, req)
+            | Self::Denied(req) => Some(req),
+            Self::Resume
+            | Self::Pause
+            | Self::Stop
+            | Self::NextSong
+            | Self::SyncDatabase(_, _, _)
+            | Self::QueueRemove(_)
+            | Self::QueueMove(_, _)
+            | Self::QueueMoveInto(_, _)
+            | Self::QueueGoto(_)
+            | Self::QueueShuffle(_)
+            | Self::QueueSetShuffle(_, _)
+            | Self::QueueUnshuffle(_)
+            | Self::RemoveSong(_)
+            | Self::RemoveAlbum(_)
+            | Self::RemoveArtist(_)
+            | Self::SetSongDuration(_, _)
+            | Self::TagSongFlagSet(_, _)
+            | Self::TagSongFlagUnset(_, _)
+            | Self::TagAlbumFlagSet(_, _)
+            | Self::TagAlbumFlagUnset(_, _)
+            | Self::TagArtistFlagSet(_, _)
+            | Self::TagArtistFlagUnset(_, _)
+            | Self::TagSongPropertySet(_, _, _)
+            | Self::TagSongPropertyUnset(_, _)
+            | Self::TagAlbumPropertySet(_, _, _)
+            | Self::TagAlbumPropertyUnset(_, _)
+            | Self::TagArtistPropertySet(_, _, _)
+            | Self::TagArtistPropertyUnset(_, _)
+            | Self::InitComplete
+            | Self::Save
+            | Self::ErrorInfo(_, _) => None,
+        }
+    }
 }
 /// Should be stored in the same lock as the database
 pub struct Commander {
     seq: u8,
+}
+pub struct Requester {
+    req: u8,
 }
 impl Commander {
     pub fn new(ff: bool) -> Self {
@@ -72,16 +134,43 @@ impl Commander {
         self.seq
     }
 }
-#[derive(Clone, Debug)]
+impl Requester {
+    pub fn new() -> Self {
+        Self { req: 0 }
+    }
+    pub fn inc(&mut self) -> Req {
+        if self.req < 0xFFu8 {
+            self.req += 1;
+        } else {
+            self.req = 1;
+        }
+        Req(self.req)
+    }
+}
+/// A request ID, or None
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Req(u8);
+impl Req {
+    pub fn none() -> Self {
+        Self(0)
+    }
+    pub fn is_none(self) -> bool {
+        self.0 == 0
+    }
+    pub fn is_some(self) -> bool {
+        self.0 != 0
+    }
+}
+#[derive(Clone, Debug, PartialEq)]
 pub enum Action {
     Resume,
     Pause,
     Stop,
     NextSong,
     SyncDatabase(Vec<Artist>, Vec<Album>, Vec<Song>),
-    QueueUpdate(Vec<usize>, Queue),
-    QueueAdd(Vec<usize>, Vec<Queue>),
-    QueueInsert(Vec<usize>, usize, Vec<Queue>),
+    QueueUpdate(Vec<usize>, Queue, Req),
+    QueueAdd(Vec<usize>, Vec<Queue>, Req),
+    QueueInsert(Vec<usize>, usize, Vec<Queue>, Req),
     QueueRemove(Vec<usize>),
     /// Move an element from A to B
     QueueMove(Vec<usize>, Vec<usize>),
@@ -95,18 +184,18 @@ pub enum Action {
     QueueUnshuffle(Vec<usize>),
 
     /// .id field is ignored!
-    AddSong(Song),
+    AddSong(Song, Req),
     /// .id field is ignored!
-    AddAlbum(Album),
+    AddAlbum(Album, Req),
     /// .id field is ignored!
-    AddArtist(Artist),
-    AddCover(Cover),
-    ModifySong(Song),
-    ModifyAlbum(Album),
+    AddArtist(Artist, Req),
+    AddCover(Cover, Req),
+    ModifySong(Song, Req),
+    ModifyAlbum(Album, Req),
+    ModifyArtist(Artist, Req),
     RemoveSong(SongId),
     RemoveAlbum(AlbumId),
     RemoveArtist(ArtistId),
-    ModifyArtist(Artist),
     SetSongDuration(SongId, u64),
     /// Add the given Tag to the song's tags, if it isn't set already.
     TagSongFlagSet(SongId, String),
@@ -129,21 +218,25 @@ pub enum Action {
     InitComplete,
     Save,
     ErrorInfo(String, String),
+
+    /// The server denied a request or an action.
+    /// Contains the Request ID that was rejected, if there was a request ID.
+    Denied(Req),
 }
 impl Command {
-    pub fn send_to_server(self, db: &Database) -> Result<(), Self> {
+    pub fn send_to_server(self, db: &Database, client: Option<u64>) -> Result<(), Self> {
         if let Some(sender) = &db.command_sender {
-            sender.send(self).unwrap();
+            sender.send((self, client)).unwrap();
             Ok(())
         } else {
             Err(self)
         }
     }
-    pub fn send_to_server_or_apply(self, db: &mut Database) {
+    pub fn send_to_server_or_apply(self, db: &mut Database, client: Option<u64>) {
         if let Some(sender) = &db.command_sender {
-            sender.send(self).unwrap();
+            sender.send((self, client)).unwrap();
         } else {
-            db.apply_command(self);
+            db.apply_command(self, client);
         }
     }
 }
@@ -164,7 +257,7 @@ impl Command {
 pub fn run_server(
     database: Arc<Mutex<Database>>,
     addr_tcp: Option<SocketAddr>,
-    sender_sender: Option<Box<dyn FnOnce(mpsc::Sender<Command>)>>,
+    sender_sender: Option<Box<dyn FnOnce(mpsc::Sender<(Command, Option<u64>)>)>>,
     play_audio: bool,
 ) {
     run_server_caching_thread_opt(database, addr_tcp, sender_sender, None, play_audio)
@@ -172,7 +265,7 @@ pub fn run_server(
 pub fn run_server_caching_thread_opt(
     database: Arc<Mutex<Database>>,
     addr_tcp: Option<SocketAddr>,
-    sender_sender: Option<Box<dyn FnOnce(mpsc::Sender<Command>)>>,
+    sender_sender: Option<Box<dyn FnOnce(mpsc::Sender<(Command, Option<u64>)>)>>,
     caching_thread: Option<Box<dyn FnOnce(&mut crate::data::cache_manager::CacheManager)>>,
     play_audio: bool,
 ) {
@@ -251,6 +344,7 @@ pub fn run_server_caching_thread_opt(
                                     "control" => handle_one_connection_as_control(
                                         &mut connection,
                                         &command_sender,
+                                        None,
                                     ),
                                     "get" => _ = handle_one_connection_as_get(db, &mut connection),
                                     _ => {
@@ -312,13 +406,13 @@ pub fn run_server_caching_thread_opt(
                 }
             }
         }
-        if let Ok(command) = command_receiver.recv_timeout(dur) {
+        if let Ok((command, client)) = command_receiver.recv_timeout(dur) {
             checkf = true;
             #[cfg(feature = "playback")]
             if let Some(player) = &mut player {
                 player.handle_action(&command.action);
             }
-            database.lock().unwrap().apply_command(command);
+            database.lock().unwrap().apply_command(command, client);
         }
     }
 }
@@ -327,30 +421,36 @@ pub fn handle_one_connection_as_main(
     db: Arc<Mutex<Database>>,
     connection: &mut impl Read,
     mut send_to: (impl Write + Sync + Send + 'static),
-    command_sender: &mpsc::Sender<Command>,
+    command_sender: &mpsc::Sender<(Command, Option<u64>)>,
 ) -> Result<(), std::io::Error> {
     // sync database
     let mut db = db.lock().unwrap();
     db.init_connection(&mut send_to)?;
     // keep the client in sync:
     // the db will send all updates to the client once it is added to update_endpoints
-    db.update_endpoints.push(UpdateEndpoint::Bytes(Box::new(
-        // try_clone is used here to split a TcpStream into Writer and Reader
-        send_to,
-    )));
+    let udepid = db.update_endpoints_id;
+    db.update_endpoints_id += 1;
+    db.update_endpoints.push((
+        udepid,
+        UpdateEndpoint::Bytes(Box::new(
+            // try_clone is used here to split a TcpStream into Writer and Reader
+            send_to,
+        )),
+    ));
     // drop the mutex lock
     drop(db);
-    handle_one_connection_as_control(connection, command_sender);
+    handle_one_connection_as_control(connection, command_sender, Some(udepid));
     Ok(())
 }
 pub fn handle_one_connection_as_control(
     connection: &mut impl Read,
-    command_sender: &mpsc::Sender<Command>,
+    command_sender: &mpsc::Sender<(Command, Option<u64>)>,
+    client: Option<u64>,
 ) {
     // read updates from the tcp stream and send them to the database, exit on EOF or Err
     loop {
         if let Ok(command) = Command::from_bytes(connection) {
-            command_sender.send(command).unwrap();
+            command_sender.send((command, client)).unwrap();
         } else {
             break;
         }
@@ -375,6 +475,7 @@ const BYTE_INIT_COMPLETE: u8 = 0b01_010_000;
 const BYTE_SET_SONG_DURATION: u8 = 0b01_010_001;
 const BYTE_SAVE: u8 = 0b01_010_010;
 const BYTE_ERRORINFO: u8 = 0b01_100_010;
+const BYTE_DENIED: u8 = 0b01_100_011;
 
 const BYTE_QUEUE_UPDATE: u8 = 0b10_000_000;
 const BYTE_QUEUE_ADD: u8 = 0b10_000_001;
@@ -430,6 +531,21 @@ impl ToFromBytes for Command {
     }
 }
 
+impl ToFromBytes for Req {
+    fn to_bytes<T>(&self, s: &mut T) -> Result<(), std::io::Error>
+    where
+        T: Write,
+    {
+        self.0.to_bytes(s)?;
+        Ok(())
+    }
+    fn from_bytes<T>(s: &mut T) -> Result<Self, std::io::Error>
+    where
+        T: Read,
+    {
+        Ok(Self(ToFromBytes::from_bytes(s)?))
+    }
+}
 // impl ToFromBytes for Action {
 impl Action {
     fn to_bytes<T>(&self, s: &mut T) -> Result<(), std::io::Error>
@@ -447,21 +563,24 @@ impl Action {
                 b.to_bytes(s)?;
                 c.to_bytes(s)?;
             }
-            Self::QueueUpdate(index, new_data) => {
+            Self::QueueUpdate(index, new_data, req) => {
                 s.write_all(&[BYTE_QUEUE_UPDATE])?;
                 index.to_bytes(s)?;
                 new_data.to_bytes(s)?;
+                req.to_bytes(s)?;
             }
-            Self::QueueAdd(index, new_data) => {
+            Self::QueueAdd(index, new_data, req) => {
                 s.write_all(&[BYTE_QUEUE_ADD])?;
                 index.to_bytes(s)?;
                 new_data.to_bytes(s)?;
+                req.to_bytes(s)?;
             }
-            Self::QueueInsert(index, pos, new_data) => {
+            Self::QueueInsert(index, pos, new_data, req) => {
                 s.write_all(&[BYTE_QUEUE_INSERT])?;
                 index.to_bytes(s)?;
                 pos.to_bytes(s)?;
                 new_data.to_bytes(s)?;
+                req.to_bytes(s)?;
             }
             Self::QueueRemove(index) => {
                 s.write_all(&[BYTE_QUEUE_REMOVE])?;
@@ -497,40 +616,47 @@ impl Action {
                 s.write_all(&[SUBBYTE_ACTION_UNSHUFFLE])?;
                 path.to_bytes(s)?;
             }
-            Self::AddSong(song) => {
+            Self::AddSong(song, req) => {
                 s.write_all(&[BYTE_LIB_ADD])?;
                 s.write_all(&[SUBBYTE_SONG])?;
                 song.to_bytes(s)?;
+                req.to_bytes(s)?;
             }
-            Self::AddAlbum(album) => {
+            Self::AddAlbum(album, req) => {
                 s.write_all(&[BYTE_LIB_ADD])?;
                 s.write_all(&[SUBBYTE_ALBUM])?;
                 album.to_bytes(s)?;
+                req.to_bytes(s)?;
             }
-            Self::AddArtist(artist) => {
+            Self::AddArtist(artist, req) => {
                 s.write_all(&[BYTE_LIB_ADD])?;
                 s.write_all(&[SUBBYTE_ARTIST])?;
                 artist.to_bytes(s)?;
+                req.to_bytes(s)?;
             }
-            Self::AddCover(cover) => {
+            Self::AddCover(cover, req) => {
                 s.write_all(&[BYTE_LIB_ADD])?;
                 s.write_all(&[SUBBYTE_COVER])?;
                 cover.to_bytes(s)?;
+                req.to_bytes(s)?;
             }
-            Self::ModifySong(song) => {
+            Self::ModifySong(song, req) => {
                 s.write_all(&[BYTE_LIB_MODIFY])?;
                 s.write_all(&[SUBBYTE_SONG])?;
                 song.to_bytes(s)?;
+                req.to_bytes(s)?;
             }
-            Self::ModifyAlbum(album) => {
+            Self::ModifyAlbum(album, req) => {
                 s.write_all(&[BYTE_LIB_MODIFY])?;
                 s.write_all(&[SUBBYTE_ALBUM])?;
                 album.to_bytes(s)?;
+                req.to_bytes(s)?;
             }
-            Self::ModifyArtist(artist) => {
+            Self::ModifyArtist(artist, req) => {
                 s.write_all(&[BYTE_LIB_MODIFY])?;
                 s.write_all(&[SUBBYTE_ARTIST])?;
                 artist.to_bytes(s)?;
+                req.to_bytes(s)?;
             }
             Self::RemoveSong(song) => {
                 s.write_all(&[BYTE_LIB_REMOVE])?;
@@ -636,6 +762,10 @@ impl Action {
                 t.to_bytes(s)?;
                 d.to_bytes(s)?;
             }
+            Self::Denied(req) => {
+                s.write_all(&[BYTE_DENIED])?;
+                req.to_bytes(s)?;
+            }
         }
         Ok(())
     }
@@ -654,9 +784,11 @@ impl Action {
             BYTE_STOP => Self::Stop,
             BYTE_NEXT_SONG => Self::NextSong,
             BYTE_SYNC_DATABASE => Self::SyncDatabase(from_bytes!(), from_bytes!(), from_bytes!()),
-            BYTE_QUEUE_UPDATE => Self::QueueUpdate(from_bytes!(), from_bytes!()),
-            BYTE_QUEUE_ADD => Self::QueueAdd(from_bytes!(), from_bytes!()),
-            BYTE_QUEUE_INSERT => Self::QueueInsert(from_bytes!(), from_bytes!(), from_bytes!()),
+            BYTE_QUEUE_UPDATE => Self::QueueUpdate(from_bytes!(), from_bytes!(), from_bytes!()),
+            BYTE_QUEUE_ADD => Self::QueueAdd(from_bytes!(), from_bytes!(), from_bytes!()),
+            BYTE_QUEUE_INSERT => {
+                Self::QueueInsert(from_bytes!(), from_bytes!(), from_bytes!(), from_bytes!())
+            }
             BYTE_QUEUE_REMOVE => Self::QueueRemove(from_bytes!()),
             BYTE_QUEUE_MOVE => Self::QueueMove(from_bytes!(), from_bytes!()),
             BYTE_QUEUE_MOVE_INTO => Self::QueueMoveInto(from_bytes!(), from_bytes!()),
@@ -674,10 +806,10 @@ impl Action {
                 }
             },
             BYTE_LIB_ADD => match s.read_byte()? {
-                SUBBYTE_SONG => Self::AddSong(from_bytes!()),
-                SUBBYTE_ALBUM => Self::AddAlbum(from_bytes!()),
-                SUBBYTE_ARTIST => Self::AddArtist(from_bytes!()),
-                SUBBYTE_COVER => Self::AddCover(from_bytes!()),
+                SUBBYTE_SONG => Self::AddSong(from_bytes!(), from_bytes!()),
+                SUBBYTE_ALBUM => Self::AddAlbum(from_bytes!(), from_bytes!()),
+                SUBBYTE_ARTIST => Self::AddArtist(from_bytes!(), from_bytes!()),
+                SUBBYTE_COVER => Self::AddCover(from_bytes!(), from_bytes!()),
                 _ => {
                     eprintln!(
                         "[{}] unexpected byte when reading command:libAdd; stopping playback.",
@@ -687,9 +819,9 @@ impl Action {
                 }
             },
             BYTE_LIB_MODIFY => match s.read_byte()? {
-                SUBBYTE_SONG => Self::ModifySong(from_bytes!()),
-                SUBBYTE_ALBUM => Self::ModifyAlbum(from_bytes!()),
-                SUBBYTE_ARTIST => Self::ModifyArtist(from_bytes!()),
+                SUBBYTE_SONG => Self::ModifySong(from_bytes!(), from_bytes!()),
+                SUBBYTE_ALBUM => Self::ModifyAlbum(from_bytes!(), from_bytes!()),
+                SUBBYTE_ARTIST => Self::ModifyArtist(from_bytes!(), from_bytes!()),
                 _ => {
                     eprintln!(
                         "[{}] unexpected byte when reading command:libModify; stopping playback.",
@@ -751,6 +883,7 @@ impl Action {
             BYTE_INIT_COMPLETE => Self::InitComplete,
             BYTE_SAVE => Self::Save,
             BYTE_ERRORINFO => Self::ErrorInfo(from_bytes!(), from_bytes!()),
+            BYTE_DENIED => Self::Denied(from_bytes!()),
             _ => {
                 eprintln!(
                     "[{}] unexpected byte when reading command; stopping playback.",
@@ -770,5 +903,63 @@ impl<T: Read> ReadByte for T {
         let mut b = [0];
         self.read_exact(&mut b)?;
         Ok(b[0])
+    }
+}
+
+#[test]
+fn test_to_from_bytes() {
+    use crate::data::queue::QueueContent;
+    use std::io::Cursor;
+    for v in [
+        Action::Resume,
+        Action::Pause,
+        Action::Stop,
+        Action::NextSong,
+        Action::SyncDatabase(vec![], vec![], vec![]),
+        Action::QueueUpdate(vec![], QueueContent::Song(12).into(), Req::none()),
+        Action::QueueAdd(vec![], vec![], Req::none()),
+        Action::QueueInsert(vec![], 5, vec![], Req::none()),
+        Action::QueueRemove(vec![]),
+        Action::QueueMove(vec![], vec![]),
+        Action::QueueMoveInto(vec![], vec![]),
+        Action::QueueGoto(vec![]),
+        Action::QueueShuffle(vec![]),
+        Action::QueueSetShuffle(vec![], vec![]),
+        Action::QueueUnshuffle(vec![]),
+        // Action::AddSong(Song, Req),
+        // Action::AddAlbum(Album, Req),
+        // Action::AddArtist(Artist, Req),
+        // Action::AddCover(Cover, Req),
+        // Action::ModifySong(Song, Req),
+        // Action::ModifyAlbum(Album, Req),
+        // Action::ModifyArtist(Artist, Req),
+        // Action::RemoveSong(SongId),
+        // Action::RemoveAlbum(AlbumId),
+        // Action::RemoveArtist(ArtistId),
+        // Action::SetSongDuration(SongId, u64),
+        // Action::TagSongFlagSet(SongId, String),
+        // Action::TagSongFlagUnset(SongId, String),
+        // Action::TagAlbumFlagSet(AlbumId, String),
+        // Action::TagAlbumFlagUnset(AlbumId, String),
+        // Action::TagArtistFlagSet(ArtistId, String),
+        // Action::TagArtistFlagUnset(ArtistId, String),
+        // Action::TagSongPropertySet(SongId, String, String),
+        // Action::TagSongPropertyUnset(SongId, String),
+        // Action::TagAlbumPropertySet(AlbumId, String, String),
+        // Action::TagAlbumPropertyUnset(AlbumId, String),
+        // Action::TagArtistPropertySet(ArtistId, String, String),
+        // Action::TagArtistPropertyUnset(ArtistId, String),
+        Action::InitComplete,
+        Action::Save,
+        Action::ErrorInfo(format!("some error"), format!("with a message")),
+        Action::Denied(Req::none()),
+    ] {
+        let v = v.cmd(0xFF);
+        assert_eq!(
+            v.action,
+            Command::from_bytes(&mut Cursor::new(v.to_bytes_vec()))
+                .unwrap()
+                .action
+        );
     }
 }
