@@ -148,7 +148,7 @@ fn main() {
             let mut con = TcpStream::connect(addr).unwrap();
             writeln!(con, "main").unwrap();
             loop {
-                let cmd = musicdb_lib::server::Command::from_bytes(&mut con).unwrap();
+                let mut cmd = musicdb_lib::server::Command::from_bytes(&mut con).unwrap();
                 use musicdb_lib::server::Action::*;
                 match &cmd.action {
                     // ignore playback and queue commands, and denials
@@ -184,6 +184,7 @@ fn main() {
                     | Save
                     | ErrorInfo(..) => (),
                 }
+                cmd.seq = 0xFF;
                 database.lock().unwrap().apply_command(cmd, None);
             }
         });
