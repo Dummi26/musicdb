@@ -43,20 +43,28 @@ impl Action {
     pub fn cmd(self, seq: u8) -> Command {
         Command::new(seq, self)
     }
-    pub fn take_req(&mut self) -> Option<Req> {
+    pub fn take_req_all(&mut self) -> Vec<Req> {
         self.req_mut()
+            .into_iter()
             .map(|r| std::mem::replace(r, Req::none()))
+            .collect()
+    }
+    pub fn get_req_all(&mut self) -> Vec<Req> {
+        self.req_mut().into_iter().map(|r| *r).collect()
+    }
+    pub fn get_req_if_some(&mut self) -> Vec<Req> {
+        self.req_mut()
+            .into_iter()
+            .map(|r| *r)
             .filter(|r| r.is_some())
+            .collect()
     }
-    pub fn get_req(&mut self) -> Option<Req> {
-        self.req_mut().map(|r| *r).filter(|r| r.is_some())
-    }
-    pub fn put_req(&mut self, req: Req) {
-        if let Some(r) = self.req_mut() {
-            *r = req;
+    pub fn put_req_all(&mut self, reqs: Vec<Req>) {
+        for (o, n) in self.req_mut().into_iter().zip(reqs) {
+            *o = n;
         }
     }
-    fn req_mut(&mut self) -> Option<&mut Req> {
+    fn req_mut(&mut self) -> Vec<&mut Req> {
         match self {
             Self::QueueUpdate(_, _, req)
             | Self::QueueAdd(_, _, req)
@@ -68,7 +76,7 @@ impl Action {
             | Self::ModifySong(_, req)
             | Self::ModifyAlbum(_, req)
             | Self::ModifyArtist(_, req)
-            | Self::Denied(req) => Some(req),
+            | Self::Denied(req) => vec![req],
             Self::Resume
             | Self::Pause
             | Self::Stop
@@ -99,7 +107,8 @@ impl Action {
             | Self::TagArtistPropertyUnset(_, _)
             | Self::InitComplete
             | Self::Save
-            | Self::ErrorInfo(_, _) => None,
+            | Self::ErrorInfo(_, _) => vec![],
+            Self::Multiple(actions) => actions.iter_mut().flat_map(|v| v.req_mut()).collect(),
         }
     }
 }
@@ -214,6 +223,8 @@ pub enum Action {
     TagAlbumPropertyUnset(AlbumId, String),
     TagArtistPropertySet(ArtistId, String, String),
     TagArtistPropertyUnset(ArtistId, String),
+
+    Multiple(Vec<Self>),
 
     InitComplete,
     Save,
@@ -471,6 +482,7 @@ const BYTE_PAUSE: u8 = 0b01_000_001;
 const BYTE_STOP: u8 = 0b01_000_010;
 const BYTE_NEXT_SONG: u8 = 0b01_000_100;
 
+const BYTE_MULTIPLE: u8 = 0b01_010_100;
 const BYTE_INIT_COMPLETE: u8 = 0b01_010_000;
 const BYTE_SET_SONG_DURATION: u8 = 0b01_010_001;
 const BYTE_SAVE: u8 = 0b01_010_010;
@@ -546,8 +558,7 @@ impl ToFromBytes for Req {
         Ok(Self(ToFromBytes::from_bytes(s)?))
     }
 }
-// impl ToFromBytes for Action {
-impl Action {
+impl ToFromBytes for Action {
     fn to_bytes<T>(&self, s: &mut T) -> Result<(), std::io::Error>
     where
         T: Write,
@@ -753,6 +764,10 @@ impl Action {
                 i.to_bytes(s)?;
                 d.to_bytes(s)?;
             }
+            Self::Multiple(actions) => {
+                s.write_all(&[BYTE_MULTIPLE])?;
+                actions.to_bytes(s)?;
+            }
             Self::InitComplete => {
                 s.write_all(&[BYTE_INIT_COMPLETE])?;
             }
@@ -880,6 +895,7 @@ impl Action {
                 }
             },
             BYTE_SET_SONG_DURATION => Self::SetSongDuration(from_bytes!(), from_bytes!()),
+            BYTE_MULTIPLE => Self::Multiple(from_bytes!()),
             BYTE_INIT_COMPLETE => Self::InitComplete,
             BYTE_SAVE => Self::Save,
             BYTE_ERRORINFO => Self::ErrorInfo(from_bytes!(), from_bytes!()),

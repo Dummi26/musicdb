@@ -368,116 +368,130 @@ impl Gui {
             db.update_endpoints_id += 1;
             db.update_endpoints.push((
                 udepid,
-                musicdb_lib::data::database::UpdateEndpoint::Custom(Box::new(
-                    move |cmd| match &cmd.action {
-                        Action::Resume
-                        | Action::Pause
-                        | Action::Stop
-                        | Action::Save
-                        | Action::InitComplete => {}
-                        Action::NextSong
-                        | Action::QueueUpdate(..)
-                        | Action::QueueAdd(..)
-                        | Action::QueueInsert(..)
-                        | Action::QueueRemove(..)
-                        | Action::QueueMove(..)
-                        | Action::QueueMoveInto(..)
-                        | Action::QueueGoto(..)
-                        | Action::QueueShuffle(..)
-                        | Action::QueueSetShuffle(..)
-                        | Action::QueueUnshuffle(..) => {
-                            if let Some(s) = &*event_sender_arc.lock().unwrap() {
-                                _ = s.send_event(GuiEvent::UpdatedQueue);
+                musicdb_lib::data::database::UpdateEndpoint::Custom(Box::new(move |cmd| {
+                    the_impl(&cmd.action, &event_sender_arc, &notif_sender_two);
+                    fn the_impl(
+                        action: &Action,
+                        event_sender_arc: &Arc<Mutex<Option<UserEventSender<GuiEvent>>>>,
+                        notif_sender_two: &Sender<
+                            Box<dyn FnOnce(&NotifOverlay) -> (Box<dyn GuiElem>, NotifInfo) + Send>,
+                        >,
+                    ) {
+                        match action {
+                            Action::Resume
+                            | Action::Pause
+                            | Action::Stop
+                            | Action::Save
+                            | Action::InitComplete => {}
+                            Action::NextSong
+                            | Action::QueueUpdate(..)
+                            | Action::QueueAdd(..)
+                            | Action::QueueInsert(..)
+                            | Action::QueueRemove(..)
+                            | Action::QueueMove(..)
+                            | Action::QueueMoveInto(..)
+                            | Action::QueueGoto(..)
+                            | Action::QueueShuffle(..)
+                            | Action::QueueSetShuffle(..)
+                            | Action::QueueUnshuffle(..) => {
+                                if let Some(s) = &*event_sender_arc.lock().unwrap() {
+                                    _ = s.send_event(GuiEvent::UpdatedQueue);
+                                }
                             }
-                        }
-                        Action::SyncDatabase(..)
-                        | Action::AddSong(_, _)
-                        | Action::AddAlbum(_, _)
-                        | Action::AddArtist(_, _)
-                        | Action::AddCover(_, _)
-                        | Action::ModifySong(_, _)
-                        | Action::ModifyAlbum(_, _)
-                        | Action::ModifyArtist(_, _)
-                        | Action::RemoveSong(_)
-                        | Action::RemoveAlbum(_)
-                        | Action::RemoveArtist(_)
-                        | Action::TagSongFlagSet(..)
-                        | Action::TagSongFlagUnset(..)
-                        | Action::TagAlbumFlagSet(..)
-                        | Action::TagAlbumFlagUnset(..)
-                        | Action::TagArtistFlagSet(..)
-                        | Action::TagArtistFlagUnset(..)
-                        | Action::TagSongPropertySet(..)
-                        | Action::TagSongPropertyUnset(..)
-                        | Action::TagAlbumPropertySet(..)
-                        | Action::TagAlbumPropertyUnset(..)
-                        | Action::TagArtistPropertySet(..)
-                        | Action::TagArtistPropertyUnset(..)
-                        | Action::SetSongDuration(..) => {
-                            if let Some(s) = &*event_sender_arc.lock().unwrap() {
-                                _ = s.send_event(GuiEvent::UpdatedLibrary);
+                            Action::SyncDatabase(..)
+                            | Action::AddSong(_, _)
+                            | Action::AddAlbum(_, _)
+                            | Action::AddArtist(_, _)
+                            | Action::AddCover(_, _)
+                            | Action::ModifySong(_, _)
+                            | Action::ModifyAlbum(_, _)
+                            | Action::ModifyArtist(_, _)
+                            | Action::RemoveSong(_)
+                            | Action::RemoveAlbum(_)
+                            | Action::RemoveArtist(_)
+                            | Action::TagSongFlagSet(..)
+                            | Action::TagSongFlagUnset(..)
+                            | Action::TagAlbumFlagSet(..)
+                            | Action::TagAlbumFlagUnset(..)
+                            | Action::TagArtistFlagSet(..)
+                            | Action::TagArtistFlagUnset(..)
+                            | Action::TagSongPropertySet(..)
+                            | Action::TagSongPropertyUnset(..)
+                            | Action::TagAlbumPropertySet(..)
+                            | Action::TagAlbumPropertyUnset(..)
+                            | Action::TagArtistPropertySet(..)
+                            | Action::TagArtistPropertyUnset(..)
+                            | Action::SetSongDuration(..) => {
+                                if let Some(s) = &*event_sender_arc.lock().unwrap() {
+                                    _ = s.send_event(GuiEvent::UpdatedLibrary);
+                                }
                             }
-                        }
-                        Action::ErrorInfo(t, d) => {
-                            let (t, d) = (t.clone(), d.clone());
-                            notif_sender_two
-                                .send(Box::new(move |_| {
-                                    (
-                                        Box::new(Panel::with_background(
-                                            GuiElemCfg::default(),
-                                            [Label::new(
+                            Action::Multiple(actions) => {
+                                for action in actions {
+                                    the_impl(action, event_sender_arc, notif_sender_two);
+                                }
+                            }
+                            Action::ErrorInfo(t, d) => {
+                                let (t, d) = (t.clone(), d.clone());
+                                notif_sender_two
+                                    .send(Box::new(move |_| {
+                                        (
+                                            Box::new(Panel::with_background(
                                                 GuiElemCfg::default(),
-                                                if t.is_empty() {
-                                                    format!("Server message\n{d}")
-                                                } else {
-                                                    format!("Server error ({t})\n{d}")
-                                                },
-                                                Color::WHITE,
-                                                None,
-                                                Vec2::new(0.5, 0.5),
-                                            )],
-                                            Color::from_rgba(0.0, 0.0, 0.0, 0.8),
-                                        )),
-                                        if t.is_empty() {
-                                            NotifInfo::new(Duration::from_secs(2))
-                                        } else {
-                                            NotifInfo::new(Duration::from_secs(5))
-                                                .with_highlight(Color::RED)
-                                        },
-                                    )
-                                }))
-                                .unwrap();
-                        }
-                        Action::Denied(req) => {
-                            let req = *req;
-                            notif_sender_two
-                                .send(Box::new(move |_| {
-                                    (
-                                        Box::new(Panel::with_background(
-                                            GuiElemCfg::default(),
-                                            [Label::new(
-                                                GuiElemCfg::default(),
-                                                format!(
-                                                    "server denied {}",
-                                                    if req.is_some() {
-                                                        "request, maybe desynced"
+                                                [Label::new(
+                                                    GuiElemCfg::default(),
+                                                    if t.is_empty() {
+                                                        format!("Server message\n{d}")
                                                     } else {
-                                                        "action, likely desynced"
+                                                        format!("Server error ({t})\n{d}")
                                                     },
-                                                ),
-                                                Color::WHITE,
-                                                None,
-                                                Vec2::new(0.5, 0.5),
-                                            )],
-                                            Color::from_rgba(0.0, 0.0, 0.0, 0.8),
-                                        )),
-                                        NotifInfo::new(Duration::from_secs(1)),
-                                    )
-                                }))
-                                .unwrap();
+                                                    Color::WHITE,
+                                                    None,
+                                                    Vec2::new(0.5, 0.5),
+                                                )],
+                                                Color::from_rgba(0.0, 0.0, 0.0, 0.8),
+                                            )),
+                                            if t.is_empty() {
+                                                NotifInfo::new(Duration::from_secs(2))
+                                            } else {
+                                                NotifInfo::new(Duration::from_secs(5))
+                                                    .with_highlight(Color::RED)
+                                            },
+                                        )
+                                    }))
+                                    .unwrap();
+                            }
+                            Action::Denied(req) => {
+                                let req = *req;
+                                notif_sender_two
+                                    .send(Box::new(move |_| {
+                                        (
+                                            Box::new(Panel::with_background(
+                                                GuiElemCfg::default(),
+                                                [Label::new(
+                                                    GuiElemCfg::default(),
+                                                    format!(
+                                                        "server denied {}",
+                                                        if req.is_some() {
+                                                            "request, maybe desynced"
+                                                        } else {
+                                                            "action, likely desynced"
+                                                        },
+                                                    ),
+                                                    Color::WHITE,
+                                                    None,
+                                                    Vec2::new(0.5, 0.5),
+                                                )],
+                                                Color::from_rgba(0.0, 0.0, 0.0, 0.8),
+                                            )),
+                                            NotifInfo::new(Duration::from_secs(1)),
+                                        )
+                                    }))
+                                    .unwrap();
+                            }
                         }
-                    },
-                )),
+                    }
+                })),
             ));
         }
         let no_animations = false;

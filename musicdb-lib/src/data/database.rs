@@ -527,19 +527,23 @@ impl Database {
             if let Some(client) = client {
                 for (udepid, udep) in &mut self.update_endpoints {
                     if client == *udepid {
-                        let denied =
-                            Action::Denied(command.action.get_req().unwrap_or_else(Req::none))
-                                .cmd(0xFFu8);
-                        match udep {
-                            UpdateEndpoint::Bytes(w) => {
-                                let _ = w.write(&denied.to_bytes_vec());
+                        let mut reqs = command.action.get_req_if_some();
+                        if reqs.is_empty() {
+                            reqs.push(Req::none());
+                        }
+                        for req in reqs {
+                            let denied = Action::Denied(req).cmd(0xFFu8);
+                            match udep {
+                                UpdateEndpoint::Bytes(w) => {
+                                    let _ = w.write(&denied.to_bytes_vec());
+                                }
+                                UpdateEndpoint::CmdChannel(w) => {
+                                    let _ = w.send(Arc::new(denied));
+                                }
+                                UpdateEndpoint::Custom(w) => w(&denied),
+                                UpdateEndpoint::CustomArc(w) => w(Arc::new(denied)),
+                                UpdateEndpoint::CustomBytes(w) => w(&denied.to_bytes_vec()),
                             }
-                            UpdateEndpoint::CmdChannel(w) => {
-                                let _ = w.send(Arc::new(denied));
-                            }
-                            UpdateEndpoint::Custom(w) => w(&denied),
-                            UpdateEndpoint::CustomArc(w) => w(Arc::new(denied)),
-                            UpdateEndpoint::CustomBytes(w) => w(&denied.to_bytes_vec()),
                         }
                         return;
                     }
@@ -864,6 +868,11 @@ impl Database {
                     song.duration_millis = duration;
                 }
             }
+            Action::Multiple(actions) => {
+                for action in actions {
+                    self.apply_action_unchecked_seq(action, client);
+                }
+            }
             Action::InitComplete => {
                 self.client_is_init = true;
             }
@@ -1008,13 +1017,13 @@ impl Database {
             self.seq.inc();
         }
         let mut update = self.seq.pack(update);
-        let req = update.action.take_req();
+        let reqs = update.action.take_req_all();
         let mut remove = vec![];
         let mut bytes = None;
         let mut arc = None;
         for (i, (udepid, udep)) in self.update_endpoints.iter_mut().enumerate() {
-            if req.is_some_and(|r| r.is_some()) && client.is_some_and(|v| *udepid == v) {
-                update.action.put_req(req.unwrap());
+            if reqs.iter().any(|r| r.is_some()) && client.is_some_and(|v| *udepid == v) {
+                update.action.put_req_all(reqs.clone());
                 match udep {
                     UpdateEndpoint::Bytes(writer) => {
                         if writer.write_all(&update.to_bytes_vec()).is_err() {
@@ -1035,7 +1044,7 @@ impl Database {
                         func(bytes.as_ref().unwrap())
                     }
                 }
-                update.action.take_req();
+                update.action.take_req_all();
             }
             match udep {
                 UpdateEndpoint::Bytes(writer) => {
@@ -1079,9 +1088,7 @@ impl Database {
                 self.update_endpoints.remove(i);
             }
         }
-        if let Some(req) = req {
-            update.action.put_req(req);
-        }
+        update.action.put_req_all(reqs);
         update.action
     }
     pub fn sync(&mut self, artists: Vec<Artist>, albums: Vec<Album>, songs: Vec<Song>) {

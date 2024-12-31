@@ -149,43 +149,60 @@ fn main() {
             writeln!(con, "main").unwrap();
             loop {
                 let mut cmd = musicdb_lib::server::Command::from_bytes(&mut con).unwrap();
-                use musicdb_lib::server::Action::*;
-                match &cmd.action {
-                    // ignore playback and queue commands, and denials
-                    Resume | Pause | Stop | NextSong | QueueUpdate(..) | QueueAdd(..)
-                    | QueueInsert(..) | QueueRemove(..) | QueueMove(..) | QueueMoveInto(..)
-                    | QueueGoto(..) | QueueShuffle(..) | QueueSetShuffle(..)
-                    | QueueUnshuffle(..) | Denied(..) => continue,
-                    SyncDatabase(..)
-                    | AddSong(..)
-                    | AddAlbum(..)
-                    | AddArtist(..)
-                    | AddCover(..)
-                    | ModifySong(..)
-                    | ModifyAlbum(..)
-                    | RemoveSong(..)
-                    | RemoveAlbum(..)
-                    | RemoveArtist(..)
-                    | ModifyArtist(..)
-                    | SetSongDuration(..)
-                    | TagSongFlagSet(..)
-                    | TagSongFlagUnset(..)
-                    | TagAlbumFlagSet(..)
-                    | TagAlbumFlagUnset(..)
-                    | TagArtistFlagSet(..)
-                    | TagArtistFlagUnset(..)
-                    | TagSongPropertySet(..)
-                    | TagSongPropertyUnset(..)
-                    | TagAlbumPropertySet(..)
-                    | TagAlbumPropertyUnset(..)
-                    | TagArtistPropertySet(..)
-                    | TagArtistPropertyUnset(..)
-                    | InitComplete
-                    | Save
-                    | ErrorInfo(..) => (),
+                use musicdb_lib::server::Action::{self, *};
+                fn sanitize_actions(action: Action) -> Option<Action> {
+                    match action {
+                        // ignore playback and queue commands, and denials
+                        Resume | Pause | Stop | NextSong | QueueUpdate(..) | QueueAdd(..)
+                        | QueueInsert(..) | QueueRemove(..) | QueueMove(..) | QueueMoveInto(..)
+                        | QueueGoto(..) | QueueShuffle(..) | QueueSetShuffle(..)
+                        | QueueUnshuffle(..) | Denied(..) => None,
+                        SyncDatabase(..)
+                        | AddSong(..)
+                        | AddAlbum(..)
+                        | AddArtist(..)
+                        | AddCover(..)
+                        | ModifySong(..)
+                        | ModifyAlbum(..)
+                        | RemoveSong(..)
+                        | RemoveAlbum(..)
+                        | RemoveArtist(..)
+                        | ModifyArtist(..)
+                        | SetSongDuration(..)
+                        | TagSongFlagSet(..)
+                        | TagSongFlagUnset(..)
+                        | TagAlbumFlagSet(..)
+                        | TagAlbumFlagUnset(..)
+                        | TagArtistFlagSet(..)
+                        | TagArtistFlagUnset(..)
+                        | TagSongPropertySet(..)
+                        | TagSongPropertyUnset(..)
+                        | TagAlbumPropertySet(..)
+                        | TagAlbumPropertyUnset(..)
+                        | TagArtistPropertySet(..)
+                        | TagArtistPropertyUnset(..)
+                        | InitComplete
+                        | Save
+                        | ErrorInfo(..) => Some(action),
+                        Multiple(actions) => {
+                            let actions = actions
+                                .into_iter()
+                                .flat_map(|action| sanitize_actions(action))
+                                .collect::<Vec<_>>();
+                            if actions.is_empty() {
+                                None
+                            } else {
+                                Some(Multiple(actions))
+                            }
+                        }
+                    }
                 }
-                cmd.seq = 0xFF;
-                database.lock().unwrap().apply_command(cmd, None);
+                if let Some(action) = sanitize_actions(cmd.action) {
+                    database
+                        .lock()
+                        .unwrap()
+                        .apply_action_unchecked_seq(action, None);
+                }
             }
         });
     }
