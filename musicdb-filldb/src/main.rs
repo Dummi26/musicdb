@@ -434,9 +434,9 @@ fn get_cover(
     if let Ok(files) = fs::read_dir(&abs_dir) {
         for file in files {
             if let Ok(file) = file {
-                if let Ok(metadata) = file.metadata() {
-                    if metadata.is_file() {
                         let path = file.path();
+                if let Ok(metadata) = path.metadata() {
+                    if metadata.is_file() {
                         if path.extension().and_then(|v| v.to_str()).is_some_and(|v| {
                             matches!(v.to_lowercase().as_str(), "png" | "jpg" | "jpeg")
                         }) {
