@@ -24,6 +24,7 @@ fn main() {
     }
     let mut actions = vec![];
     rev_actions(&mut actions, &db.queue, &mut vec![], &mut HashSet::new());
+    actions.reverse();
     eprintln!("Removing {} queue elements", actions.len());
     db.seq
         .pack(Action::Multiple(actions))
