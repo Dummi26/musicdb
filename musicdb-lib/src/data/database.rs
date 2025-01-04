@@ -573,6 +573,8 @@ impl Database {
             Action::NextSong if self.queue.is_almost_empty() => (),
             Action::Pause if !self.playing => (),
             Action::Resume if self.playing => (),
+            // will be broadcast individually
+            Action::Multiple(_) => (),
             // since db.update_endpoints is empty for clients, this won't cause unwanted back and forth
             _ => action = self.broadcast_update(action, client),
         }
