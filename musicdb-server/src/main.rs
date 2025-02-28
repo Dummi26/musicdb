@@ -241,11 +241,7 @@ fn main() {
                     run_server(database, Some(Box::new(move |c| s.send(c).unwrap())))
                 });
                 let sender = r.recv().unwrap();
-                tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .unwrap()
-                    .block_on(web::main(db, sender, *addr));
+                web::main(db, sender, *addr);
             }
         } else {
             run_server(database, None);

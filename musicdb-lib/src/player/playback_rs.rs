@@ -3,7 +3,7 @@ use std::{ffi::OsStr, io::Cursor, path::Path, sync::Arc, time::Duration};
 use playback_rs::Hint;
 
 use crate::{
-    data::SongId,
+    data::{song::Song, SongId},
     server::{Action, Command},
 };
 
@@ -41,6 +41,7 @@ impl<T> PlayerBackend<T> for PlayerBackendPlaybackRs<T> {
     fn load_next_song(
         &mut self,
         id: SongId,
+        _song: &Song,
         filename: &OsStr,
         bytes: Arc<Vec<u8>>,
         _load_duration: bool,

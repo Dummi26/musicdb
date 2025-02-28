@@ -4,7 +4,7 @@ use rc_u8_reader::ArcU8Reader;
 use rodio::{decoder::DecoderError, Decoder, OutputStream, OutputStreamHandle, Sink, Source};
 
 use crate::{
-    data::SongId,
+    data::{song::Song, SongId},
     server::{Action, Command},
 };
 
@@ -52,6 +52,7 @@ impl<T> PlayerBackend<T> for PlayerBackendRodio<T> {
     fn load_next_song(
         &mut self,
         id: SongId,
+        _song: &Song,
         _filename: &OsStr,
         bytes: Arc<Vec<u8>>,
         _load_duration: bool,

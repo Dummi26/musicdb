@@ -292,6 +292,8 @@ pub fn run_server_caching_thread_opt(
     use crate::player::playback_rs::PlayerBackendPlaybackRs;
     #[cfg(feature = "playback-via-rodio")]
     use crate::player::rodio::PlayerBackendRodio;
+    #[cfg(feature = "playback-via-sleep")]
+    use crate::player::sleep::PlayerBackendSleep;
     #[cfg(any(
         feature = "playback",
         feature = "playback-via-playback-rs",
@@ -305,6 +307,8 @@ pub fn run_server_caching_thread_opt(
 
     #[cfg(feature = "playback")]
     let mut player = if play_audio {
+        #[cfg(feature = "playback-via-sleep")]
+        let backend = PlayerBackendSleep::new(Some(command_sender.clone())).unwrap();
         #[cfg(feature = "playback-via-playback-rs")]
         let backend = PlayerBackendPlaybackRs::new(command_sender.clone()).unwrap();
         #[cfg(feature = "playback-via-rodio")]

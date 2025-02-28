@@ -186,7 +186,7 @@ impl CachedData {
     }
     /// Gets the cached data, if available.
     /// If a thread is running to load the data, it is awaited.
-    /// This function doesn't block.
+    /// This function blocks!
     pub fn cached_data_await(&self) -> Option<Arc<Vec<u8>>> {
         let mut cd = self.0.lock().unwrap();
         let (out, next) = match replace(&mut cd.0, Err(None)) {

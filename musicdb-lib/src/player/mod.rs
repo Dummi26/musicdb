@@ -2,6 +2,8 @@
 pub mod playback_rs;
 #[cfg(feature = "playback-via-rodio")]
 pub mod rodio;
+#[cfg(feature = "playback-via-sleep")]
+pub mod sleep;
 #[cfg(feature = "playback-via-playback-rs")]
 pub type PlayerBackendFeat<T> = playback_rs::PlayerBackendPlaybackRs<T>;
 #[cfg(feature = "playback-via-rodio")]
@@ -10,7 +12,11 @@ pub type PlayerBackendFeat<T> = rodio::PlayerBackendRodio<T>;
 use std::{collections::HashMap, ffi::OsStr, sync::Arc};
 
 use crate::{
-    data::{database::Database, song::CachedData, SongId},
+    data::{
+        database::Database,
+        song::{CachedData, Song},
+        SongId,
+    },
     server::Action,
 };
 
@@ -28,6 +34,7 @@ pub trait PlayerBackend<T> {
     fn load_next_song(
         &mut self,
         id: SongId,
+        song: &Song,
         filename: &OsStr,
         bytes: Arc<Vec<u8>>,
         load_duration: bool,
@@ -158,6 +165,7 @@ impl<T: PlayerBackend<SongCustomData>> Player<T> {
                         let load_duration = song.duration_millis == 0;
                         self.backend.load_next_song(
                             id,
+                            song,
                             song.location
                                 .rel_path
                                 .file_name()
@@ -211,6 +219,7 @@ impl<T: PlayerBackend<SongCustomData>> Player<T> {
                         let load_duration = song.duration_millis == 0;
                         self.backend.load_next_song(
                             id,
+                            song,
                             song.location
                                 .rel_path
                                 .file_name()
