@@ -89,7 +89,7 @@ impl CacheManager {
                         let mut queue = db.queue.clone();
 
                         let queue_current_song = queue.get_current_song().copied();
-                        queue.advance_index_inner();
+                        queue.advance_index_inner(&mut Vec::new(), &mut Vec::new());
                         let queue_next_song = queue.get_current_song().copied();
 
                         let mut ids_to_cache = queue_current_song
@@ -98,7 +98,7 @@ impl CacheManager {
                             .collect::<Vec<_>>();
 
                         for _ in 2..songs_to_cache {
-                            queue.advance_index_inner();
+                            queue.advance_index_inner(&mut Vec::new(), &mut Vec::new());
                             if let Some(id) = queue.get_current_song() {
                                 if !ids_to_cache.contains(id) {
                                     ids_to_cache.push(*id);

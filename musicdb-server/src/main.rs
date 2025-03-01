@@ -148,7 +148,7 @@ fn main() {
             let mut con = TcpStream::connect(addr).unwrap();
             writeln!(con, "main").unwrap();
             loop {
-                let mut cmd = musicdb_lib::server::Command::from_bytes(&mut con).unwrap();
+                let cmd = musicdb_lib::server::Command::from_bytes(&mut con).unwrap();
                 use musicdb_lib::server::Action::{self, *};
                 fn sanitize_actions(action: Action) -> Option<Action> {
                     match action {

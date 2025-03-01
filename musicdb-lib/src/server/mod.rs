@@ -86,8 +86,8 @@ impl Action {
             | Self::QueueMove(_, _)
             | Self::QueueMoveInto(_, _)
             | Self::QueueGoto(_)
-            | Self::QueueShuffle(_)
-            | Self::QueueSetShuffle(_, _)
+            | Self::QueueShuffle(_, _)
+            | Self::QueueSetShuffle(_, _, _)
             | Self::QueueUnshuffle(_)
             | Self::RemoveSong(_)
             | Self::RemoveAlbum(_)
@@ -186,10 +186,12 @@ pub enum Action {
     /// Take an element from A and add it to the end of the folder B
     QueueMoveInto(Vec<usize>, Vec<usize>),
     QueueGoto(Vec<usize>),
-    // sent by clients when they want to shuffle a folder
-    QueueShuffle(Vec<usize>),
-    // sent by the server when the folder was shuffled
-    QueueSetShuffle(Vec<usize>, Vec<usize>),
+    /// sent by clients when they want to shuffle a folder
+    /// last parameter: 0 = don't change index, 1 = set folder index to new index of previously active element
+    QueueShuffle(Vec<usize>, u8),
+    /// sent by the server when the folder was shuffled
+    /// last parameter, see QueueShuffle
+    QueueSetShuffle(Vec<usize>, Vec<usize>, u8),
     QueueUnshuffle(Vec<usize>),
 
     /// .id field is ignored!
@@ -615,16 +617,18 @@ impl ToFromBytes for Action {
                 s.write_all(&[BYTE_QUEUE_GOTO])?;
                 index.to_bytes(s)?;
             }
-            Self::QueueShuffle(path) => {
+            Self::QueueShuffle(path, set_index) => {
                 s.write_all(&[BYTE_QUEUE_ACTION])?;
                 s.write_all(&[SUBBYTE_ACTION_SHUFFLE])?;
                 path.to_bytes(s)?;
+                set_index.to_bytes(s)?;
             }
-            Self::QueueSetShuffle(path, map) => {
+            Self::QueueSetShuffle(path, map, set_index) => {
                 s.write_all(&[BYTE_QUEUE_ACTION])?;
                 s.write_all(&[SUBBYTE_ACTION_SET_SHUFFLE])?;
                 path.to_bytes(s)?;
                 map.to_bytes(s)?;
+                set_index.to_bytes(s)?;
             }
             Self::QueueUnshuffle(path) => {
                 s.write_all(&[BYTE_QUEUE_ACTION])?;
@@ -813,8 +817,10 @@ impl ToFromBytes for Action {
             BYTE_QUEUE_MOVE_INTO => Self::QueueMoveInto(from_bytes!(), from_bytes!()),
             BYTE_QUEUE_GOTO => Self::QueueGoto(from_bytes!()),
             BYTE_QUEUE_ACTION => match s.read_byte()? {
-                SUBBYTE_ACTION_SHUFFLE => Self::QueueShuffle(from_bytes!()),
-                SUBBYTE_ACTION_SET_SHUFFLE => Self::QueueSetShuffle(from_bytes!(), from_bytes!()),
+                SUBBYTE_ACTION_SHUFFLE => Self::QueueShuffle(from_bytes!(), from_bytes!()),
+                SUBBYTE_ACTION_SET_SHUFFLE => {
+                    Self::QueueSetShuffle(from_bytes!(), from_bytes!(), from_bytes!())
+                }
                 SUBBYTE_ACTION_UNSHUFFLE => Self::QueueUnshuffle(from_bytes!()),
                 _ => {
                     eprintln!(
@@ -943,8 +949,8 @@ fn test_to_from_bytes() {
         Action::QueueMove(vec![], vec![]),
         Action::QueueMoveInto(vec![], vec![]),
         Action::QueueGoto(vec![]),
-        Action::QueueShuffle(vec![]),
-        Action::QueueSetShuffle(vec![], vec![]),
+        Action::QueueShuffle(vec![], 1),
+        Action::QueueSetShuffle(vec![], vec![], 0),
         Action::QueueUnshuffle(vec![]),
         // Action::AddSong(Song, Req),
         // Action::AddAlbum(Album, Req),

@@ -1,6 +1,6 @@
 use std::ops::AddAssign;
 
-use crate::load::ToFromBytes;
+use crate::{load::ToFromBytes, server::Action};
 
 use super::{database::Database, SongId};
 
@@ -210,7 +210,11 @@ impl Queue {
     }
 
     pub fn advance_index_db(db: &mut Database) -> bool {
-        let o = db.queue.advance_index_inner();
+        let mut actions = Vec::new();
+        let o = db.queue.advance_index_inner(&mut Vec::new(), &mut actions);
+        for action in actions {
+            db.apply_action_unchecked_seq(action, None);
+        }
         o
     }
     pub fn init(&mut self) {
@@ -225,20 +229,50 @@ impl Queue {
             QueueContent::Loop(_, _, inner) => inner.init(),
         }
     }
-    pub fn advance_index_inner(&mut self) -> bool {
+    pub fn done(&mut self, path: &Vec<usize>, actions: &mut Vec<Action>) {
         match &mut self.content {
-            QueueContent::Song(_) => false,
-            QueueContent::Folder(folder) => folder.advance_index_inner(),
-            QueueContent::Loop(total, current, inner) => {
-                if inner.advance_index_inner() {
+            QueueContent::Song(..) => {}
+            QueueContent::Folder(folder) => {
+                if folder.order.is_some() {
+                    actions.push(Action::QueueShuffle(path.clone(), 0));
+                }
+            }
+            QueueContent::Loop(_, _, _) => {}
+        }
+    }
+    pub fn advance_index_inner(
+        &mut self,
+        path: &mut Vec<usize>,
+        actions: &mut Vec<Action>,
+    ) -> bool {
+        match &mut self.content {
+            QueueContent::Song(_) => {
+                self.done(path, actions);
+                false
+            }
+            QueueContent::Folder(folder) => {
+                if folder.advance_index_inner(path, actions) {
                     true
                 } else {
+                    self.done(path, actions);
+                    false
+                }
+            }
+            QueueContent::Loop(total, current, inner) => {
+                path.push(0);
+                if inner.advance_index_inner(path, actions) {
+                    path.pop();
+                    true
+                } else {
+                    inner.done(path, actions);
+                    path.pop();
                     *current += 1;
                     if *total == 0 || *current < *total {
                         inner.init();
                         true
                     } else {
                         *current = 0;
+                        self.done(path, actions);
                         false
                     }
                 }
@@ -481,12 +515,20 @@ impl QueueFolder {
             self.content.first()
         }
     }
-    pub fn advance_index_inner(&mut self) -> bool {
+    pub fn advance_index_inner(
+        &mut self,
+        path: &mut Vec<usize>,
+        actions: &mut Vec<Action>,
+    ) -> bool {
+        let index = self.index;
         if let Some(c) = self.get_current_mut() {
-            if c.advance_index_inner() {
+            path.push(index);
+            if c.advance_index_inner(path, actions) {
+                path.pop();
                 // inner value could advance index, do nothing.
                 true
             } else {
+                path.pop();
                 loop {
                     if self.index + 1 < self.content.len() {
                         // can advance

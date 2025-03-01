@@ -9,10 +9,8 @@ use musicdb_lib::data::song::Song;
 use musicdb_lib::data::SongId;
 use musicdb_lib::server::{Action, Command, Req};
 use rocket::futures::{SinkExt, StreamExt};
-use rocket::http::ContentType;
 use rocket::response::content::RawHtml;
-use rocket::response::Responder;
-use rocket::{get, routes, Config, Response, State};
+use rocket::{get, routes, Config, State};
 use rocket_seek_stream::SeekStream;
 use rocket_ws::{Message, WebSocket};
 use tokio::select;
@@ -53,7 +51,6 @@ struct Data {
 
 #[get("/")]
 fn index(data: &State<Data>) -> RawHtml<String> {
-    dbg!(());
     let script = r#"<script>
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function performSearch() {
@@ -90,7 +87,8 @@ async function performSearch() {
 async function addSong(id) {
     await fetch("/add-song/" + id);
 }
-</script>"#;
+</script>
+"#;
     let script2 = r#"<script>
 const searchDiv = document.getElementById("searchDiv");
 searchDiv.style.display = "";
@@ -263,7 +261,10 @@ async function runLoop() {
         document.getElementById("warnLag").innerText = "Average update time: " + Math.round(averageLoopTimeMs) + "ms";
     }
 }
-runLoop();</script>"#;
+updateLivePlaybackIds();
+runLoop();
+</script>
+"#;
     let buttons = "<button onclick=\"fetch('/play')\">play</button><button onclick=\"fetch('/pause')\">pause</button><button onclick=\"fetch('/stop')\">stop</button><button onclick=\"fetch('/skip')\">skip</button><button onclick=\"fetch('/clear-queue')\">clear queue</button>";
     let search = "<input id=\"searchFieldArtist\" placeholder=\"artist\"><input id=\"searchFieldAlbum\" placeholder=\"album\"><input id=\"searchFieldTitle\" placeholder=\"title\">
 <button onclick=\"performSearch()\">search</button><div id=\"searchResultDiv\"></div>";
@@ -272,7 +273,6 @@ runLoop();</script>"#;
     let now_playing = gen_now_playing(&db);
     let mut queue = String::new();
     gen_queue_html(&db.queue, &mut queue, &db);
-    dbg!(&queue);
     drop(db);
     RawHtml(format!(
         "{HTML_START}<title>MusicDb</title>{script}{HTML_SEP}<small><small><div id=\"warnLag\">no javascript? reload to see updated information.</div></small></small><div id=\"nowPlayingDiv\">{now_playing}</div><div>{buttons}</div>{playback_live}<div id=\"searchDiv\" style=\"display:none;\">{search}</div><div id=\"queueDiv\">{queue}</div>{script2}{HTML_END}",
@@ -301,8 +301,15 @@ fn now_playing_ids(data: &State<Data>) -> String {
     }
 }
 
-#[get("/song/<id>/<name>")]
-fn song(data: &State<Data>, id: SongId, name: String) -> Option<SeekStream> {
+#[get("/song/<id>")]
+fn song1(data: &State<Data>, id: SongId) -> Option<SeekStream> {
+    song(data, id)
+}
+#[get("/song/<id>/<_>")]
+fn song2(data: &State<Data>, id: SongId) -> Option<SeekStream> {
+    song(data, id)
+}
+fn song(data: &State<Data>, id: SongId) -> Option<SeekStream> {
     let db = data.db.lock().unwrap();
     if let Some(song) = db.get_song(&id) {
         song.cached_data().cache_data_start_thread(&*db, song);
@@ -901,7 +908,7 @@ pub fn main(
         .unwrap()
         .block_on(async_main(data, addr));
 }
-pub async fn async_main(data: Data, addr: SocketAddr) {
+async fn async_main(data: Data, addr: SocketAddr) {
     rocket::build()
         .configure(Config {
             address: addr.ip(),
@@ -925,7 +932,8 @@ pub async fn async_main(data: Data, addr: SocketAddr) {
                 search,
                 now_playing_html,
                 now_playing_ids,
-                song,
+                song1,
+                song2,
                 queue_html,
             ],
         )

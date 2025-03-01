@@ -569,7 +569,7 @@ impl Database {
         // some commands shouldn't be broadcast. these will broadcast a different command in their specific implementation.
         match &action {
             // Will broadcast `QueueSetShuffle`
-            Action::QueueShuffle(_) => (),
+            Action::QueueShuffle(_, _) => (),
             Action::NextSong if self.queue.is_almost_empty() => (),
             Action::Pause if !self.playing => (),
             Action::Resume if self.playing => (),
@@ -679,26 +679,31 @@ impl Database {
                 }
             }
             Action::QueueGoto(index) => Queue::set_index_db(self, &index),
-            Action::QueueShuffle(path) => {
-                if let Some(elem) = self.queue.get_item_at_index_mut(&path, 0) {
-                    if let QueueContent::Folder(QueueFolder {
-                        index: _,
-                        content,
-                        name: _,
-                        order: _,
-                    }) = elem.content_mut()
-                    {
-                        let mut ord: Vec<usize> = (0..content.len()).collect();
-                        ord.shuffle(&mut thread_rng());
-                        self.apply_action_unchecked_seq(Action::QueueSetShuffle(path, ord), client);
+            Action::QueueShuffle(path, set_index) => {
+                if !self.is_client() {
+                    if let Some(elem) = self.queue.get_item_at_index_mut(&path, 0) {
+                        if let QueueContent::Folder(QueueFolder {
+                            index: _,
+                            content,
+                            name: _,
+                            order: _,
+                        }) = elem.content_mut()
+                        {
+                            let mut ord: Vec<usize> = (0..content.len()).collect();
+                            ord.shuffle(&mut thread_rng());
+                            self.apply_action_unchecked_seq(
+                                Action::QueueSetShuffle(path, ord, set_index),
+                                client,
+                            );
+                        } else {
+                            eprintln!("(QueueShuffle) QueueElement at {path:?} not a folder!");
+                        }
                     } else {
-                        eprintln!("(QueueShuffle) QueueElement at {path:?} not a folder!");
+                        eprintln!("(QueueShuffle) No QueueElement at {path:?}");
                     }
-                } else {
-                    eprintln!("(QueueShuffle) No QueueElement at {path:?}");
                 }
             }
-            Action::QueueSetShuffle(path, ord) => {
+            Action::QueueSetShuffle(path, ord, set_index) => {
                 if let Some(elem) = self.queue.get_item_at_index_mut(&path, 0) {
                     if let QueueContent::Folder(QueueFolder {
                         index,
@@ -708,8 +713,14 @@ impl Database {
                     }) = elem.content_mut()
                     {
                         if ord.len() == content.len() {
-                            if let Some(ni) = ord.iter().position(|v| *v == *index) {
-                                *index = ni;
+                            match set_index {
+                                0 => {}
+                                1 => {
+                                    if let Some(ni) = ord.iter().position(|v| *v == *index) {
+                                        *index = ni;
+                                    }
+                                }
+                                _ => {}
                             }
                             *order = Some(ord);
                         } else {
