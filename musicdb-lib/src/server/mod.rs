@@ -2,7 +2,7 @@ pub mod get;
 
 use std::{
     io::{BufRead as _, BufReader, Read, Write},
-    net::{SocketAddr, TcpListener},
+    net::TcpListener,
     sync::{mpsc, Arc, Mutex},
     thread,
     time::Duration,
@@ -269,7 +269,7 @@ impl Command {
 /// c) re-encode all received messages using Command::to_bytes_vec(), send them to the db, and send them to all your clients.
 pub fn run_server(
     database: Arc<Mutex<Database>>,
-    addr_tcp: Option<SocketAddr>,
+    addr_tcp: Option<String>,
     sender_sender: Option<Box<dyn FnOnce(mpsc::Sender<(Command, Option<u64>)>)>>,
     play_audio: bool,
 ) {
@@ -277,7 +277,7 @@ pub fn run_server(
 }
 pub fn run_server_caching_thread_opt(
     database: Arc<Mutex<Database>>,
-    addr_tcp: Option<SocketAddr>,
+    addr_tcp: Option<String>,
     sender_sender: Option<Box<dyn FnOnce(mpsc::Sender<(Command, Option<u64>)>)>>,
     caching_thread: Option<Box<dyn FnOnce(&mut crate::data::cache_manager::CacheManager)>>,
     play_audio: bool,

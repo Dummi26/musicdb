@@ -2,7 +2,7 @@
 
 use std::{
     io::{BufReader, Write},
-    net::{SocketAddr, TcpStream},
+    net::TcpStream,
     path::PathBuf,
     sync::{Arc, Mutex},
     thread,
@@ -65,7 +65,7 @@ mod textcfg;
 #[derive(Parser, Debug)]
 struct Args {
     /// the address to be used for the tcp connection to the server
-    addr: SocketAddr,
+    addr: String,
     /// what to do
     #[command(subcommand)]
     mode: Mode,
@@ -109,8 +109,8 @@ fn main() {
     // parse args
     let args = Args::parse();
     // start
-    let addr = args.addr;
-    let mut con = TcpStream::connect(addr).unwrap();
+    let addr = args.addr.clone();
+    let mut con = TcpStream::connect(&addr).unwrap();
     let mode = args.mode;
     writeln!(con, "main").unwrap();
     let database = Arc::new(Mutex::new(Database::new_clientside()));
@@ -130,6 +130,7 @@ fn main() {
         let database = Arc::clone(&database);
         let mut con = con.try_clone().unwrap();
         // this is all you need to keep the db in sync
+        let addr = addr.clone();
         thread::spawn(move || {
             #[cfg(feature = "playback")]
             #[cfg(not(feature = "speedy2d"))]
@@ -182,7 +183,7 @@ fn main() {
                     break 'ifstatementworkaround;
                 }
                 let mut db = database.lock().unwrap();
-                let client_con: Box<dyn ClientIo> = Box::new(TcpStream::connect(addr).unwrap());
+                let client_con: Box<dyn ClientIo> = Box::new(TcpStream::connect(&addr).unwrap());
                 db.remote_server_as_song_file_source = Some(Arc::new(Mutex::new(
                     musicdb_lib::server::get::Client::new(BufReader::new(client_con)).unwrap(),
                 )));
@@ -222,7 +223,7 @@ fn main() {
             let get_con: Arc<Mutex<musicdb_lib::server::get::Client<Box<dyn ClientIo + 'static>>>> =
                 Arc::new(Mutex::new(
                     musicdb_lib::server::get::Client::new(BufReader::new(Box::new(
-                        TcpStream::connect(addr).expect("opening get client connection"),
+                        TcpStream::connect(&addr).expect("opening get client connection"),
                     ) as _))
                     .expect("initializing get client connection"),
                 ));

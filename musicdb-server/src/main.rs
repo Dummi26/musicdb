@@ -18,7 +18,7 @@ use musicdb_lib::data::database::Database;
 struct Args {
     /// optional address for tcp connections to the server
     #[arg(long)]
-    tcp: Option<SocketAddr>,
+    tcp: Option<String>,
     /// optional address on which to start a website which can be used on devices without `musicdb-client` to control playback.
     /// requires the `assets/` folder to be present!
     #[arg(long)]
@@ -65,7 +65,7 @@ enum Source {
     Remote {
         /// The address of another musicdb-server from where to load the songs
         #[arg()]
-        addr: SocketAddr,
+        addr: String,
     },
 }
 // struct Args {
@@ -80,7 +80,7 @@ enum Source {
 //     init: bool,
 //     /// optional address for tcp connections to the server
 //     #[arg(long)]
-//     tcp: Option<SocketAddr>,
+//     tcp: Option<String>,
 //     /// optional address on which to start a website which can be used on devices without `musicdb-client` to control playback.
 //     /// requires the `assets/` folder to be present!
 //     #[arg(long)]
