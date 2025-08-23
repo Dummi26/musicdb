@@ -1275,24 +1275,54 @@ impl GuiElem for ListSong {
     fn mouse_pressed(&mut self, e: &mut EventInfo, button: MouseButton) -> Vec<GuiAction> {
         if button == MouseButton::Right && e.take() {
             let id = self.id;
-            vec![GuiAction::Build(Box::new(move |db| {
-                if let Some(me) = db.songs().get(&id) {
-                    let me = me.clone();
-                    vec![GuiAction::ContextMenu(Some(vec![Box::new(Button::new(
+            let mut menu_actions: Vec<Box<dyn GuiElem + 'static>> = vec![Box::new(Button::new(
+                GuiElemCfg::default(),
+                move |_| {
+                    vec![GuiAction::Build(Box::new(move |db| {
+                        if let Some(me) = db.get_song(&id) {
+                            vec![GuiAction::EditSongs(vec![me.clone()])]
+                        } else {
+                            vec![]
+                        }
+                    }))]
+                },
+                [Label::new(
+                    GuiElemCfg::default(),
+                    format!("Edit this song"),
+                    Color::WHITE,
+                    None,
+                    Vec2::new_y(0.5),
+                )],
+            ))];
+            if self.selected.contains_song(&id) {
+                menu_actions.push(Box::new(Button::new(
+                    GuiElemCfg::default(),
+                    {
+                        let selected = self.selected.clone();
+                        move |_| {
+                            let selected = selected.clone();
+                            vec![GuiAction::Build(Box::new(move |db| {
+                                vec![GuiAction::EditSongs(selected.view(
+                                    |(artists, albums, songs)| {
+                                        songs
+                                            .iter()
+                                            .filter_map(|id| db.get_song(id).cloned())
+                                            .collect()
+                                    },
+                                ))]
+                            }))]
+                        }
+                    },
+                    [Label::new(
                         GuiElemCfg::default(),
-                        move |_| vec![GuiAction::EditSongs(vec![me.clone()])],
-                        [Label::new(
-                            GuiElemCfg::default(),
-                            format!("Edit"),
-                            Color::WHITE,
-                            None,
-                            Vec2::new_y(0.5),
-                        )],
-                    ))]))]
-                } else {
-                    vec![]
-                }
-            }))]
+                        format!("Edit selected songs"),
+                        Color::WHITE,
+                        None,
+                        Vec2::new_y(0.5),
+                    )],
+                )));
+            }
+            vec![GuiAction::ContextMenu(Some(menu_actions))]
         } else {
             vec![]
         }

@@ -1258,8 +1258,8 @@ pub enum GuiAction {
     Do(Box<dyn FnOnce(&mut Gui)>),
     Exit,
     EditSongs(Vec<Song>),
-    // EditAlbums(Vec<Album>),
-    // EditArtists(Vec<Artist>),
+    // EditAlbums(Vec<Album>, bool),
+    // EditArtists(Vec<Artist>, bool),
     OpenAddSongsMenu,
     CloseAddSongsMenu,
 }

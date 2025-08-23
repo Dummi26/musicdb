@@ -355,6 +355,14 @@ impl<C: GuiElemChildren> Button<C> {
             action: Arc::new(action),
         }
     }
+    pub fn disable(&mut self) {
+        self.config.mouse_events = false;
+        self.config.keyboard_events_focus = false;
+    }
+    pub fn enable(&mut self) {
+        self.config.mouse_events = true;
+        self.config.keyboard_events_focus = true;
+    }
 }
 impl<C: GuiElemChildren + 'static> GuiElem for Button<C> {
     fn config(&self) -> &GuiElemCfg {

@@ -32,6 +32,7 @@ mod gui;
 mod gui_anim;
 #[cfg(feature = "speedy2d")]
 mod gui_base;
+pub mod gui_edit_any;
 #[cfg(feature = "speedy2d")]
 mod gui_edit_song;
 #[cfg(feature = "speedy2d")]
