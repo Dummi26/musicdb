@@ -198,7 +198,11 @@ impl GuiElem for EditorForSongs {
                     Event::SetArtist(name, id) => {
                         self.c_scrollbox.children.c_artist.chosen_id = id;
                         self.c_scrollbox.children.c_artist.last_search = name.to_lowercase();
-                        self.c_scrollbox.children.c_artist.open_prog.target = 1.0;
+                        self.c_scrollbox
+                            .children
+                            .c_artist
+                            .open_prog
+                            .set_target(info.time, 1.0);
                         *self
                             .c_scrollbox
                             .children
@@ -232,15 +236,15 @@ impl GuiElem for EditorForSongs {
             }
         }
         // artist sel
-        if self
+        if let Ok(val) = self
             .c_scrollbox
             .children
             .c_artist
             .open_prog
-            .update(Instant::now(), false)
+            .update(info.time, false)
         {
             if let Some(v) = self.c_scrollbox.children_heights.get_mut(1) {
-                *v = ELEM_HEIGHT * self.c_scrollbox.children.c_artist.open_prog.value;
+                *v = ELEM_HEIGHT * val as f32;
                 self.c_scrollbox.config_mut().redraw = true;
             }
             if let Some(h) = &info.helper {
@@ -272,7 +276,7 @@ pub struct EditorForSongArtistChooser {
     config: GuiElemCfg,
     event_sender: std::sync::mpsc::Sender<Event>,
     /// `1.0` = collapsed, `self.expand_to` = expanded (shows `c_picker` of height 7-1=6)
-    open_prog: AnimationController<f32>,
+    open_prog: AnimationController,
     expand_to: f32,
     chosen_id: Option<ArtistId>,
     c_name: TextField,
@@ -285,7 +289,7 @@ impl EditorForSongArtistChooser {
         Self {
             config: GuiElemCfg::default(),
             event_sender,
-            open_prog: AnimationController::new(1.0, 1.0, 0.3, 8.0, 0.5, 0.6, Instant::now()),
+            open_prog: AnimationController::new(1.0, 1.0, 4.0),
             expand_to,
             chosen_id: None,
             c_name: TextField::new(
@@ -307,10 +311,10 @@ impl EditorForSongArtistChooser {
 }
 impl GuiElem for EditorForSongArtistChooser {
     fn draw(&mut self, info: &mut crate::gui::DrawInfo, _g: &mut speedy2d::Graphics2D) {
-        let picker_enabled = self.open_prog.value > 1.0;
+        let picker_enabled = self.open_prog.value(info.time) > 1.0;
         self.c_picker.config_mut().enabled = picker_enabled;
         if picker_enabled {
-            let split = 1.0 / self.open_prog.value;
+            let split = 1.0 / self.open_prog.value(info.time) as f32;
             self.c_name.config_mut().pos = Rectangle::from_tuples((0.0, 0.0), (1.0, split));
             self.c_picker.config_mut().pos = Rectangle::from_tuples((0.0, split), (1.0, 1.0));
         } else {
@@ -327,9 +331,10 @@ impl GuiElem for EditorForSongArtistChooser {
             };
             if search_changed {
                 self.chosen_id = None;
-                self.open_prog.target = self.expand_to;
                 if search.is_empty() {
-                    self.open_prog.target = 1.0;
+                    self.open_prog.set_target(info.time, 1.0);
+                } else {
+                    self.open_prog.set_target(info.time, self.expand_to as f64);
                 }
             }
             let artists = info

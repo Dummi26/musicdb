@@ -1,4 +1,7 @@
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use musicdb_lib::data::{CoverId, SongId};
 use speedy2d::{color::Color, dimen::Vec2, image::ImageHandle, shape::Rectangle};
@@ -151,25 +154,29 @@ pub fn image_display(
     left: f32,
     top: f32,
     bottom: f32,
-    aspect_ratio: &mut AnimationController<f32>,
+    now: Instant,
+    aspect_ratio: &mut AnimationController,
 ) {
     if let Some(cover) = &img {
         let cover_size = cover.size();
-        aspect_ratio.target = if cover_size.x > 0 && cover_size.y > 0 {
-            let pos = if let Some(pos) = pos {
-                pos
-            } else {
-                let right_x = get_right_x(left, top, bottom, aspect_ratio.value);
-                Rectangle::from_tuples((left, top), (right_x, bottom))
-            };
-            let aspect_ratio = cover_size.x as f32 / cover_size.y as f32;
-            g.draw_rectangle_image(pos, cover);
-            aspect_ratio
+        let pos = if let Some(pos) = pos {
+            pos
         } else {
-            0.0
+            let right_x = get_right_x(left, top, bottom, aspect_ratio.value(now) as f32);
+            Rectangle::from_tuples((left, top), (right_x, bottom))
         };
+        g.draw_rectangle_image(pos, cover);
+        aspect_ratio.set_target(
+            now,
+            if cover_size.x > 0 && cover_size.y > 0 {
+                let aspect_ratio = cover_size.x as f32 / cover_size.y as f32;
+                aspect_ratio as f64
+            } else {
+                0.0
+            },
+        );
     } else {
-        aspect_ratio.target = 0.0;
+        aspect_ratio.set_target(now, 0.0);
     }
 }
 pub fn get_right_x(left: f32, top: f32, bottom: f32, aspect_ratio: f32) -> f32 {

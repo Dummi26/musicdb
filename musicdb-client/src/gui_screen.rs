@@ -403,7 +403,7 @@ impl GuiElem for GuiScreen {
             false
         };
         // request_redraw for animations
-        let idle_value = self.idle.get_value(Instant::now()) as f32;
+        let idle_value = self.idle.get_value(info.time) as f32;
         let idle_changed = self.idle_prev_val != idle_value;
         if idle_changed || idle_exit_anim || self.settings.1.is_some() {
             self.idle_prev_val = idle_value;

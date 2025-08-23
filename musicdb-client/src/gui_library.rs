@@ -6,7 +6,6 @@ use std::{
         atomic::{AtomicBool, AtomicUsize},
         mpsc, Mutex,
     },
-    time::Instant,
 };
 
 use musicdb_lib::data::{
@@ -70,7 +69,7 @@ pub struct LibraryBrowser {
     search_song: String,
     search_song_regex: Option<Regex>,
     filter_target_state: Arc<AtomicBool>,
-    filter_state: AnimationController<f32>,
+    filter_state: AnimationController,
     library_updated: bool,
     search_settings_changed: Arc<AtomicBool>,
     search_is_case_sensitive: Arc<AtomicBool>,
@@ -203,7 +202,7 @@ impl LibraryBrowser {
             search_song: String::new(),
             search_song_regex: None,
             filter_target_state,
-            filter_state: AnimationController::new(0.0, 0.0, 0.25, 25.0, 0.1, 0.2, Instant::now()),
+            filter_state: AnimationController::new(0.0, 0.0, 4.0),
             library_updated: true,
             search_settings_changed,
             search_is_case_sensitive,
@@ -380,18 +379,19 @@ impl GuiElem for LibraryBrowser {
         let filter_target_state = self
             .filter_target_state
             .load(std::sync::atomic::Ordering::Relaxed);
-        self.filter_state.target = if filter_target_state { 1.0 } else { 0.0 };
-        if self.filter_state.update(info.time, info.high_performance) {
+        self.filter_state
+            .set_target(info.time, if filter_target_state { 1.0 } else { 0.0 });
+        if let Ok(val) = self.filter_state.update(info.time, info.high_performance) {
             if let Some(h) = &info.helper {
                 h.request_redraw();
             }
-            let y = LP_LIB1 + (LP_LIB1S - LP_LIB1) * self.filter_state.value;
+            let y = LP_LIB1 + (LP_LIB1S - LP_LIB1) * val as f32;
             self.c_scroll_box.config_mut().pos =
                 Rectangle::new(Vec2::new(0.0, y), Vec2::new(1.0, LP_LIB2));
             let filter_panel = &mut self.c_filter_panel;
             filter_panel.config_mut().pos =
                 Rectangle::new(Vec2::new(0.0, LP_LIB1), Vec2::new(1.0, y));
-            filter_panel.config.enabled = self.filter_state.value > 0.0;
+            filter_panel.config.enabled = val > 0.0;
         }
         // -
         if self.library_updated {

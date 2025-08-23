@@ -1,7 +1,4 @@
-use std::{
-    sync::{atomic::AtomicBool, Arc},
-    time::Instant,
-};
+use std::sync::{atomic::AtomicBool, Arc};
 
 use musicdb_lib::data::ArtistId;
 use speedy2d::{color::Color, dimen::Vec2, image::ImageHandle, shape::Rectangle};
@@ -27,8 +24,8 @@ pub struct IdleDisplay {
     pub c_buttons: PlayPause,
     pub c_buttons_custom_pos: bool,
 
-    pub cover_aspect_ratio: AnimationController<f32>,
-    pub artist_image_aspect_ratio: AnimationController<f32>,
+    pub cover_aspect_ratio: AnimationController,
+    pub artist_image_aspect_ratio: AnimationController,
 
     pub cover_pos: Option<Rectangle>,
     pub cover_left: f32,
@@ -76,24 +73,8 @@ impl IdleDisplay {
             is_fav: (false, Arc::clone(&is_fav)),
             c_buttons: PlayPause::new(GuiElemCfg::default(), is_fav),
             c_buttons_custom_pos: false,
-            cover_aspect_ratio: AnimationController::new(
-                1.0,
-                1.0,
-                0.01,
-                1.0,
-                0.8,
-                0.6,
-                Instant::now(),
-            ),
-            artist_image_aspect_ratio: AnimationController::new(
-                0.0,
-                0.0,
-                0.01,
-                1.0,
-                0.8,
-                0.6,
-                Instant::now(),
-            ),
+            cover_aspect_ratio: AnimationController::new(1.0, 1.0, 1.0),
+            artist_image_aspect_ratio: AnimationController::new(0.0, 0.0, 1.0),
             cover_pos: None,
             cover_left: 0.01,
             cover_top: 0.21,
@@ -181,7 +162,7 @@ impl GuiElem for IdleDisplay {
                         .is_some_and(|(a, _)| *a != artist_id)
                 {
                     self.current_artist_image = Some((artist_id, None));
-                    self.artist_image_aspect_ratio.target = 0.0;
+                    self.artist_image_aspect_ratio.set_target(info.time, 0.0);
                     if let Some(artist) = info.database.artists().get(&artist_id) {
                         for tag in &artist.general.tags {
                             if tag.starts_with("ImageExt=") {
@@ -205,7 +186,7 @@ impl GuiElem for IdleDisplay {
             } else {
                 if self.current_artist_image.is_some() {
                     self.current_artist_image = None;
-                    self.artist_image_aspect_ratio.target = 0.0;
+                    self.artist_image_aspect_ratio.set_target(info.time, 0.0);
                 }
             }
         }
@@ -213,7 +194,7 @@ impl GuiElem for IdleDisplay {
             self.current_info.new_cover = false;
             match self.current_info.current_cover {
                 None | Some((_, Some(None))) => {
-                    self.cover_aspect_ratio.target = 0.0;
+                    self.cover_aspect_ratio.set_target(info.time, 0.0);
                 }
                 Some((_, None)) | Some((_, Some(Some(_)))) => {}
             }
@@ -243,6 +224,7 @@ impl GuiElem for IdleDisplay {
                 info.pos.top_left().x + info.pos.height() * self.cover_left,
                 info.pos.top_left().y + info.pos.height() * self.cover_top,
                 info.pos.top_left().y + info.pos.height() * self.cover_bottom,
+                info.time,
                 &mut self.cover_aspect_ratio,
             );
         }
@@ -260,20 +242,23 @@ impl GuiElem for IdleDisplay {
                     info.pos.top_left().x + info.pos.height() * self.cover_left,
                     top,
                     bottom,
-                    self.cover_aspect_ratio.value,
+                    self.cover_aspect_ratio.value(info.time) as f32,
                 ) + info.pos.height() * self.artist_image_to_cover_margin,
                 top + (bottom - top) * self.artist_image_top,
                 bottom,
+                info.time,
                 &mut self.artist_image_aspect_ratio,
             );
         }
         // move children to make space for cover
         let ar_updated = self
             .cover_aspect_ratio
-            .update(info.time.clone(), info.high_performance)
+            .update(info.time, info.high_performance)
+            .is_ok()
             | self
                 .artist_image_aspect_ratio
-                .update(info.time.clone(), info.high_performance);
+                .update(info.time, info.high_performance)
+                .is_ok();
         if ar_updated || info.pos.size() != self.config.pixel_pos.size() {
             if let Some(h) = &info.helper {
                 h.request_redraw();
@@ -281,8 +266,12 @@ impl GuiElem for IdleDisplay {
             // make thing be relative to width instead of to height by multiplying with this
             let top = self.cover_top;
             let bottom = self.cover_bottom;
-            let left = (get_right_x(self.cover_left, top, bottom, self.cover_aspect_ratio.value)
-                + self.artist_image_to_cover_margin)
+            let left = (get_right_x(
+                self.cover_left,
+                top,
+                bottom,
+                self.cover_aspect_ratio.value(info.time) as f32,
+            ) + self.artist_image_to_cover_margin)
                 * info.pos.height()
                 / info.pos.width();
             let ai_top = top + (bottom - top) * self.artist_image_top;
@@ -293,7 +282,7 @@ impl GuiElem for IdleDisplay {
                 left,
                 ai_top * info.pos.height() / info.pos.width(),
                 bottom * info.pos.height() / info.pos.width(),
-                self.artist_image_aspect_ratio.value,
+                self.artist_image_aspect_ratio.value(info.time) as f32,
             );
             self.c_side2_label.config_mut().pos =
                 Rectangle::from_tuples((left, ai_top), (max_right, bottom));

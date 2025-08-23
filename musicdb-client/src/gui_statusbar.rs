@@ -1,7 +1,4 @@
-use std::{
-    sync::{atomic::AtomicBool, Arc},
-    time::Instant,
-};
+use std::sync::{atomic::AtomicBool, Arc};
 
 use speedy2d::{dimen::Vec2, shape::Rectangle};
 
@@ -17,7 +14,7 @@ pub struct StatusBar {
     config: GuiElemCfg,
     pub idle_mode: f32,
     current_info: CurrentInfo,
-    cover_aspect_ratio: AnimationController<f32>,
+    cover_aspect_ratio: AnimationController,
     c_song_label: AdvancedLabel,
     pub force_reset_texts: bool,
     c_buttons: PlayPause,
@@ -31,15 +28,7 @@ impl StatusBar {
             config,
             idle_mode: 0.0,
             current_info: CurrentInfo::new(),
-            cover_aspect_ratio: AnimationController::new(
-                0.0,
-                0.0,
-                0.01,
-                1.0,
-                0.8,
-                0.6,
-                Instant::now(),
-            ),
+            cover_aspect_ratio: AnimationController::new(0.0, 0.0, 1.0),
             c_song_label: AdvancedLabel::new(GuiElemCfg::default(), Vec2::new(0.0, 0.5), vec![]),
             force_reset_texts: false,
             is_fav: (false, Arc::clone(&is_fav)),
@@ -82,7 +71,7 @@ impl GuiElem for StatusBar {
             self.current_info.new_cover = false;
             match self.current_info.current_cover {
                 None | Some((_, Some(None))) => {
-                    self.cover_aspect_ratio.target = 0.0;
+                    self.cover_aspect_ratio.set_target(info.time, 0.0);
                 }
                 Some((_, None)) | Some((_, Some(Some(_)))) => {}
             }
@@ -90,7 +79,8 @@ impl GuiElem for StatusBar {
         // move children to make space for cover
         let ar_updated = self
             .cover_aspect_ratio
-            .update(info.time.clone(), info.high_performance);
+            .update(info.time, info.high_performance)
+            .is_ok();
         if ar_updated || info.pos.size() != self.config.pixel_pos.size() {
             if let Some(h) = &info.helper {
                 h.request_redraw();
@@ -105,7 +95,8 @@ impl GuiElem for StatusBar {
             );
             self.c_song_label.config_mut().pos = Rectangle::from_tuples(
                 (
-                    self.cover_aspect_ratio.value * info.pos.height() / info.pos.width(),
+                    self.cover_aspect_ratio.value(info.time) as f32 * info.pos.height()
+                        / info.pos.width(),
                     0.0,
                 ),
                 (buttons_right_pos - buttons_width, 1.0),
@@ -125,6 +116,7 @@ impl GuiElem for StatusBar {
                 info.pos.top_left().x + info.pos.height() * 0.05,
                 info.pos.top_left().y + info.pos.height() * 0.05,
                 info.pos.top_left().y + info.pos.height() * 0.95,
+                info.time,
                 &mut self.cover_aspect_ratio,
             );
         }

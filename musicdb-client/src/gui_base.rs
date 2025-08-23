@@ -604,7 +604,7 @@ impl GuiElem for Slider {
     fn draw(&mut self, info: &mut DrawInfo, g: &mut speedy2d::Graphics2D) {
         if self.display != (self.config.mouse_down.0 || info.pos.contains(info.mouse_pos)) {
             self.display = !self.display;
-            self.display_since = Some(Instant::now());
+            self.display_since = Some(info.time);
             self.config.redraw = true;
         }
         let dot_size = (info.pos.height() * 0.9).min(info.pos.width() * 0.25);
