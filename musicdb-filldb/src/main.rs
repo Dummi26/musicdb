@@ -4,7 +4,8 @@ use std::{
     fs,
     io::Write,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex}, time::SystemTime,
+    sync::{Arc, Mutex},
+    time::SystemTime,
 };
 
 use id3::TagLike;
@@ -28,7 +29,6 @@ fn main() {
     let mut bad_arg = false;
     let mut skip_duration = false;
     let mut custom_files = None;
-    let mut artist_txt = false;
     let mut artist_img = false;
     loop {
         match args.next() {
@@ -50,7 +50,6 @@ fn main() {
                         eprintln!("--custom-files <path> :: missing <path>!");
                     }
                 }
-                "--cf-artist-txt" => artist_txt = true,
                 "--cf-artist-img" => artist_img = true,
                 arg => {
                     bad_arg = true;
@@ -249,7 +248,6 @@ fn main() {
                         song_path
                     );
                     None
-                    
                 }
             },
             title.clone(),
@@ -335,23 +333,95 @@ fn main() {
         }
     }
     if let Some(custom_files) = custom_files {
-        if artist_txt {
-            eprintln!("[info] Searching for <artist>.txt files in custom-files dir...");
-            let l = database.artists().len();
-            let mut c = 0;
-            for (i, artist) in database.artists_mut().values_mut().enumerate() {
-                if let Ok(info) =
-                    fs::read_to_string(custom_files.join(format!("{}.txt", artist.name)))
+        eprintln!("[info] Searching for <artist>.tags, <artist>.d/<album>.tags, <artist>.d/singles.d/<song>.tags, <artist>.d/<album>.d/<song>.tags in custom-files dir...");
+        let l = database.artists().len() + database.albums().len() + database.songs().len();
+        let mut cc = 0;
+        let mut c = 0;
+        let (artists, albums, songs) = database.artists_albums_songs_mut();
+        for artist in artists.values_mut() {
+            // <artist>.tags
+            cc += 1;
+            if let Ok(info) = fs::read_to_string(custom_files.join(format!(
+                "{}.tags",
+                normalize_to_file_path_component_for_custom_files(&artist.name)
+            ))) {
+                c += 1;
+                for line in info.lines() {
+                    artist.general.tags.push(normalized_str_to_tag(line));
+                }
+            }
+            // <artist>.d/
+            let dir = custom_files.join(format!(
+                "{}.d",
+                normalize_to_file_path_component_for_custom_files(&artist.name)
+            ));
+            if fs::metadata(&dir).is_ok_and(|meta| meta.is_dir()) {
+                // <artist>.d/singles/
                 {
-                    c += 1;
-                    for line in info.lines() {
-                        artist.general.tags.push(line.to_owned());
+                    let dir = dir.join("singles");
+                    for song in artist.singles.iter() {
+                        // <artist>.d/singles/<song>.tags
+                        cc += 1;
+                        if let Some(song) = songs.get_mut(song) {
+                            if let Ok(info) = fs::read_to_string(dir.join(format!(
+                                "{}.tags",
+                                normalize_to_file_path_component_for_custom_files(&song.title)
+                            ))) {
+                                c += 1;
+                                for line in info.lines() {
+                                    song.general.tags.push(normalized_str_to_tag(line));
+                                }
+                            }
+                        }
                     }
                 }
-                eprint!(" {}/{l} ({c})\r", i + 1);
+                for album in artist.albums.iter() {
+                    eprint!(" {cc}/{l} ({c})\r");
+                    cc += 1;
+                    if let Some(album) = albums.get_mut(album) {
+                        // <artist>.d/<album>.tags
+                        if let Ok(info) = fs::read_to_string(dir.join(format!(
+                            "{}.tags",
+                            normalize_to_file_path_component_for_custom_files(&album.name)
+                        ))) {
+                            c += 1;
+                            for line in info.lines() {
+                                album.general.tags.push(normalized_str_to_tag(line));
+                            }
+                        }
+                        // <artist>.d/<album>.d/
+                        let dir = dir.join(format!(
+                            "{}.d",
+                            normalize_to_file_path_component_for_custom_files(&album.name)
+                        ));
+                        for song in album.songs.iter() {
+                            cc += 1;
+                            if let Some(song) = songs.get_mut(song) {
+                                // <artist>.d/<album>.d/<song>.tags
+                                if let Ok(info) = fs::read_to_string(dir.join(format!(
+                                    "{}.tags",
+                                    normalize_to_file_path_component_for_custom_files(&song.title)
+                                ))) {
+                                    c += 1;
+                                    for line in info.lines() {
+                                        song.general.tags.push(normalized_str_to_tag(line));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                cc += artist.albums.len();
+                for album in artist.albums.iter() {
+                    if let Some(album) = albums.get(album) {
+                        cc += album.songs.len();
+                    }
+                }
             }
-            eprintln!();
+            eprint!(" {cc}/{l} ({c})\r");
         }
+        eprintln!();
         if artist_img {
             eprintln!("[info] Searching for <artist>.{{png,jpg,...}} files in custom-files dir...");
             match fs::read_dir(&custom_files) {
@@ -434,7 +504,7 @@ fn get_cover(
     if let Ok(files) = fs::read_dir(&abs_dir) {
         for file in files {
             if let Ok(file) = file {
-                        let path = file.path();
+                let path = file.path();
                 if let Ok(metadata) = path.metadata() {
                     if metadata.is_file() {
                         if path.extension().and_then(|v| v.to_str()).is_some_and(|v| {
@@ -470,4 +540,26 @@ fn get_cover(
     } else {
         None
     }
+}
+
+fn normalize_to_file_path_component_for_custom_files(str: &str) -> String {
+    str.replace('%', "%p")
+        .replace('\0', "%0")
+        .replace('/', "%s")
+        .replace('\\', "%S")
+        .replace('\t', "%t")
+        .replace('\r', "%r")
+        .replace('\n', "%n")
+}
+
+fn normalize_tag_to_str(str: &str) -> String {
+    str.replace('\\', "\\S")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
+}
+fn normalized_str_to_tag(str: &str) -> String {
+    str.replace(['\n', '\r'], "")
+        .replace("\\n", "\n")
+        .replace("\\r", "\r")
+        .replace("\\S", "\\")
 }

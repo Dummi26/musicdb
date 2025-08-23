@@ -1145,6 +1145,15 @@ impl Database {
         self.modified_data();
         &mut self.covers
     }
+    pub fn artists_albums_songs_mut(
+        &mut self,
+    ) -> (
+        &mut HashMap<ArtistId, Artist>,
+        &mut HashMap<AlbumId, Album>,
+        &mut HashMap<SongId, Song>,
+    ) {
+        (&mut self.artists, &mut self.albums, &mut self.songs)
+    }
 }
 
 #[derive(Clone, Debug)]
