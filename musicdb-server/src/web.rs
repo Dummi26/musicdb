@@ -302,14 +302,14 @@ fn now_playing_ids(data: &State<Data>) -> String {
 }
 
 #[get("/song/<id>")]
-fn song1(data: &State<Data>, id: SongId) -> Option<SeekStream> {
+fn song1(data: &State<Data>, id: SongId) -> Option<SeekStream<'_>> {
     song(data, id)
 }
 #[get("/song/<id>/<_>")]
-fn song2(data: &State<Data>, id: SongId) -> Option<SeekStream> {
+fn song2(data: &State<Data>, id: SongId) -> Option<SeekStream<'_>> {
     song(data, id)
 }
-fn song(data: &State<Data>, id: SongId) -> Option<SeekStream> {
+fn song(data: &State<Data>, id: SongId) -> Option<SeekStream<'_>> {
     let db = data.db.lock().unwrap();
     if let Some(song) = db.get_song(&id) {
         song.cached_data().cache_data_start_thread(&*db, song);

@@ -437,7 +437,7 @@ pub fn run_server_caching_thread_opt(
 pub fn handle_one_connection_as_main(
     db: Arc<Mutex<Database>>,
     connection: &mut impl Read,
-    mut send_to: (impl Write + Sync + Send + 'static),
+    mut send_to: impl Write + Sync + Send + 'static,
     command_sender: &mpsc::Sender<(Command, Option<u64>)>,
 ) -> Result<(), std::io::Error> {
     // sync database

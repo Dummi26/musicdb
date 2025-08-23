@@ -39,8 +39,8 @@ impl CacheManager {
                 let sleep_dur_long = Duration::from_secs(20);
                 let sleep_dur_short = Duration::from_secs(1);
                 let mut si = sysinfo::System::new_with_specifics(
-                    sysinfo::RefreshKind::new()
-                        .with_memory(sysinfo::MemoryRefreshKind::new().with_ram()),
+                    sysinfo::RefreshKind::nothing()
+                        .with_memory(sysinfo::MemoryRefreshKind::nothing().with_ram()),
                 );
                 eprintln!("[{}] Starting CacheManager", "INFO".cyan());
                 let mut sleep_short = true;
@@ -54,7 +54,7 @@ impl CacheManager {
                     });
                     sleep_short = false;
                     // memory stuff
-                    si.refresh_memory_specifics(sysinfo::MemoryRefreshKind::new().with_ram());
+                    si.refresh_memory_specifics(sysinfo::MemoryRefreshKind::nothing().with_ram());
                     let available_memory = si.available_memory();
                     let min_avail_mem = min_avail_mem.load(std::sync::atomic::Ordering::Relaxed);
                     let low_memory = available_memory < min_avail_mem;

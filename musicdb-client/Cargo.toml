@@ -7,11 +7,11 @@ edition = "2021"
 
 [dependencies]
 musicdb-lib = { path = "../musicdb-lib", default-features = false }
-clap = { version = "4.4.6", features = ["derive"] }
-directories = "5.0.1"
-regex = "1.9.3"
-speedy2d = { version = "1.12.0", optional = true }
-toml = "0.7.6"
+clap = { version = "4.5.45", features = ["derive"] }
+directories = "6.0.0"
+regex = "1.11.1"
+speedy2d = { version = "2.1.0", optional = true }
+toml = "0.9.5"
 # musicdb-mers = { version = "0.1.0", path = "../musicdb-mers", optional = true }
 uianimator = "0.1.1"
 
@@ -27,7 +27,9 @@ default = ["gui", "default-playback"]
 #   enables syncplayer modes, where the client mirrors the server's playback
 gui = ["speedy2d"]
 # merscfg = ["mers", "gui"]
+merscfg = []
 # mers = ["musicdb-mers"]
+mers = []
 playback = []
 default-playback = ["playback", "musicdb-lib/default-playback"]
 playback-via-playback-rs = ["playback", "musicdb-lib/playback-via-playback-rs"]

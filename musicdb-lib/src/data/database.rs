@@ -9,7 +9,7 @@ use std::{
 };
 
 use colorize::AnsiColor;
-use rand::thread_rng;
+use rand::rng;
 
 use crate::{
     load::ToFromBytes,
@@ -690,7 +690,7 @@ impl Database {
                         }) = elem.content_mut()
                         {
                             let mut ord: Vec<usize> = (0..content.len()).collect();
-                            ord.shuffle(&mut thread_rng());
+                            ord.shuffle(&mut rng());
                             self.apply_action_unchecked_seq(
                                 Action::QueueSetShuffle(path, ord, set_index),
                                 client,

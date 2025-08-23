@@ -418,7 +418,7 @@ impl Queue {
 }
 
 impl QueueFolder {
-    pub fn iter(&self) -> QueueFolderIter {
+    pub fn iter(&self) -> QueueFolderIter<'_> {
         QueueFolderIter {
             folder: self,
             index: 0,

@@ -1,4 +1,5 @@
-// #![allow(unused)]
+#![allow(dead_code)]
+#![allow(unused_variables)]
 
 use std::{
     io::{BufReader, Write},
@@ -146,7 +147,6 @@ fn main() {
                     | Mode::GuiSyncplayerNetwork
             );
             #[cfg(feature = "playback")]
-            #[allow(unused)]
             let mut cache_manager = None;
             #[cfg(feature = "playback")]
             let mut player = if is_syncplayer {
@@ -160,6 +160,12 @@ fn main() {
             } else {
                 None
             };
+            // prevent unused assignment warning, we might
+            // need cache manager at some point -_-
+            #[cfg(feature = "playback")]
+            if false {
+                drop(cache_manager);
+            }
             #[allow(unused_labels)]
             'ifstatementworkaround: {
                 // use if+break instead of if-else because we can't #[cfg(feature)] the if statement,

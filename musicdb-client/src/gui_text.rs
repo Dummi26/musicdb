@@ -1,4 +1,4 @@
-use std::{fmt::Display, rc::Rc, sync::Arc};
+use std::{fmt::Display, sync::Arc};
 
 use musicdb_lib::data::CoverId;
 use speedy2d::{
@@ -30,7 +30,7 @@ pub struct Content {
     text: String,
     color: Color,
     background: Option<Color>,
-    formatted: Option<Rc<FormattedTextBlock>>,
+    formatted: Option<FormattedTextBlock>,
 }
 
 #[allow(unused)]

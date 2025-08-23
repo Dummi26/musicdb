@@ -1,7 +1,7 @@
 use std::{ffi::OsStr, sync::Arc};
 
 use rc_u8_reader::ArcU8Reader;
-use rodio::{decoder::DecoderError, Decoder, OutputStream, OutputStreamHandle, Sink, Source};
+use rodio::{decoder::DecoderError, Decoder, OutputStream, Sink, Source};
 
 use crate::{
     data::{song::Song, SongId},
@@ -13,8 +13,6 @@ use super::PlayerBackend;
 pub struct PlayerBackendRodio<T> {
     #[allow(unused)]
     output_stream: OutputStream,
-    #[allow(unused)]
-    output_stream_handle: OutputStreamHandle,
     sink: Sink,
     stopped: bool,
     current: Option<(SongId, Arc<Vec<u8>>, Option<u128>, T)>,
@@ -34,11 +32,11 @@ impl<T> PlayerBackendRodio<T> {
     pub fn new_with_optional_command_sending(
         command_sender: Option<std::sync::mpsc::Sender<(Command, Option<u64>)>>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        let (output_stream, output_stream_handle) = rodio::OutputStream::try_default()?;
-        let sink = Sink::try_new(&output_stream_handle)?;
+        let output_stream =
+            rodio::OutputStreamBuilder::from_default_device()?.open_stream_or_fallback()?;
+        let sink = Sink::connect_new(&output_stream.mixer());
         Ok(Self {
             output_stream,
-            output_stream_handle,
             sink,
             stopped: true,
             current: None,
