@@ -27,19 +27,30 @@ fn main() {
         std::process::exit(1);
     };
     let mut bad_arg = false;
+    let mut dbdir = ".".to_owned();
     let mut skip_duration = false;
     let mut custom_files = None;
     let mut artist_img = false;
+    let mut export_custom_files = None;
     loop {
         match args.next() {
             None => break,
             Some(arg) => match arg.as_str() {
                 "--help" => {
+                    eprintln!("--dbdir <path>: Save dbfile in the <path> directory (default: `.`)");
                     eprintln!("--skip-duration: Don't try to figure out the songs duration from file contents. This means mp3 files with the Duration field unset will have a duration of 0.");
-                    eprintln!("--custom-files <path>: server will use <path> as its custom-files directory.");
-                    eprintln!("--cf-artist-txt: For each artist, check for an <artist>.txt file. If it exists, add each line as a tag to that artist.");
+                    eprintln!("--custom-files <path>: server will use <path> as its custom-files directory. Additional data is loaded from here.");
                     eprintln!("--cf-artist-img: For each artist, check for an <artist>.{{jpg,png,...}} file. If it exists, add ImageExt=<extension> tag to the artist, so the image can be loaded by clients later.");
+                    eprintln!("--export-custom-files <path>: Create <path> as a directory containing metadata from the *existing* dbfile, so that it can be loaded again using --custom-files <same-path>.");
                     return;
+                }
+                "--dbdir" => {
+                    if let Some(dir) = args.next() {
+                        dbdir = dir;
+                    } else {
+                        bad_arg = true;
+                        eprintln!("--dbdir <path> :: missing <path>!");
+                    }
                 }
                 "--skip-duration" => skip_duration = true,
                 "--custom-files" => {
@@ -51,6 +62,14 @@ fn main() {
                     }
                 }
                 "--cf-artist-img" => artist_img = true,
+                "--export-custom-files" => {
+                    if let Some(path) = args.next() {
+                        export_custom_files = Some(PathBuf::from(path));
+                    } else {
+                        bad_arg = true;
+                        eprintln!("--export-custom-files <path> :: missing <path>!");
+                    }
+                }
                 arg => {
                     bad_arg = true;
                     eprintln!("Unknown argument: {arg}");
@@ -58,7 +77,17 @@ fn main() {
             },
         }
     }
+    if export_custom_files.is_some() {
+        if skip_duration || custom_files.is_some() || artist_img {
+            bad_arg = true;
+            eprintln!("--export-custom-files :: incompatible with other arguments except --dbdir!");
+        }
+    }
     if bad_arg {
+        return;
+    }
+    if let Some(path) = export_custom_files {
+        export_to_custom_files_dir(dbdir, path);
         return;
     }
     eprintln!("Library: {lib_dir}. press enter to start. result will be saved in 'dbfile'.");
@@ -89,7 +118,7 @@ fn main() {
         }
     }
     eprintln!("\nloaded metadata of {} files.", songs.len());
-    let mut database = Database::new_empty_in_dir(PathBuf::from("."), PathBuf::from(&lib_dir));
+    let mut database = Database::new_empty_in_dir(PathBuf::from(dbdir), PathBuf::from(&lib_dir));
     let unknown_artist = database.add_artist_new(Artist {
         id: 0,
         name: format!("<unknown>"),
@@ -132,21 +161,21 @@ fn main() {
         let mut general = GeneralData::default();
         match (song_tags.track(), song_tags.total_tracks()) {
             (None, None) => {}
-            (Some(n), Some(t)) => general.tags.push(format!("TrackNr={n}/{t}")),
-            (Some(n), None) => general.tags.push(format!("TrackNr={n}")),
-            (None, Some(t)) => general.tags.push(format!("TrackNr=?/{t}")),
+            (Some(n), Some(t)) => general.tags.push(format!("SRCFILE:TrackNr={n}/{t}")),
+            (Some(n), None) => general.tags.push(format!("SRCFILE:TrackNr={n}")),
+            (None, Some(t)) => general.tags.push(format!("SRCFILE:TrackNr=?/{t}")),
         }
         match (song_tags.disc(), song_tags.total_discs()) {
             (None, None) => {}
-            (Some(n), Some(t)) => general.tags.push(format!("DiscNr={n}/{t}")),
-            (Some(n), None) => general.tags.push(format!("DiscNr={n}")),
-            (None, Some(t)) => general.tags.push(format!("DiscNr=?/{t}")),
+            (Some(n), Some(t)) => general.tags.push(format!("SRCFILE:DiscNr={n}/{t}")),
+            (Some(n), None) => general.tags.push(format!("SRCFILE:DiscNr={n}")),
+            (None, Some(t)) => general.tags.push(format!("SRCFILE:DiscNr=?/{t}")),
         }
         if let Some(year) = song_tags.year() {
-            general.tags.push(format!("Year={year}"));
+            general.tags.push(format!("SRCFILE:Year={year}"));
         }
         if let Some(genre) = song_tags.genre_parsed() {
-            general.tags.push(format!("Genre={genre}"));
+            general.tags.push(format!("SRCFILE:Genre={genre}"));
         }
         let (artist_id, album_id) = if let Some(artist) = song_tags
             .album_artist()
@@ -278,6 +307,30 @@ fn main() {
             general,
         ));
     }
+    {
+        let (artists, albums, songs) = database.artists_albums_songs_mut();
+        fn unsrcfile(tags: &mut Vec<String>) {
+            let srcfile_tags = tags
+                .iter()
+                .filter_map(|tag| tag.strip_prefix("SRCFILE:"))
+                .map(|tag| tag.to_owned())
+                .collect::<Vec<_>>();
+            for tag in srcfile_tags {
+                if !tags.contains(&tag) {
+                    tags.push(tag.to_owned());
+                }
+            }
+        }
+        for v in artists.values_mut() {
+            unsrcfile(&mut v.general.tags);
+        }
+        for v in albums.values_mut() {
+            unsrcfile(&mut v.general.tags);
+        }
+        for v in songs.values_mut() {
+            unsrcfile(&mut v.general.tags);
+        }
+    }
     eprintln!("searching for covers...");
     let mut multiple_cover_options = vec![];
     let mut single_images = HashMap::new();
@@ -333,95 +386,6 @@ fn main() {
         }
     }
     if let Some(custom_files) = custom_files {
-        eprintln!("[info] Searching for <artist>.tags, <artist>.d/<album>.tags, <artist>.d/singles.d/<song>.tags, <artist>.d/<album>.d/<song>.tags in custom-files dir...");
-        let l = database.artists().len() + database.albums().len() + database.songs().len();
-        let mut cc = 0;
-        let mut c = 0;
-        let (artists, albums, songs) = database.artists_albums_songs_mut();
-        for artist in artists.values_mut() {
-            // <artist>.tags
-            cc += 1;
-            if let Ok(info) = fs::read_to_string(custom_files.join(format!(
-                "{}.tags",
-                normalize_to_file_path_component_for_custom_files(&artist.name)
-            ))) {
-                c += 1;
-                for line in info.lines() {
-                    artist.general.tags.push(normalized_str_to_tag(line));
-                }
-            }
-            // <artist>.d/
-            let dir = custom_files.join(format!(
-                "{}.d",
-                normalize_to_file_path_component_for_custom_files(&artist.name)
-            ));
-            if fs::metadata(&dir).is_ok_and(|meta| meta.is_dir()) {
-                // <artist>.d/singles/
-                {
-                    let dir = dir.join("singles");
-                    for song in artist.singles.iter() {
-                        // <artist>.d/singles/<song>.tags
-                        cc += 1;
-                        if let Some(song) = songs.get_mut(song) {
-                            if let Ok(info) = fs::read_to_string(dir.join(format!(
-                                "{}.tags",
-                                normalize_to_file_path_component_for_custom_files(&song.title)
-                            ))) {
-                                c += 1;
-                                for line in info.lines() {
-                                    song.general.tags.push(normalized_str_to_tag(line));
-                                }
-                            }
-                        }
-                    }
-                }
-                for album in artist.albums.iter() {
-                    eprint!(" {cc}/{l} ({c})\r");
-                    cc += 1;
-                    if let Some(album) = albums.get_mut(album) {
-                        // <artist>.d/<album>.tags
-                        if let Ok(info) = fs::read_to_string(dir.join(format!(
-                            "{}.tags",
-                            normalize_to_file_path_component_for_custom_files(&album.name)
-                        ))) {
-                            c += 1;
-                            for line in info.lines() {
-                                album.general.tags.push(normalized_str_to_tag(line));
-                            }
-                        }
-                        // <artist>.d/<album>.d/
-                        let dir = dir.join(format!(
-                            "{}.d",
-                            normalize_to_file_path_component_for_custom_files(&album.name)
-                        ));
-                        for song in album.songs.iter() {
-                            cc += 1;
-                            if let Some(song) = songs.get_mut(song) {
-                                // <artist>.d/<album>.d/<song>.tags
-                                if let Ok(info) = fs::read_to_string(dir.join(format!(
-                                    "{}.tags",
-                                    normalize_to_file_path_component_for_custom_files(&song.title)
-                                ))) {
-                                    c += 1;
-                                    for line in info.lines() {
-                                        song.general.tags.push(normalized_str_to_tag(line));
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            } else {
-                cc += artist.albums.len();
-                for album in artist.albums.iter() {
-                    if let Some(album) = albums.get(album) {
-                        cc += album.songs.len();
-                    }
-                }
-            }
-            eprint!(" {cc}/{l} ({c})\r");
-        }
-        eprintln!();
         if artist_img {
             eprintln!("[info] Searching for <artist>.{{png,jpg,...}} files in custom-files dir...");
             match fs::read_dir(&custom_files) {
@@ -452,12 +416,102 @@ fn main() {
                     }
                     for artist in database.artists_mut().values_mut() {
                         if let Some(ext) = files.get(&artist.name) {
+                            artist.general.tags.push(format!("SRCFILE:ImageExt={ext}"));
                             artist.general.tags.push(format!("ImageExt={ext}"));
                         }
                     }
                 }
             }
         }
+        eprintln!("[info] Searching for <artist>.tags, <artist>.d/<album>.tags, <artist>.d/singles.d/<song>.tags, <artist>.d/<album>.d/<song>.tags in custom-files dir...");
+        let l = database.artists().len() + database.albums().len() + database.songs().len();
+        let mut cc = 0;
+        let mut c = 0;
+        let (artists, albums, songs) = database.artists_albums_songs_mut();
+        fn push_tags(info: &str, tags: &mut Vec<String>) {
+            for line in info.lines() {
+                let tag = normalized_str_to_tag(line);
+                if !tags.contains(&tag) {
+                    tags.push(tag);
+                }
+            }
+        }
+        for artist in artists.values_mut() {
+            // <artist>.tags
+            cc += 1;
+            if let Ok(info) = fs::read_to_string(custom_files.join(format!(
+                "{}.tags",
+                normalize_to_file_path_component_for_custom_files(&artist.name)
+            ))) {
+                c += 1;
+                push_tags(&info, &mut artist.general.tags);
+            }
+            // <artist>.d/
+            let dir = custom_files.join(format!(
+                "{}.d",
+                normalize_to_file_path_component_for_custom_files(&artist.name)
+            ));
+            if fs::metadata(&dir).is_ok_and(|meta| meta.is_dir()) {
+                // <artist>.d/singles/
+                {
+                    let dir = dir.join("singles");
+                    for song in artist.singles.iter() {
+                        // <artist>.d/singles/<song>.tags
+                        cc += 1;
+                        if let Some(song) = songs.get_mut(song) {
+                            if let Ok(info) = fs::read_to_string(dir.join(format!(
+                                "{}.tags",
+                                normalize_to_file_path_component_for_custom_files(&song.title)
+                            ))) {
+                                c += 1;
+                                push_tags(&info, &mut song.general.tags);
+                            }
+                        }
+                    }
+                }
+                for album in artist.albums.iter() {
+                    eprint!(" {cc}/{l} ({c})\r");
+                    cc += 1;
+                    if let Some(album) = albums.get_mut(album) {
+                        // <artist>.d/<album>.tags
+                        if let Ok(info) = fs::read_to_string(dir.join(format!(
+                            "{}.tags",
+                            normalize_to_file_path_component_for_custom_files(&album.name)
+                        ))) {
+                            c += 1;
+                            push_tags(&info, &mut album.general.tags);
+                        }
+                        // <artist>.d/<album>.d/
+                        let dir = dir.join(format!(
+                            "{}.d",
+                            normalize_to_file_path_component_for_custom_files(&album.name)
+                        ));
+                        for song in album.songs.iter() {
+                            cc += 1;
+                            if let Some(song) = songs.get_mut(song) {
+                                // <artist>.d/<album>.d/<song>.tags
+                                if let Ok(info) = fs::read_to_string(dir.join(format!(
+                                    "{}.tags",
+                                    normalize_to_file_path_component_for_custom_files(&song.title)
+                                ))) {
+                                    c += 1;
+                                    push_tags(&info, &mut song.general.tags);
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                cc += artist.albums.len();
+                for album in artist.albums.iter() {
+                    if let Some(album) = albums.get(album) {
+                        cc += album.songs.len();
+                    }
+                }
+            }
+            eprint!(" {cc}/{l} ({c})\r");
+        }
+        eprintln!();
     }
     eprintln!("saving dbfile...");
     database.save_database(None).unwrap();
@@ -562,4 +616,178 @@ fn normalized_str_to_tag(str: &str) -> String {
         .replace("\\n", "\n")
         .replace("\\r", "\r")
         .replace("\\S", "\\")
+}
+
+fn export_to_custom_files_dir(dbdir: String, path: PathBuf) {
+    let database = Database::load_database_from_dir(dbdir.into(), PathBuf::new()).unwrap();
+    for artist in database.artists().values() {
+        export_custom_files_tags(
+            &artist.general.tags,
+            &path.join(format!(
+                "{}.tags",
+                normalize_to_file_path_component_for_custom_files(&artist.name)
+            )),
+        );
+        let dir = path.join(format!(
+            "{}.d",
+            normalize_to_file_path_component_for_custom_files(&artist.name)
+        ));
+        {
+            let dir = dir.join("singles");
+            for song in artist.singles.iter() {
+                if let Some(song) = database.songs().get(song) {
+                    export_custom_files_tags(
+                        &song.general.tags,
+                        &dir.join(format!(
+                            "{}.tags",
+                            normalize_to_file_path_component_for_custom_files(&song.title,)
+                        )),
+                    );
+                }
+            }
+        }
+        for album in artist.albums.iter() {
+            if let Some(album) = database.albums().get(album) {
+                export_custom_files_tags(
+                    &album.general.tags,
+                    &dir.join(format!(
+                        "{}.tags",
+                        normalize_to_file_path_component_for_custom_files(&album.name,)
+                    )),
+                );
+                let dir = dir.join(format!(
+                    "{}.d",
+                    normalize_to_file_path_component_for_custom_files(&album.name,)
+                ));
+                for song in album.songs.iter() {
+                    if let Some(song) = database.songs().get(song) {
+                        export_custom_files_tags(
+                            &song.general.tags,
+                            &dir.join(format!(
+                                "{}.tags",
+                                normalize_to_file_path_component_for_custom_files(&song.title,)
+                            )),
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+fn export_custom_files_tags(tags: &Vec<String>, path: &Path) {
+    if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
+        let mut normalized_tags = None;
+        fn mk_normalized_tags<'a>(
+            normalized_tags: &'a mut Option<Vec<String>>,
+            tags: &'_ Vec<String>,
+        ) -> &'a Vec<String> {
+            &*normalized_tags.get_or_insert_with(|| {
+                let mut tags = tags.clone();
+                let mut rm = Vec::new();
+                for (i, srcfile_tag_stripped) in tags
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, tag)| Some((i, tag.strip_prefix("SRCFILE:")?)))
+                {
+                    match rm.binary_search(&i) {
+                        Ok(_) => {}
+                        Err(v) => rm.insert(v, i),
+                    }
+                    if let Some(i) = tags.iter().position(|tag| tag == srcfile_tag_stripped) {
+                        // There is a tag which just repeats the information
+                        // which is already present in the source (audio) file.
+                        // We do not want to save this information, so that,
+                        // if the audio file is replaced in the future, its new
+                        // information is used by musicdb, and musicdb-internal
+                        // information is only used if it was changed to be different
+                        // from the source file by the user.
+                        match rm.binary_search(&i) {
+                            Ok(_) => {}
+                            Err(v) => rm.insert(v, i),
+                        }
+                    }
+                }
+                for i in rm.into_iter().rev() {
+                    tags.remove(i);
+                }
+                tags
+            })
+        }
+        let allow_write = match fs::exists(path) {
+            Err(e) => {
+                eprintln!("Cannot check for {}, skipping. Error: {e}", path.display());
+                false
+            }
+            Ok(false) => true,
+            Ok(true) => {
+                if fs::read_to_string(path).is_ok_and(|file| {
+                    file.lines()
+                        .map(|str| normalized_str_to_tag(str))
+                        .collect::<Vec<String>>()
+                        == *mk_normalized_tags(&mut normalized_tags, tags)
+                }) {
+                    // file contains the same tags as database, don't write,
+                    // but don't create backup either
+                    false
+                } else {
+                    let backup_path = path.with_file_name(format!("{file_name}.backup"));
+                    match fs::exists(&backup_path) {
+                        Err(e) => {
+                            eprintln!(
+                                "Cannot check for {}, skipping {}. Error: {e}",
+                                backup_path.display(),
+                                path.display()
+                            );
+                            false
+                        }
+                        Ok(true) => {
+                            eprintln!(
+                                "Backup {} exists, skipping {}.",
+                                backup_path.display(),
+                                path.display()
+                            );
+                            false
+                        }
+                        Ok(false) => {
+                            if let Err(e) = fs::rename(path, &backup_path) {
+                                eprintln!(
+                                    "Failed to move previous file/dir {} to {}: {e}",
+                                    path.display(),
+                                    backup_path.display()
+                                );
+                                false
+                            } else {
+                                true
+                            }
+                        }
+                    }
+                }
+            }
+        };
+        if allow_write {
+            if !mk_normalized_tags(&mut normalized_tags, tags).is_empty() {
+                if let Some(p) = path.parent() {
+                    if let Err(e) = fs::create_dir_all(p) {
+                        eprintln!(
+                            "Could not create directory to contain {}: {e}",
+                            path.display()
+                        );
+                    }
+                }
+                if let Err(e) = fs::write(
+                    path,
+                    mk_normalized_tags(&mut normalized_tags, tags)
+                        .iter()
+                        .map(|tag| normalize_tag_to_str(tag) + "\n")
+                        .collect::<String>(),
+                ) {
+                    eprintln!("Could not save {}: {e}", path.display());
+                }
+            }
+        }
+    } else {
+        eprintln!(
+            "[ERR] Somehow created a non-unicode path {path:?}! This should not have happened!"
+        );
+    }
 }
