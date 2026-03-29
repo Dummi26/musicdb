@@ -1,6 +1,6 @@
 use std::{
     cmp::Ordering,
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     fs,
     io::Write,
     path::{Path, PathBuf},
@@ -10,11 +10,11 @@ use std::{
 
 use id3::TagLike;
 use musicdb_lib::data::{
+    CoverId, DatabaseLocation, GeneralData,
     album::Album,
     artist::Artist,
     database::{Cover, Database},
     song::Song,
-    CoverId, DatabaseLocation, GeneralData,
 };
 
 fn main() {
@@ -23,27 +23,50 @@ fn main() {
     let lib_dir = if let Some(arg) = args.next() {
         arg
     } else {
-        eprintln!("usage: musicdb-filldb <library root> [--help] [--skip-duration] [--custom-files <path>] [... (see --help)]");
+        eprintln!(
+            "usage: musicdb-filldb <library root> [--help] [--skip-duration] [--custom-files <path>] [... (see --help)]"
+        );
         std::process::exit(1);
     };
     let mut bad_arg = false;
     let mut dbdir = ".".to_owned();
     let mut skip_duration = false;
+    let mut verbosity = 0;
     let mut custom_files = None;
     let mut artist_img = false;
     let mut export_custom_files = None;
+
+    let mut stats = false;
+
+    let mut year_counts = BTreeMap::new();
+    let mut genre_counts = BTreeMap::new();
+
     loop {
         match args.next() {
             None => break,
             Some(arg) => match arg.as_str() {
+                "-v" | "--verbose" => verbosity += 1,
                 "--help" => {
+                    eprintln!(
+                        "-v, --verbose: Generate more warnings (can be specified multiple times)"
+                    );
                     eprintln!("--dbdir <path>: Save dbfile in the <path> directory (default: `.`)");
-                    eprintln!("--skip-duration: Don't try to figure out the songs duration from file contents. This means mp3 files with the Duration field unset will have a duration of 0.");
-                    eprintln!("--custom-files <path>: server will use <path> as its custom-files directory. Additional data is loaded from here.");
-                    eprintln!("--cf-artist-img: For each artist, check for an <artist>.{{jpg,png,...}} file. If it exists, add ImageExt=<extension> tag to the artist, so the image can be loaded by clients later.");
-                    eprintln!("--export-custom-files <path>: Create <path> as a directory containing metadata from the *existing* dbfile, so that it can be loaded again using --custom-files <same-path>.");
+                    eprintln!(
+                        "--skip-duration: Don't try to figure out the songs duration from file contents. This means mp3 files with the Duration field unset will have a duration of 0."
+                    );
+                    eprintln!(
+                        "--custom-files <path>: Server will use <path> as its custom-files directory. Additional data is loaded from here."
+                    );
+                    eprintln!(
+                        "--cf-artist-img: For each artist, check for an <artist>.{{jpg,png,...}} file. If it exists, add ImageExt=<extension> tag to the artist, so the image can be loaded by clients later."
+                    );
+                    eprintln!(
+                        "--export-custom-files <path>: Create <path> as a directory containing metadata from the *existing* dbfile, so that it can be loaded again using --custom-files <same-path>."
+                    );
+                    eprintln!("--stats, --statistics: Output statistics before exiting.");
                     return;
                 }
+                "--stats" | "--statistics" => stats = true,
                 "--dbdir" => {
                     if let Some(dir) = args.next() {
                         dbdir = dir;
@@ -77,11 +100,9 @@ fn main() {
             },
         }
     }
-    if export_custom_files.is_some() {
-        if skip_duration || custom_files.is_some() || artist_img {
-            bad_arg = true;
-            eprintln!("--export-custom-files :: incompatible with other arguments except --dbdir!");
-        }
+    if export_custom_files.is_some() && (skip_duration || custom_files.is_some() || artist_img) {
+        bad_arg = true;
+        eprintln!("--export-custom-files :: incompatible with other arguments except --dbdir!");
     }
     if bad_arg {
         return;
@@ -121,7 +142,7 @@ fn main() {
     let mut database = Database::new_empty_in_dir(PathBuf::from(dbdir), PathBuf::from(&lib_dir));
     let unknown_artist = database.add_artist_new(Artist {
         id: 0,
-        name: format!("<unknown>"),
+        name: "<unknown>".to_owned(),
         cover: None,
         albums: vec![],
         singles: vec![],
@@ -148,7 +169,7 @@ fn main() {
                 (None, Some(_)) => Ordering::Less,
                 (None, None) => Ordering::Equal,
             }
-            .then_with(|| path1.cmp(&path2))
+            .then_with(|| path1.cmp(path2))
         })
     });
     for (i, (song_path, song_file_metadata, song_tags)) in songs.into_iter().enumerate() {
@@ -173,9 +194,19 @@ fn main() {
         }
         if let Some(year) = song_tags.year() {
             general.tags.push(format!("SRCFILE:Year={year}"));
+            if stats {
+                *year_counts.entry(year).or_insert(0) += 1;
+            }
+        } else if verbosity > 0 {
+            eprintln!("Missing year tag for file {}.", song_path.display());
         }
         if let Some(genre) = song_tags.genre_parsed() {
             general.tags.push(format!("SRCFILE:Genre={genre}"));
+            if stats {
+                *genre_counts.entry(genre.into_owned()).or_insert(0) += 1;
+            }
+        } else if verbosity > 0 {
+            eprintln!("Missing genre tag for file {}.", song_path.display());
         }
         let (artist_id, album_id) = if let Some(artist) = song_tags
             .album_artist()
@@ -234,7 +265,7 @@ fn main() {
         let path = song_path.strip_prefix(&lib_dir).unwrap();
         let title = song_tags
             .title()
-            .map_or(None, |title| {
+            .and_then(|title| {
                 if title.trim().is_empty() {
                     None
                 } else {
@@ -289,10 +320,12 @@ fn main() {
                 dur as u64
             } else {
                 if skip_duration {
-                    eprintln!(
-                        "Duration of song {:?} not found in tags, using 0 instead!",
-                        song_path
-                    );
+                    if verbosity > 0 {
+                        eprintln!(
+                            "Duration of song {:?} not found in tags, using 0 instead!",
+                            song_path
+                        );
+                    }
                     0
                 } else {
                     match mp3_duration::from_path(&song_path) {
@@ -336,16 +369,16 @@ fn main() {
     let mut single_images = HashMap::new();
     for (i1, (_artist, (artist_id, albums))) in artists.iter().enumerate() {
         eprint!("\rartist {}/{}", i1 + 1, artists.len());
-        for (_album, (album_id, album_dir)) in albums {
-            if let Some(album_dir) = album_dir {
-                if let Some(cover_id) = get_cover(
+        for (album_id, album_dir) in albums.values() {
+            if let Some(album_dir) = album_dir
+                && let Some(cover_id) = get_cover(
                     &mut database,
                     &lib_dir,
                     album_dir,
                     &mut multiple_cover_options,
-                ) {
-                    database.albums_mut().get_mut(album_id).unwrap().cover = Some(cover_id);
-                }
+                )
+            {
+                database.albums_mut().get_mut(album_id).unwrap().cover = Some(cover_id);
             }
         }
         if let Some(artist) = database.artists().get(artist_id) {
@@ -394,24 +427,21 @@ fn main() {
                 }
                 Ok(ls) => {
                     let mut files = HashMap::new();
-                    for entry in ls {
-                        if let Ok(entry) = entry {
-                            let p = entry.path();
-                            if let Some(base) = p.file_stem().and_then(|v| v.to_str()) {
-                                if let Some(ext) = entry
-                                    .path()
-                                    .extension()
-                                    .and_then(|v| v.to_str())
-                                    .filter(|v| {
-                                        matches!(v.to_lowercase().as_str(), "png" | "jpg" | "jpeg")
-                                    })
-                                {
-                                    if let Some(old) = files.insert(base.to_owned(), ext.to_owned())
-                                    {
-                                        eprintln!("[warn] Not using file {base}.{old}, because {base}.{ext} was found.");
-                                    }
-                                }
-                            }
+                    for entry in ls.flatten() {
+                        let p = entry.path();
+                        if let Some(base) = p.file_stem().and_then(|v| v.to_str())
+                            && let Some(ext) = entry
+                                .path()
+                                .extension()
+                                .and_then(|v| v.to_str())
+                                .filter(|v| {
+                                    matches!(v.to_lowercase().as_str(), "png" | "jpg" | "jpeg")
+                                })
+                            && let Some(old) = files.insert(base.to_owned(), ext.to_owned())
+                        {
+                            eprintln!(
+                                "[warn] Not using file {base}.{old}, because {base}.{ext} was found."
+                            );
                         }
                     }
                     for artist in database.artists_mut().values_mut() {
@@ -423,7 +453,9 @@ fn main() {
                 }
             }
         }
-        eprintln!("[info] Searching for <artist>.tags, <artist>.d/<album>.tags, <artist>.d/singles.d/<song>.tags, <artist>.d/<album>.d/<song>.tags in custom-files dir...");
+        eprintln!(
+            "[info] Searching for <artist>.tags, <artist>.d/<album>.tags, <artist>.d/singles.d/<song>.tags, <artist>.d/<album>.d/<song>.tags in custom-files dir..."
+        );
         let l = database.artists().len() + database.albums().len() + database.songs().len();
         let mut cc = 0;
         let mut c = 0;
@@ -458,14 +490,14 @@ fn main() {
                     for song in artist.singles.iter() {
                         // <artist>.d/singles/<song>.tags
                         cc += 1;
-                        if let Some(song) = songs.get_mut(song) {
-                            if let Ok(info) = fs::read_to_string(dir.join(format!(
+                        if let Some(song) = songs.get_mut(song)
+                            && let Ok(info) = fs::read_to_string(dir.join(format!(
                                 "{}.tags",
                                 normalize_to_file_path_component_for_custom_files(&song.title)
-                            ))) {
-                                c += 1;
-                                push_tags(&info, &mut song.general.tags);
-                            }
+                            )))
+                        {
+                            c += 1;
+                            push_tags(&info, &mut song.general.tags);
                         }
                     }
                 }
@@ -516,6 +548,64 @@ fn main() {
     eprintln!("saving dbfile...");
     database.save_database(None).unwrap();
     eprintln!("done!");
+    if stats {
+        eprintln!();
+        eprintln!("=== Genre Statistics ===");
+        let mut genre_counts = genre_counts
+            .iter()
+            .map(|(genre, count)| (genre, *count))
+            .collect::<Vec<_>>();
+        genre_counts.sort_by(|(_, count_1), (_, count_2)| count_2.cmp(count_1));
+        for (genre, count) in genre_counts {
+            eprintln!("{genre}: {count}");
+        }
+        eprintln!();
+        eprintln!("=== Year Statistics ===");
+        if let Some((&min_year, _)) = year_counts.first_key_value()
+            && let Some((&max_year, _)) = year_counts.last_key_value()
+        {
+            let width = year_counts
+                .values()
+                .copied()
+                .max()
+                .unwrap_or(0)
+                .to_string()
+                .len();
+            for i in min_year / 10..=max_year / 10 {
+                let start = 10 * i;
+                let end = 10 * (1 + i);
+                let total = year_counts
+                    .range(start..end)
+                    .map(|(_, c)| *c)
+                    .sum::<usize>()
+                    .to_string();
+                eprint!(
+                    "{}-{} | ∑: {}{}",
+                    start,
+                    end - 1,
+                    " ".repeat(width + 1 - total.len()),
+                    total,
+                );
+                for y in start..end {
+                    let count = year_counts.get(&y).copied().unwrap_or(0);
+                    let (pre, post) = if count == 0 {
+                        ("\x1b[90m", "\x1b[0m")
+                    } else {
+                        ("", "")
+                    };
+                    let count = count.to_string();
+                    eprint!(
+                        ", {}{y}: {}{}{}",
+                        pre,
+                        " ".repeat(width - count.len()),
+                        count,
+                        post
+                    );
+                }
+                eprintln!();
+            }
+        }
+    }
 }
 
 fn get_all_files_in_dir(dir: impl AsRef<Path>) -> Vec<PathBuf> {
@@ -556,27 +646,23 @@ fn get_cover(
     let mut multiple = false;
     let mut cover = None;
     if let Ok(files) = fs::read_dir(&abs_dir) {
-        for file in files {
-            if let Ok(file) = file {
-                let path = file.path();
-                if let Ok(metadata) = path.metadata() {
-                    if metadata.is_file() {
-                        if path.extension().and_then(|v| v.to_str()).is_some_and(|v| {
-                            matches!(v.to_lowercase().as_str(), "png" | "jpg" | "jpeg")
-                        }) {
-                            if cover.is_none()
-                                || cover
-                                    .as_ref()
-                                    .is_some_and(|(_, size)| *size < metadata.len())
-                            {
-                                if cover.is_some() {
-                                    multiple = true;
-                                }
-                                cover = Some((path, metadata.len()));
-                            }
-                        }
-                    }
+        for file in files.flatten() {
+            let path = file.path();
+            if let Ok(metadata) = path.metadata()
+                && metadata.is_file()
+                && path
+                    .extension()
+                    .and_then(|v| v.to_str())
+                    .is_some_and(|v| matches!(v.to_lowercase().as_str(), "png" | "jpg" | "jpeg"))
+                && (cover.is_none()
+                    || cover
+                        .as_ref()
+                        .is_some_and(|(_, size)| *size < metadata.len()))
+            {
+                if cover.is_some() {
+                    multiple = true;
                 }
+                cover = Some((path, metadata.len()));
             }
         }
     }
@@ -584,7 +670,7 @@ fn get_cover(
         multiple_options_list.push(abs_dir.as_ref().to_path_buf());
     }
     if let Some((path, _)) = cover {
-        let rel_path = path.strip_prefix(&lib_dir).unwrap().to_path_buf();
+        let rel_path = path.strip_prefix(lib_dir).unwrap().to_path_buf();
         Some(database.add_cover_new(Cover {
             location: DatabaseLocation {
                 rel_path: rel_path.clone(),
@@ -606,6 +692,8 @@ fn normalize_to_file_path_component_for_custom_files(str: &str) -> String {
         .replace('\n', "%n")
 }
 
+// may NOT set \! to a valid escape sequence, as this is used to
+// identify db-internal "tags" such as the Song-/Album-/Artist-ID
 fn normalize_tag_to_str(str: &str) -> String {
     str.replace('\\', "\\S")
         .replace('\n', "\\n")
@@ -620,9 +708,10 @@ fn normalized_str_to_tag(str: &str) -> String {
 
 fn export_to_custom_files_dir(dbdir: String, path: PathBuf) {
     let database = Database::load_database_from_dir(dbdir.into(), PathBuf::new()).unwrap();
-    for artist in database.artists().values() {
+    for (artist_id, artist) in database.artists().iter() {
         export_custom_files_tags(
             &artist.general.tags,
+            &gen_internals(Some(*artist_id), artist.cover),
             &path.join(format!(
                 "{}.tags",
                 normalize_to_file_path_component_for_custom_files(&artist.name)
@@ -634,10 +723,11 @@ fn export_to_custom_files_dir(dbdir: String, path: PathBuf) {
         ));
         {
             let dir = dir.join("singles");
-            for song in artist.singles.iter() {
-                if let Some(song) = database.songs().get(song) {
+            for song_id in artist.singles.iter() {
+                if let Some(song) = database.songs().get(song_id) {
                     export_custom_files_tags(
                         &song.general.tags,
+                        &gen_internals(Some(*song_id), song.cover),
                         &dir.join(format!(
                             "{}.tags",
                             normalize_to_file_path_component_for_custom_files(&song.title,)
@@ -646,10 +736,11 @@ fn export_to_custom_files_dir(dbdir: String, path: PathBuf) {
                 }
             }
         }
-        for album in artist.albums.iter() {
-            if let Some(album) = database.albums().get(album) {
+        for album_id in artist.albums.iter() {
+            if let Some(album) = database.albums().get(album_id) {
                 export_custom_files_tags(
                     &album.general.tags,
+                    &gen_internals(Some(*album_id), album.cover),
                     &dir.join(format!(
                         "{}.tags",
                         normalize_to_file_path_component_for_custom_files(&album.name,)
@@ -659,10 +750,11 @@ fn export_to_custom_files_dir(dbdir: String, path: PathBuf) {
                     "{}.d",
                     normalize_to_file_path_component_for_custom_files(&album.name,)
                 ));
-                for song in album.songs.iter() {
-                    if let Some(song) = database.songs().get(song) {
+                for song_id in album.songs.iter() {
+                    if let Some(song) = database.songs().get(song_id) {
                         export_custom_files_tags(
                             &song.general.tags,
+                            &gen_internals(Some(*song_id), song.cover),
                             &dir.join(format!(
                                 "{}.tags",
                                 normalize_to_file_path_component_for_custom_files(&song.title,)
@@ -674,15 +766,16 @@ fn export_to_custom_files_dir(dbdir: String, path: PathBuf) {
         }
     }
 }
-fn export_custom_files_tags(tags: &Vec<String>, path: &Path) {
+fn export_custom_files_tags(tags: &[String], internals: &[String], path: &Path) {
     if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
         let mut normalized_tags = None;
         fn mk_normalized_tags<'a>(
-            normalized_tags: &'a mut Option<Vec<String>>,
-            tags: &'_ Vec<String>,
-        ) -> &'a Vec<String> {
+            normalized_tags: &'a mut Option<String>,
+            tags: &[String],
+            internals: &[String],
+        ) -> &'a String {
             &*normalized_tags.get_or_insert_with(|| {
-                let mut tags = tags.clone();
+                let mut tags = Vec::from(tags);
                 let mut rm = Vec::new();
                 for (i, srcfile_tag_stripped) in tags
                     .iter()
@@ -710,7 +803,14 @@ fn export_custom_files_tags(tags: &Vec<String>, path: &Path) {
                 for i in rm.into_iter().rev() {
                     tags.remove(i);
                 }
-                tags
+                tags.iter()
+                    .map(|tag| normalize_tag_to_str(tag) + "\n")
+                    .chain(
+                        internals
+                            .iter()
+                            .map(|tag| format!("\\!{}\n", normalize_tag_to_str(tag))),
+                    )
+                    .collect::<String>()
             })
         }
         let allow_write = match fs::exists(path) {
@@ -721,10 +821,7 @@ fn export_custom_files_tags(tags: &Vec<String>, path: &Path) {
             Ok(false) => true,
             Ok(true) => {
                 if fs::read_to_string(path).is_ok_and(|file| {
-                    file.lines()
-                        .map(|str| normalized_str_to_tag(str))
-                        .collect::<Vec<String>>()
-                        == *mk_normalized_tags(&mut normalized_tags, tags)
+                    file == *mk_normalized_tags(&mut normalized_tags, tags, internals)
                 }) {
                     // file contains the same tags as database, don't write,
                     // but don't create backup either
@@ -764,25 +861,20 @@ fn export_custom_files_tags(tags: &Vec<String>, path: &Path) {
                 }
             }
         };
-        if allow_write {
-            if !mk_normalized_tags(&mut normalized_tags, tags).is_empty() {
-                if let Some(p) = path.parent() {
-                    if let Err(e) = fs::create_dir_all(p) {
-                        eprintln!(
-                            "Could not create directory to contain {}: {e}",
-                            path.display()
-                        );
-                    }
-                }
-                if let Err(e) = fs::write(
-                    path,
-                    mk_normalized_tags(&mut normalized_tags, tags)
-                        .iter()
-                        .map(|tag| normalize_tag_to_str(tag) + "\n")
-                        .collect::<String>(),
-                ) {
-                    eprintln!("Could not save {}: {e}", path.display());
-                }
+        if allow_write && !mk_normalized_tags(&mut normalized_tags, tags, internals).is_empty() {
+            if let Some(p) = path.parent()
+                && let Err(e) = fs::create_dir_all(p)
+            {
+                eprintln!(
+                    "Could not create directory to contain {}: {e}",
+                    path.display()
+                );
+            }
+            if let Err(e) = fs::write(
+                path,
+                mk_normalized_tags(&mut normalized_tags, tags, internals),
+            ) {
+                eprintln!("Could not save {}: {e}", path.display());
             }
         }
     } else {
@@ -790,4 +882,15 @@ fn export_custom_files_tags(tags: &Vec<String>, path: &Path) {
             "[ERR] Somehow created a non-unicode path {path:?}! This should not have happened!"
         );
     }
+}
+
+// TODO: load these tags, infer album and artist id from parent directories in the structure (will probably happen with no further changes required)
+fn gen_internals(id: Option<u64>, cover: Option<CoverId>) -> Vec<String> {
+    [
+        id.map(|id| format!("id={id}")),
+        cover.map(|id| format!("cover={id}")),
+    ]
+    .into_iter()
+    .flatten()
+    .collect()
 }
