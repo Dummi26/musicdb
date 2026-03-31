@@ -267,6 +267,12 @@ fn main() {
             .title()
             .and_then(|title| {
                 if title.trim().is_empty() {
+                    if verbosity > 0 {
+                        eprintln!(
+                            "Title of song {:?} not found in tags, using {} (from filename) instead!",
+                            song_path.display(), song_path.file_stem().unwrap().display(),
+                        );
+                    }
                     None
                 } else {
                     Some(title.to_string())
