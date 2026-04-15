@@ -1,13 +1,13 @@
-use std::sync::{atomic::AtomicBool, Arc};
+use std::sync::{Arc, atomic::AtomicBool};
 
 use musicdb_lib::data::ArtistId;
 use speedy2d::{color::Color, dimen::Vec2, image::ImageHandle, shape::Rectangle};
 
 use crate::{
-    gui::{rect_from_rel, DrawInfo, GuiAction, GuiElem, GuiElemCfg, GuiServerImage},
+    gui::{DrawInfo, GuiAction, GuiElem, GuiElemCfg, GuiServerImage, rect_from_rel},
     gui_anim::AnimationController,
     gui_base::Button,
-    gui_playback::{get_right_x, image_display, CurrentInfo},
+    gui_playback::{CurrentInfo, get_right_x, image_display},
     gui_playpause::PlayPause,
     gui_text::{AdvancedLabel, Label},
 };
@@ -126,7 +126,7 @@ impl GuiElem for IdleDisplay {
             self.c_top_label.content = if let Some(song) = self.current_info.current_song {
                 info.gui_config
                     .idle_top_text
-                    .gen(&info.database, info.database.get_song(&song))
+                    .gen_new(&info.database, info.database.get_song(&song))
             } else {
                 vec![]
             };
@@ -134,7 +134,7 @@ impl GuiElem for IdleDisplay {
             self.c_side1_label.content = if let Some(song) = self.current_info.current_song {
                 info.gui_config
                     .idle_side1_text
-                    .gen(&info.database, info.database.get_song(&song))
+                    .gen_new(&info.database, info.database.get_song(&song))
             } else {
                 vec![]
             };
@@ -142,7 +142,7 @@ impl GuiElem for IdleDisplay {
             self.c_side2_label.content = if let Some(song) = self.current_info.current_song {
                 info.gui_config
                     .idle_side2_text
-                    .gen(&info.database, info.database.get_song(&song))
+                    .gen_new(&info.database, info.database.get_song(&song))
             } else {
                 vec![]
             };

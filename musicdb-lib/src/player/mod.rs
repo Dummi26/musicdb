@@ -1,3 +1,5 @@
+#[cfg(feature = "playback-via-mpv")]
+pub mod mpv;
 #[cfg(feature = "playback-via-playback-rs")]
 pub mod playback_rs;
 #[cfg(feature = "playback-via-rodio")]
@@ -8,14 +10,18 @@ pub mod sleep;
 pub type PlayerBackendFeat<T> = playback_rs::PlayerBackendPlaybackRs<T>;
 #[cfg(feature = "playback-via-rodio")]
 pub type PlayerBackendFeat<T> = rodio::PlayerBackendRodio<T>;
+#[cfg(feature = "playback-via-sleep")]
+pub type PlayerBackendFeat<T> = sleep::PlayerBackendSleep<T>;
+#[cfg(feature = "playback-via-mpv")]
+pub type PlayerBackendFeat<T> = mpv::PlayerBackendMpv<T>;
 
 use std::{collections::HashMap, ffi::OsStr, sync::Arc};
 
 use crate::{
     data::{
+        SongId,
         database::Database,
         song::{CachedData, Song},
-        SongId,
     },
     server::Action,
 };

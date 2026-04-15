@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{BTreeMap, HashMap, VecDeque},
     io::{Read, Write},
     path::PathBuf,
 };
@@ -158,6 +158,34 @@ where
     {
         let len = ToFromBytes::from_bytes(s)?;
         let mut o = Self::with_capacity(len);
+        for _ in 0..len {
+            o.insert(ToFromBytes::from_bytes(s)?, ToFromBytes::from_bytes(s)?);
+        }
+        Ok(o)
+    }
+}
+impl<K, V> ToFromBytes for BTreeMap<K, V>
+where
+    K: ToFromBytes + std::cmp::Ord,
+    V: ToFromBytes,
+{
+    fn to_bytes<T>(&self, s: &mut T) -> Result<(), std::io::Error>
+    where
+        T: Write,
+    {
+        self.len().to_bytes(s)?;
+        for (key, val) in self.iter() {
+            key.to_bytes(s)?;
+            val.to_bytes(s)?;
+        }
+        Ok(())
+    }
+    fn from_bytes<T>(s: &mut T) -> Result<Self, std::io::Error>
+    where
+        T: Read,
+    {
+        let len = ToFromBytes::from_bytes(s)?;
+        let mut o = Self::new();
         for _ in 0..len {
             o.insert(ToFromBytes::from_bytes(s)?, ToFromBytes::from_bytes(s)?);
         }

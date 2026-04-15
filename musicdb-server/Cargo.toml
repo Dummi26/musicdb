@@ -1,7 +1,7 @@
 [package]
 name = "musicdb-server"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -27,5 +27,6 @@ website = ["dep:tokio", "dep:rocket", "dep:html-escape"]
 playback = []
 default-playback = ["playback", "musicdb-lib/default-playback"]
 playback-via-sleep = ["playback", "musicdb-lib/playback-via-sleep"]
+playback-via-mpv = ["playback", "musicdb-lib/playback-via-mpv"]
 playback-via-playback-rs = ["playback", "musicdb-lib/playback-via-playback-rs"]
 playback-via-rodio = ["playback", "musicdb-lib/playback-via-rodio"]

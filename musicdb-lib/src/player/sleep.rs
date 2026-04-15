@@ -5,7 +5,7 @@ use std::{
 };
 
 use crate::{
-    data::{song::Song, SongId},
+    data::{SongId, song::Song},
     server::Command,
 };
 
@@ -28,6 +28,14 @@ enum SongFinished {
 
 impl<T> PlayerBackendSleep<T> {
     pub fn new(
+        command_sender: std::sync::mpsc::Sender<(Command, Option<u64>)>,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        Self::new_with_optional_command_sending(Some(command_sender))
+    }
+    pub fn new_without_command_sending() -> Result<Self, Box<dyn std::error::Error>> {
+        Self::new_with_optional_command_sending(None)
+    }
+    pub fn new_with_optional_command_sending(
         command_sender: Option<std::sync::mpsc::Sender<(Command, Option<u64>)>>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         Ok(Self {

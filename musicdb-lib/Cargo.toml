@@ -1,7 +1,7 @@
 [package]
 name = "musicdb-lib"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [dependencies]
 base64 = "0.22.1"
@@ -18,5 +18,6 @@ playback = []
 default-playback = ["playback-via-playback-rs"]
 # default-playback = ["playback-via-rodio"]
 playback-via-sleep = ["playback"]
+playback-via-mpv = ["playback"]
 playback-via-playback-rs = ["playback", "dep:playback-rs"]
 playback-via-rodio = ["playback", "dep:rodio"]

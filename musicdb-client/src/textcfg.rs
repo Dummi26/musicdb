@@ -3,7 +3,7 @@ use std::{
     str::{Chars, FromStr},
 };
 
-use musicdb_lib::data::{database::Database, song::Song, CoverId, GeneralData};
+use musicdb_lib::data::{CoverId, GeneralData, database::Database, song::Song};
 use speedy2d::color::Color;
 
 use crate::gui_text::{AdvancedContent, Content, ImageSource};
@@ -38,7 +38,7 @@ pub enum TextPart {
     ImgCustom(TextBuilder),
 }
 impl TextBuilder {
-    pub fn gen(
+    pub fn gen_new(
         &self,
         db: &Database,
         current_song: Option<&Song>,
@@ -151,40 +151,39 @@ impl TextBuilder {
                     }
                 }
                 TextPart::TagEq(p) => {
-                    for (i, gen) in all_general(db, &current_song).into_iter().enumerate() {
-                        if let Some(_) = gen.and_then(|gen| gen.tags.iter().find(|t| *t == p)) {
-                            push!(match i {
-                                0 => 's',
-                                1 => 'a',
-                                2 => 'A',
-                                _ => unreachable!("array length should be 3"),
-                            }
-                            .to_string());
+                    for (i, g) in all_general(db, &current_song).into_iter().enumerate() {
+                        if let Some(_) = g.and_then(|g| g.tags.iter().find(|t| *t == p)) {
+                            push!(
+                                match i {
+                                    0 => 's',
+                                    1 => 'a',
+                                    2 => 'A',
+                                    _ => unreachable!("array length should be 3"),
+                                }
+                                .to_string()
+                            );
                             break;
                         }
                     }
                 }
                 TextPart::TagEnd(p) => {
-                    for gen in all_general(db, &current_song) {
-                        if let Some(t) =
-                            gen.and_then(|gen| gen.tags.iter().find(|t| t.starts_with(p)))
-                        {
+                    for g in all_general(db, &current_song) {
+                        if let Some(t) = g.and_then(|g| g.tags.iter().find(|t| t.starts_with(p))) {
                             push!(t[p.len()..].to_owned());
                             break;
                         }
                     }
                 }
                 TextPart::TagContains(p) => {
-                    for gen in all_general(db, &current_song) {
-                        if let Some(t) = gen.and_then(|gen| gen.tags.iter().find(|t| t.contains(p)))
-                        {
+                    for g in all_general(db, &current_song) {
+                        if let Some(t) = g.and_then(|g| g.tags.iter().find(|t| t.contains(p))) {
                             push!(t.to_owned());
                             break;
                         }
                     }
                 }
                 TextPart::If(condition, yes, no) => {
-                    if !condition.gen(db, current_song).is_empty() {
+                    if !condition.gen_new(db, current_song).is_empty() {
                         yes.gen_to(db, current_song, out, line, scale, align, color);
                     } else {
                         no.gen_to(db, current_song, out, line, scale, align, color);
@@ -195,7 +194,7 @@ impl TextBuilder {
                 }
                 TextPart::ImgCustom(path) => {
                     push_img!(ImageSource::CustomFile(
-                        path.gen(db, current_song)
+                        path.gen_new(db, current_song)
                             .into_iter()
                             .flat_map(|v| v.into_iter().map(|(v, _, _)| v.to_string()))
                             .collect()
@@ -326,7 +325,7 @@ impl TextBuilder {
                                     None => {
                                         return Err(TextBuilderParseError::InvalidImageSourceName(
                                             src,
-                                        ))
+                                        ));
                                     }
                                     Some(':') => break,
                                     Some(c) => src.push(c),
@@ -349,7 +348,7 @@ impl TextBuilder {
                                 }
                                 "CustomFile" => TextPart::ImgCustom(Self::from_chars(chars)?),
                                 _ => {
-                                    return Err(TextBuilderParseError::InvalidImageSourceName(src))
+                                    return Err(TextBuilderParseError::InvalidImageSourceName(src));
                                 }
                             });
                         }
@@ -419,7 +418,10 @@ impl Display for TextBuilderParseError {
                 write!(f, "Unknown tag mode '{mode}': Allowed are only _, > or =.")
             }
             Self::TooFewCharsForColor => write!(f, "Too few chars for color: Syntax is \\cRRGGBB."),
-            Self::ColorNotHex => write!(f, "Color value wasn't a hex number! Syntax is \\cRRGGBB, where R, G, and B are values from 0-9 and A-F (hex 0-F)."),
+            Self::ColorNotHex => write!(
+                f,
+                "Color value wasn't a hex number! Syntax is \\cRRGGBB, where R, G, and B are values from 0-9 and A-F (hex 0-F)."
+            ),
             Self::CouldntParse(v, t) => write!(f, "Couldn't parse value '{v}' to type '{t}'."),
             Self::InvalidImageSourceName(name) => write!(f, "Invalid image source name: '{name}'."),
             Self::InvalidImageCoverId(id) => write!(f, "Invalid image cover id: '{id}'."),

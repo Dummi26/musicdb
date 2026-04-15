@@ -3,7 +3,7 @@ pub mod get;
 use std::{
     io::{BufRead as _, BufReader, Read, Write},
     net::TcpListener,
-    sync::{mpsc, Arc, Mutex},
+    sync::{Arc, Mutex, mpsc},
     thread,
     time::Duration,
 };
@@ -15,12 +15,12 @@ use crate::player::Player;
 use crate::server::get::handle_one_connection_as_get;
 use crate::{
     data::{
+        AlbumId, ArtistId, SongId,
         album::Album,
         artist::Artist,
         database::{Cover, Database, UpdateEndpoint},
         queue::Queue,
         song::Song,
-        AlbumId, ArtistId, SongId,
     },
     load::ToFromBytes,
 };
@@ -284,23 +284,15 @@ pub fn run_server_caching_thread_opt(
 ) {
     #[cfg(not(feature = "playback"))]
     if play_audio {
-        panic!("Can't run the server: cannot play audio because the `playback` feature was disabled when compiling, but `play_audio` was set to `true`!");
+        panic!(
+            "Can't run the server: cannot play audio because the `playback` feature was disabled when compiling, but `play_audio` was set to `true`!"
+        );
     }
 
     use std::time::Instant;
 
     use crate::data::cache_manager::CacheManager;
-    #[cfg(feature = "playback-via-playback-rs")]
-    use crate::player::playback_rs::PlayerBackendPlaybackRs;
-    #[cfg(feature = "playback-via-rodio")]
-    use crate::player::rodio::PlayerBackendRodio;
-    #[cfg(feature = "playback-via-sleep")]
-    use crate::player::sleep::PlayerBackendSleep;
-    #[cfg(any(
-        feature = "playback",
-        feature = "playback-via-playback-rs",
-        feature = "playback-via-rodio"
-    ))]
+    #[cfg(any(feature = "playback"))]
     use crate::player::PlayerBackend;
 
     // commands sent to this will be handeled later in this function in an infinite loop.
@@ -309,12 +301,8 @@ pub fn run_server_caching_thread_opt(
 
     #[cfg(feature = "playback")]
     let mut player = if play_audio {
-        #[cfg(feature = "playback-via-sleep")]
-        let backend = PlayerBackendSleep::new(Some(command_sender.clone())).unwrap();
-        #[cfg(feature = "playback-via-playback-rs")]
-        let backend = PlayerBackendPlaybackRs::new(command_sender.clone()).unwrap();
-        #[cfg(feature = "playback-via-rodio")]
-        let backend = PlayerBackendRodio::new(command_sender.clone()).unwrap();
+        use crate::player::PlayerBackendFeat;
+        let backend = PlayerBackendFeat::new(command_sender.clone()).unwrap();
         Some(Player::new(backend))
     } else {
         None
@@ -336,42 +324,46 @@ pub fn run_server_caching_thread_opt(
             Ok(v) => {
                 let command_sender = command_sender.clone();
                 let db = Arc::clone(&database);
-                thread::spawn(move || loop {
-                    if let Ok((connection, _con_addr)) = v.accept() {
-                        let command_sender = command_sender.clone();
-                        let db = Arc::clone(&db);
-                        thread::spawn(move || {
-                            // each connection first has to send one line to tell us what it wants
-                            let mut connection = BufReader::new(connection);
-                            let mut line = String::new();
-                            if connection.read_line(&mut line).is_ok() {
-                                // based on that line, we adjust behavior
-                                match line.as_str().trim() {
-                                    // sends all updates to this connection and reads commands from it
-                                    "main" => {
-                                        let connection = connection.into_inner();
-                                        _ = handle_one_connection_as_main(
-                                            db,
-                                            &mut connection.try_clone().unwrap(),
-                                            connection,
+                thread::spawn(move || {
+                    loop {
+                        if let Ok((connection, _con_addr)) = v.accept() {
+                            let command_sender = command_sender.clone();
+                            let db = Arc::clone(&db);
+                            thread::spawn(move || {
+                                // each connection first has to send one line to tell us what it wants
+                                let mut connection = BufReader::new(connection);
+                                let mut line = String::new();
+                                if connection.read_line(&mut line).is_ok() {
+                                    // based on that line, we adjust behavior
+                                    match line.as_str().trim() {
+                                        // sends all updates to this connection and reads commands from it
+                                        "main" => {
+                                            let connection = connection.into_inner();
+                                            _ = handle_one_connection_as_main(
+                                                db,
+                                                &mut connection.try_clone().unwrap(),
+                                                connection,
+                                                &command_sender,
+                                            )
+                                        }
+                                        // reads commands from the connection, but (unlike main) doesn't send any updates
+                                        "control" => handle_one_connection_as_control(
+                                            &mut connection,
                                             &command_sender,
-                                        )
-                                    }
-                                    // reads commands from the connection, but (unlike main) doesn't send any updates
-                                    "control" => handle_one_connection_as_control(
-                                        &mut connection,
-                                        &command_sender,
-                                        None,
-                                    ),
-                                    "get" => _ = handle_one_connection_as_get(db, &mut connection),
-                                    _ => {
-                                        _ = connection
-                                            .into_inner()
-                                            .shutdown(std::net::Shutdown::Both)
+                                            None,
+                                        ),
+                                        "get" => {
+                                            _ = handle_one_connection_as_get(db, &mut connection)
+                                        }
+                                        _ => {
+                                            _ = connection
+                                                .into_inner()
+                                                .shutdown(std::net::Shutdown::Both)
+                                        }
                                     }
                                 }
-                            }
-                        });
+                            });
+                        }
                     }
                 });
             }

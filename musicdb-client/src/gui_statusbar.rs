@@ -1,11 +1,11 @@
-use std::sync::{atomic::AtomicBool, Arc};
+use std::sync::{Arc, atomic::AtomicBool};
 
 use speedy2d::{dimen::Vec2, shape::Rectangle};
 
 use crate::{
     gui::{DrawInfo, GuiElem, GuiElemCfg},
     gui_anim::AnimationController,
-    gui_playback::{image_display, CurrentInfo},
+    gui_playback::{CurrentInfo, image_display},
     gui_playpause::PlayPause,
     gui_text::AdvancedLabel,
 };
@@ -61,7 +61,7 @@ impl GuiElem for StatusBar {
             self.c_song_label.content = if let Some(song) = self.current_info.current_song {
                 info.gui_config
                     .status_bar_text
-                    .gen(&info.database, info.database.get_song(&song))
+                    .gen_new(&info.database, info.database.get_song(&song))
             } else {
                 vec![]
             };
