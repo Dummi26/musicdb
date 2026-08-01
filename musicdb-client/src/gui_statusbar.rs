@@ -61,11 +61,11 @@ impl GuiElem for StatusBar {
             self.c_song_label.content = if let Some(song) = self.current_info.current_song {
                 info.gui_config
                     .status_bar_text
-                    .gen_new(&info.database, info.database.get_song(&song))
+                    .gen_new(info.database, info.database.get_song(&song))
             } else {
                 vec![]
             };
-            self.c_song_label.config_mut().redraw = true;
+            self.c_song_label.config_mut().redraw_once();
         }
         if self.current_info.new_cover {
             self.current_info.new_cover = false;

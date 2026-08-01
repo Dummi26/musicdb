@@ -18,14 +18,13 @@ impl Hotkey {
         if self.modifiers == u8::MAX {
             return false;
         }
-        down == false
+        !down
             && key.is_some_and(|v| v == self.key)
-            && (self.modifiers & 0b10 == 1 || (self.modifiers & 0b01 == 1) == modifiers.ctrl())
-            && (self.modifiers & 0b1000 == 1 || (self.modifiers & 0b0100 == 1) == modifiers.shift())
-            && (self.modifiers & 0b100000 == 1
-                || (self.modifiers & 0b010000 == 1) == modifiers.alt())
-            && (self.modifiers & 0b10000000 == 1
-                || (self.modifiers & 0b01000000 == 1) == modifiers.logo())
+            && (self.modifiers & 0b10 > 0 || (self.modifiers & 0b01 > 0) == modifiers.ctrl())
+            && (self.modifiers & 0b1000 > 0 || (self.modifiers & 0b0100 > 0) == modifiers.shift())
+            && (self.modifiers & 0b100000 > 0 || (self.modifiers & 0b010000 > 0) == modifiers.alt())
+            && (self.modifiers & 0b10000000 > 0
+                || (self.modifiers & 0b01000000 > 0) == modifiers.logo())
     }
     /// unlike noshift, this ignores the shift modifier
     pub fn new_key(key: VirtualKeyCode) -> Self {

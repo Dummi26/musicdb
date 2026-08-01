@@ -1,12 +1,12 @@
-use std::sync::{atomic::AtomicBool, Arc, Mutex};
+use std::sync::{Arc, Mutex, atomic::AtomicBool};
 
 use musicdb_lib::server::Action;
 use speedy2d::{
+    Graphics2D,
     color::Color,
     dimen::Vec2,
     shape::Rectangle,
     window::{KeyScancode, ModifiersState, MouseButton, VirtualKeyCode},
-    Graphics2D,
 };
 
 use crate::{
@@ -32,7 +32,7 @@ impl Settings {
         scroll_sensitivity_lines: f64,
         scroll_sensitivity_pages: f64,
     ) -> Self {
-        config.redraw = true;
+        config.redraw_once();
         Self {
             config,
             c_scroll_box: ScrollBox::new(
@@ -53,11 +53,7 @@ impl Settings {
     }
     pub fn get_timeout_val(&self) -> Option<f64> {
         let v = self.c_scroll_box.children.idle_time.children.1.val;
-        if v > 0.0 {
-            Some(v * v)
-        } else {
-            None
-        }
+        if v > 0.0 { Some(v * v) } else { None }
     }
 }
 pub struct SettingsContent {
@@ -125,7 +121,7 @@ impl KeybindInput {
                         b.key,
                     )
                 } else {
-                    format!("")
+                    String::new()
                 },
                 Color::WHITE,
                 None,
@@ -429,7 +425,7 @@ impl SettingsContent {
                                     }
                                     if hours == 0 && minutes < 10 && (seconds > 0 || minutes == 0) {
                                         s.push_str(&seconds.to_string());
-                                        s.push_str("s");
+                                        s.push('s');
                                     } else if s.ends_with(" ") {
                                         s.pop();
                                     }
@@ -532,7 +528,7 @@ impl GuiElem for Settings {
     }
     fn draw(&mut self, info: &mut DrawInfo, _g: &mut Graphics2D) {
         if self.c_scroll_box.children.draw(info) {
-            self.c_scroll_box.config_mut().redraw = true;
+            self.c_scroll_box.config_mut().redraw_once();
         }
         let scrollbox = &mut self.c_scroll_box;
         let background = &mut self.c_background;
@@ -547,9 +543,9 @@ impl GuiElem for Settings {
                 settings_opacity_slider.val as _,
             );
         }
-        if self.config.redraw {
-            self.config.redraw = false;
-            scrollbox.config_mut().redraw = true;
+        if self.config.redraw() {
+            self.config.redrawn();
+            scrollbox.config_mut().redraw_once();
             if scrollbox.children_heights.len() == scrollbox.children.len() {
                 for (i, h) in scrollbox.children_heights.iter_mut().enumerate() {
                     *h = if i == 0 || i >= 8 {
@@ -560,7 +556,7 @@ impl GuiElem for Settings {
                 }
             } else {
                 // try again next frame (scrollbox will autofill the children_heights vec)
-                self.config.redraw = true;
+                self.config.redraw_once();
             }
         }
     }
@@ -591,7 +587,7 @@ pub fn build_keybind_elems(
                         vec![
                             vec![(
                                 AdvancedContent::Text(Content::new(
-                                    format!("{}", v.title),
+                                    v.title.to_string(),
                                     if v.enabled {
                                         Color::WHITE
                                     } else {
@@ -603,7 +599,7 @@ pub fn build_keybind_elems(
                             )],
                             vec![(
                                 AdvancedContent::Text(Content::new(
-                                    format!("{}", v.description),
+                                    v.description.to_string(),
                                     if v.enabled {
                                         Color::LIGHT_GRAY
                                     } else {

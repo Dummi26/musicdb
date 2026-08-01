@@ -4,8 +4,8 @@ use musicdb_lib::{
     data::queue::{QueueContent, QueueFolder},
     server::{Action, Req},
 };
-use speedy2d::{color::Color, dimen::Vec2, shape::Rectangle, window::VirtualKeyCode, Graphics2D};
-use uianimator::{default_animator_f64_quadratic::DefaultAnimatorF64Quadratic, Animator};
+use speedy2d::{Graphics2D, color::Color, dimen::Vec2, shape::Rectangle, window::VirtualKeyCode};
+use uianimator::{Animator, default_animator_f64_quadratic::DefaultAnimatorF64Quadratic};
 
 use crate::{
     gui::{
@@ -54,7 +54,6 @@ pub struct GuiScreen {
     pub c_main_view: Panel<MainView>,
     pub c_context_menu: Option<Box<dyn GuiElem>>,
     pub idle: DefaultAnimatorF64Quadratic,
-    pub idle_prev_val: f32,
     // pub settings: (bool, Option<Instant>),
     pub settings: (bool, Option<Instant>),
     pub last_interaction: Instant,
@@ -172,7 +171,6 @@ impl GuiScreen {
             c_context_menu: None,
             hotkey: Hotkey::new_noshift(VirtualKeyCode::Escape),
             idle: DefaultAnimatorF64Quadratic::new(0.0, 0.67),
-            idle_prev_val: 0.0,
             settings: (false, None),
             last_interaction: Instant::now(),
             idle_timeout: Some(60.0),
@@ -184,17 +182,9 @@ impl GuiScreen {
             let prog = since.elapsed().as_secs_f32() / seconds;
             if prog >= 1.0 {
                 v.1 = None;
-                if v.0 {
-                    1.0
-                } else {
-                    0.0
-                }
+                if v.0 { 1.0 } else { 0.0 }
             } else {
-                if v.0 {
-                    prog
-                } else {
-                    1.0 - prog
-                }
+                if v.0 { prog } else { 1.0 - prog }
             }
         } else if v.0 {
             1.0
@@ -222,12 +212,11 @@ impl GuiScreen {
         self.idle.set_target(0.0, Instant::now());
     }
     fn idle_check(&mut self) {
-        if self.idle.target() == 0.0 {
-            if let Some(dur) = &self.idle_timeout {
-                if self.last_interaction.elapsed().as_secs_f64() > *dur {
-                    self.idle.set_target(1.0, Instant::now());
-                }
-            }
+        if self.idle.target() == 0.0
+            && let Some(dur) = &self.idle_timeout
+            && self.last_interaction.elapsed().as_secs_f64() > *dur
+        {
+            self.idle.set_target(1.0, Instant::now());
         }
     }
 
@@ -253,7 +242,7 @@ impl GuiElem for GuiScreen {
                 ]
                 .into_iter()
                 .chain(self.c_editing_songs.as_mut().map(|v| v.elem_mut()))
-                .chain(self.c_song_adder.as_mut().map(|v| v.elem_mut()).into_iter())
+                .chain(self.c_song_adder.as_mut().map(|v| v.elem_mut()))
                 .chain([
                     self.c_status_bar.elem_mut(),
                     self.c_settings.elem_mut(),
@@ -404,15 +393,12 @@ impl GuiElem for GuiScreen {
         };
         // request_redraw for animations
         let idle_value = self.idle.get_value(info.time) as f32;
-        let idle_changed = self.idle_prev_val != idle_value;
+        let idle_changed = self.idle.target() as f32 != idle_value;
         if idle_changed || idle_exit_anim || self.settings.1.is_some() {
-            self.idle_prev_val = idle_value;
             if let Some(h) = &info.helper {
                 h.request_redraw()
             }
-        }
-        // animations: idle
-        if idle_changed {
+            // animations: idle
             let enable_normal_ui = idle_value < 1.0;
             self.set_normal_ui_enabled(enable_normal_ui);
             if let Some(h) = &info.helper {

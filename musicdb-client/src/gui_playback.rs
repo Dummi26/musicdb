@@ -86,7 +86,7 @@ impl CurrentInfo {
                                                 GuiElemCfg::default(),
                                                 [Label::new(
                                                     GuiElemCfg::default(),
-                                                    format!("Couldn't load cover"),
+                                                    "Couldn't load cover".to_owned(),
                                                     Color::WHITE,
                                                     None,
                                                     Vec2::new(0.5, 0.5),

@@ -3,18 +3,19 @@ use std::{
     collections::HashSet,
     sync::Arc,
     sync::{
+        Mutex,
         atomic::{AtomicBool, AtomicUsize},
-        mpsc, Mutex,
+        mpsc,
     },
 };
 
 use musicdb_lib::data::{
+    AlbumId, ArtistId, GeneralData, SongId,
     album::Album,
     artist::Artist,
     database::Database,
     queue::{Queue, QueueContent},
     song::Song,
-    AlbumId, ArtistId, GeneralData, SongId,
 };
 use regex::{Regex, RegexBuilder};
 use speedy2d::{
@@ -296,12 +297,8 @@ impl GuiElem for LibraryBrowser {
         false
     }
     fn draw(&mut self, info: &mut DrawInfo, _g: &mut speedy2d::Graphics2D) {
-        loop {
-            if let Ok(action) = self.do_something_receiver.try_recv() {
-                action(self);
-            } else {
-                break;
-            }
+        while let Ok(action) = self.do_something_receiver.try_recv() {
+            action(self);
         }
         // search
         let mut search_changed = false;
@@ -396,7 +393,7 @@ impl GuiElem for LibraryBrowser {
         // -
         if self.library_updated {
             self.library_updated = false;
-            self.update_local_library(&info.database, |(_, a), (_, b)| a.name.cmp(&b.name));
+            self.update_local_library(info.database, |(_, a), (_, b)| a.name.cmp(&b.name));
             search_changed = true;
         }
         if search_changed {
@@ -404,7 +401,7 @@ impl GuiElem for LibraryBrowser {
                 s: &LibraryBrowser,
                 pat: &str,
                 regex: &Option<Regex>,
-                search_text: &String,
+                search_text: &str,
                 filter: &Filter,
                 search_gd: &GeneralData,
             ) -> f32 {
@@ -414,7 +411,7 @@ impl GuiElem for LibraryBrowser {
                 if let Some(r) = regex {
                     if s.search_prefers_start_matches {
                         r.find_iter(pat)
-                            .map(|m| match pat[0..m.start()].chars().rev().next() {
+                            .map(|m| match pat[0..m.start()].chars().next_back() {
                                 // found at the start of h, reaches to the end (whole pattern is part of the match)
                                 None if m.end() == pat.len() => 6.0,
                                 // found at start of h
@@ -433,11 +430,7 @@ impl GuiElem for LibraryBrowser {
                             })
                             .fold(0.0, f32::max)
                     } else {
-                        if r.is_match(pat) {
-                            2.0
-                        } else {
-                            0.0
-                        }
+                        if r.is_match(pat) { 2.0 } else { 0.0 }
                     }
                 } else if search_text.is_empty() {
                     1.0
@@ -448,7 +441,7 @@ impl GuiElem for LibraryBrowser {
             let allow_singles = self.search_album.is_empty()
                 && self.filter_albums.lock().unwrap().filters.is_empty();
             self.filter_local_library(
-                &info.database,
+                info.database,
                 |s, artist| {
                     filter(
                         s,
@@ -496,35 +489,35 @@ impl GuiElem for LibraryBrowser {
                     self.selected_popup_state.1 = artists;
                     self.selected_popup_state.2 = albums;
                     self.selected_popup_state.3 = songs;
-                    if artists > 0 || albums > 0 || songs > 0 {
-                        if let Some(text) = match (artists, albums, songs) {
+                    if (artists > 0 || albums > 0 || songs > 0)
+                        && let Some(text) = match (artists, albums, songs) {
                             (0, 0, 0) => None,
 
-                            (0, 0, 1) => Some(format!("1 song selected")),
+                            (0, 0, 1) => Some("1 song selected".to_owned()),
                             (0, 0, s) => Some(format!("{s} songs selected")),
 
-                            (0, 1, 0) => Some(format!("1 album selected")),
+                            (0, 1, 0) => Some("1 album selected".to_owned()),
                             (0, al, 0) => Some(format!("{al} albums selected")),
 
-                            (1, 0, 0) => Some(format!("1 artist selected")),
+                            (1, 0, 0) => Some("1 artist selected".to_owned()),
                             (ar, 0, 0) => Some(format!("{ar} artists selected")),
 
-                            (0, 1, 1) => Some(format!("1 song and 1 album selected")),
+                            (0, 1, 1) => Some("1 song and 1 album selected".to_owned()),
                             (0, 1, s) => Some(format!("{s} songs and 1 album selected")),
                             (0, al, 1) => Some(format!("1 song and {al} albums selected")),
                             (0, al, s) => Some(format!("{s} songs and {al} albums selected")),
 
-                            (1, 0, 1) => Some(format!("1 song and 1 artist selected")),
+                            (1, 0, 1) => Some("1 song and 1 artist selected".to_owned()),
                             (1, 0, s) => Some(format!("{s} songs and 1 artist selected")),
                             (ar, 0, 1) => Some(format!("1 song and {ar} artists selected")),
                             (ar, 0, s) => Some(format!("{s} songs and {ar} artists selected")),
 
-                            (1, 1, 0) => Some(format!("1 album and 1 artist selected")),
+                            (1, 1, 0) => Some("1 album and 1 artist selected".to_owned()),
                             (1, al, 0) => Some(format!("{al} albums and 1 artist selected")),
                             (ar, 1, 0) => Some(format!("1 album and {ar} artists selected")),
                             (ar, al, 0) => Some(format!("{al} albums and {ar} artists selected")),
 
-                            (1, 1, 1) => Some(format!("1 song, 1 album and 1 artist selected")),
+                            (1, 1, 1) => Some("1 song, 1 album and 1 artist selected".to_owned()),
                             (1, 1, s) => Some(format!("{s} songs, 1 album and 1 artist selected")),
                             (1, al, 1) => {
                                 Some(format!("1 song, {al} albums and 1 artist selected"))
@@ -544,14 +537,13 @@ impl GuiElem for LibraryBrowser {
                             (ar, al, s) => {
                                 Some(format!("{s} songs, {al} albums and {ar} artists selected"))
                             }
-                        } {
-                            *self.c_selected_counter_panel.children[0].content.text() = text;
                         }
-                    } else {
+                    {
+                        *self.c_selected_counter_panel.children[0].content.text() = text;
                     }
                 }
             }
-            self.config.redraw = true;
+            self.config.redraw_once();
         }
         // selected popup
         {
@@ -571,7 +563,7 @@ impl GuiElem for LibraryBrowser {
             } else {
                 if self.selected_popup_state.0 != 0.0 {
                     redraw = true;
-                    self.selected_popup_state.0 = 0.7 * self.selected_popup_state.0;
+                    self.selected_popup_state.0 *= 0.7;
                     if self.selected_popup_state.0 < 0.01 {
                         self.selected_popup_state.0 = 0.0;
                         self.c_selected_counter_panel.config_mut().enabled = false;
@@ -588,9 +580,9 @@ impl GuiElem for LibraryBrowser {
                 }
             }
         }
-        if self.config.redraw || info.pos.size() != self.config.pixel_pos.size() {
-            self.config.redraw = false;
-            self.update_ui(&info.database, info.line_height);
+        if self.config.redraw() || info.pos.size() != self.config.pixel_pos.size() {
+            self.config.redrawn();
+            self.update_ui(info.database, info.line_height);
         }
     }
     fn updated_library(&mut self) {
@@ -631,13 +623,13 @@ impl LibraryBrowser {
         self.library_sorted = artists
             .into_iter()
             .map(|(ar_id, artist)| {
-                let singles = artist.singles.iter().map(|id| *id).collect();
+                let singles = artist.singles.clone();
                 let albums = artist
                     .albums
                     .iter()
                     .map(|id| {
                         let songs = if let Some(album) = db.albums().get(id) {
-                            album.songs.iter().map(|id| *id).collect()
+                            album.songs.clone()
                         } else {
                             eprintln!("[warn] No album with id {id} found in db!");
                             vec![]
@@ -762,7 +754,7 @@ impl LibraryBrowser {
         let library_scroll_box = &mut self.c_scroll_box;
         library_scroll_box.children = elems;
         library_scroll_box.children_heights = elemh;
-        library_scroll_box.config_mut().redraw = true;
+        library_scroll_box.config_mut().redraw_once();
     }
     fn build_ui_element_artist(&self, id: ArtistId, db: &Database, h: f32) -> (ListElement, f32) {
         (
@@ -878,7 +870,7 @@ impl ListArtist {
             None,
             Vec2::new(0.0, 0.5),
         );
-        config.redraw = true;
+        config.redraw_once();
         Self {
             config: config.w_mouse(),
             id,
@@ -913,8 +905,8 @@ impl GuiElem for ListArtist {
         self
     }
     fn draw(&mut self, info: &mut DrawInfo, _g: &mut speedy2d::Graphics2D) {
-        if self.config.redraw {
-            self.config.redraw = false;
+        if self.config.redraw() {
+            self.config.redrawn();
             let sel = self.selected.contains_artist(&self.id);
             if sel != self.sel {
                 self.sel = sel;
@@ -972,7 +964,7 @@ impl GuiElem for ListArtist {
     fn mouse_up(&mut self, e: &mut EventInfo, button: MouseButton) -> Vec<GuiAction> {
         if self.mouse && button == MouseButton::Left {
             self.mouse = false;
-            self.config.redraw = true;
+            self.config.redraw_once();
             if e.take() {
                 if !self.sel {
                     self.selected.insert_artist(self.id);
@@ -1024,7 +1016,7 @@ impl ListAlbum {
                 ),
             ]],
         );
-        config.redraw = true;
+        config.redraw_once();
         Self {
             config: config.w_mouse(),
             id,
@@ -1059,8 +1051,8 @@ impl GuiElem for ListAlbum {
         self
     }
     fn draw(&mut self, info: &mut DrawInfo, _g: &mut speedy2d::Graphics2D) {
-        if self.config.redraw {
-            self.config.redraw = false;
+        if self.config.redraw() {
+            self.config.redrawn();
             let sel = self.selected.contains_album(&self.id);
             if sel != self.sel {
                 self.sel = sel;
@@ -1118,7 +1110,7 @@ impl GuiElem for ListAlbum {
     fn mouse_up(&mut self, e: &mut EventInfo, button: MouseButton) -> Vec<GuiAction> {
         if self.mouse && button == MouseButton::Left {
             self.mouse = false;
-            self.config.redraw = true;
+            self.config.redraw_once();
             if e.take() {
                 if !self.sel {
                     self.selected.insert_album(self.id);
@@ -1167,7 +1159,7 @@ impl ListSong {
                 ),
             ]],
         );
-        config.redraw = true;
+        config.redraw_once();
         Self {
             config: config.w_mouse(),
             id,
@@ -1202,8 +1194,8 @@ impl GuiElem for ListSong {
         self
     }
     fn draw(&mut self, info: &mut DrawInfo, _g: &mut speedy2d::Graphics2D) {
-        if self.config.redraw {
-            self.config.redraw = false;
+        if self.config.redraw() {
+            self.config.redrawn();
             let sel = self.selected.contains_song(&self.id);
             if sel != self.sel {
                 self.sel = sel;
@@ -1261,7 +1253,7 @@ impl GuiElem for ListSong {
     fn mouse_up(&mut self, e: &mut EventInfo, button: MouseButton) -> Vec<GuiAction> {
         if self.mouse && button == MouseButton::Left {
             self.mouse = false;
-            self.config.redraw = true;
+            self.config.redraw_once();
             if e.take() {
                 if !self.sel {
                     self.selected.insert_song(self.id);
@@ -1288,7 +1280,7 @@ impl GuiElem for ListSong {
                 },
                 [Label::new(
                     GuiElemCfg::default(),
-                    format!("Edit this song"),
+                    "Edit this song".to_owned(),
                     Color::WHITE,
                     None,
                     Vec2::new_y(0.5),
@@ -1315,7 +1307,7 @@ impl GuiElem for ListSong {
                     },
                     [Label::new(
                         GuiElemCfg::default(),
-                        format!("Edit selected songs"),
+                        "Edit selected songs".to_owned(),
                         Color::WHITE,
                         None,
                         Vec2::new_y(0.5),
@@ -1354,6 +1346,7 @@ struct FilterTab {
     buttons: Vec<Button<[Label; 1]>>,
     filters: Vec<FilterLine>,
 }
+#[allow(clippy::large_enum_variant)]
 enum FilterLine {
     Joiner(Button<[Label; 1]>),
     Not(Label),
@@ -1394,10 +1387,10 @@ impl GuiElemChildren for FilterTab {
         self.buttons.len() + self.filters.len()
     }
 }
-const FP_CASESENS_N: &'static str = "search is case-insensitive";
-const FP_CASESENS_Y: &'static str = "search is case-sensitive!";
-const FP_PREFSTART_N: &'static str = "simple search";
-const FP_PREFSTART_Y: &'static str = "will prefer matches at the start of a word";
+const FP_CASESENS_N: &str = "search is case-insensitive";
+const FP_CASESENS_Y: &str = "search is case-sensitive!";
+const FP_PREFSTART_N: &str = "simple search";
+const FP_PREFSTART_Y: &str = "will prefer matches at the start of a word";
 impl FilterPanel {
     pub fn new(
         search_settings_changed: Arc<AtomicBool>,
@@ -1697,8 +1690,8 @@ impl FilterPanel {
                 .iter()
                 .cloned()
                 .map(|(text, preset)| {
-                    let f = Arc::clone(&filter);
-                    let oc = Arc::clone(&on_change);
+                    let f = Arc::clone(filter);
+                    let oc = Arc::clone(on_change);
                     Button::new(
                         GuiElemCfg::default(),
                         move |_| {
@@ -1876,26 +1869,24 @@ impl FilterPanel {
                     let oc = Arc::clone(on_change);
                     let p = path.clone();
                     tf1.on_changed = Some(Box::new(move |text| {
-                        if let Ok(n) = text.parse() {
-                            if let Some(Ok(FilterType::TagWithValueInt(_, v, _))) =
+                        if let Ok(n) = text.parse()
+                            && let Some(Ok(FilterType::TagWithValueInt(_, v, _))) =
                                 mx.lock().unwrap().get_mut(&p)
-                            {
-                                *v = n;
-                                oc(false);
-                            }
+                        {
+                            *v = n;
+                            oc(false);
                         }
                     }));
                     let mx = Arc::clone(mutex);
                     let oc = Arc::clone(on_change);
                     let p = path.clone();
                     tf2.on_changed = Some(Box::new(move |text| {
-                        if let Ok(n) = text.parse() {
-                            if let Some(Ok(FilterType::TagWithValueInt(_, _, v))) =
+                        if let Ok(n) = text.parse()
+                            && let Some(Ok(FilterType::TagWithValueInt(_, _, v))) =
                                 mx.lock().unwrap().get_mut(&p)
-                            {
-                                *v = n;
-                                oc(false);
-                            }
+                        {
+                            *v = n;
+                            oc(false);
                         }
                     }));
                     children.push(FilterLine::TagWithValueInt(Panel::new(
@@ -1922,22 +1913,20 @@ impl GuiElem for FilterPanel {
     fn draw(&mut self, info: &mut DrawInfo, _g: &mut speedy2d::Graphics2D) {
         // set line height
         if info.line_height != self.line_height {
-            for h in &mut self.c_tab_main.children_heights {
-                *h = info.line_height;
-            }
-            for h in &mut self.c_tab_filters_songs.children_heights {
-                *h = info.line_height;
-            }
-            for h in &mut self.c_tab_filters_albums.children_heights {
-                *h = info.line_height;
-            }
-            for h in &mut self.c_tab_filters_artists.children_heights {
-                *h = info.line_height;
-            }
-            self.c_tab_main.config_mut().redraw = true;
-            self.c_tab_filters_songs.config_mut().redraw = true;
-            self.c_tab_filters_albums.config_mut().redraw = true;
-            self.c_tab_filters_artists.config_mut().redraw = true;
+            self.c_tab_main.children_heights.fill(info.line_height);
+            self.c_tab_filters_songs
+                .children_heights
+                .fill(info.line_height);
+            self.c_tab_filters_albums
+                .children_heights
+                .fill(info.line_height);
+            self.c_tab_filters_artists
+                .children_heights
+                .fill(info.line_height);
+            self.c_tab_main.config_mut().redraw_once();
+            self.c_tab_filters_songs.config_mut().redraw_once();
+            self.c_tab_filters_albums.config_mut().redraw_once();
+            self.c_tab_filters_artists.config_mut().redraw_once();
             self.line_height = info.line_height;
         }
         // maybe switch tabs
@@ -2001,7 +1990,7 @@ impl GuiElem for FilterPanel {
                     );
                     sb.children = ft;
                     sb.children_heights = heights;
-                    sb.config_mut().redraw = true;
+                    sb.config_mut().redraw_once();
                 }
                 _ => {}
             }

@@ -126,27 +126,27 @@ impl GuiElem for IdleDisplay {
             self.c_top_label.content = if let Some(song) = self.current_info.current_song {
                 info.gui_config
                     .idle_top_text
-                    .gen_new(&info.database, info.database.get_song(&song))
+                    .gen_new(info.database, info.database.get_song(&song))
             } else {
                 vec![]
             };
-            self.c_top_label.config_mut().redraw = true;
+            self.c_top_label.config_mut().redraw_once();
             self.c_side1_label.content = if let Some(song) = self.current_info.current_song {
                 info.gui_config
                     .idle_side1_text
-                    .gen_new(&info.database, info.database.get_song(&song))
+                    .gen_new(info.database, info.database.get_song(&song))
             } else {
                 vec![]
             };
-            self.c_side1_label.config_mut().redraw = true;
+            self.c_side1_label.config_mut().redraw_once();
             self.c_side2_label.content = if let Some(song) = self.current_info.current_song {
                 info.gui_config
                     .idle_side2_text
-                    .gen_new(&info.database, info.database.get_song(&song))
+                    .gen_new(info.database, info.database.get_song(&song))
             } else {
                 vec![]
             };
-            self.c_side2_label.config_mut().redraw = true;
+            self.c_side2_label.config_mut().redraw_once();
             // check artist
             if let Some(artist_id) = self
                 .current_info
@@ -165,8 +165,8 @@ impl GuiElem for IdleDisplay {
                     self.artist_image_aspect_ratio.set_target(info.time, 0.0);
                     if let Some(artist) = info.database.artists().get(&artist_id) {
                         for tag in &artist.general.tags {
-                            if tag.starts_with("ImageExt=") {
-                                let filename = format!("{}.{}", artist.name, &tag[9..]);
+                            if let Some(tag) = tag.strip_prefix("ImageExt=") {
+                                let filename = format!("{}.{}", artist.name, tag);
                                 self.current_artist_image =
                                     Some((artist_id, Some((filename.clone(), None))));
                                 if !info.custom_images.contains_key(&filename) {
@@ -199,15 +199,14 @@ impl GuiElem for IdleDisplay {
                 Some((_, None)) | Some((_, Some(Some(_)))) => {}
             }
         }
-        if let Some((_, Some((img, h)))) = &mut self.current_artist_image {
-            if h.is_none() {
-                if let Some(img) = info.custom_images.get_mut(img) {
-                    if let Some(img) = img.get_init(g) {
-                        *h = Some(Some(img));
-                    } else if img.is_err() {
-                        *h = Some(None);
-                    }
-                }
+        if let Some((_, Some((img, h)))) = &mut self.current_artist_image
+            && h.is_none()
+            && let Some(img) = info.custom_images.get_mut(img)
+        {
+            if let Some(img) = img.get_init(g) {
+                *h = Some(Some(img));
+            } else if img.is_err() {
+                *h = Some(None);
             }
         }
         // draw cover

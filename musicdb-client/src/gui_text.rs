@@ -387,14 +387,14 @@ impl GuiElem for AdvancedLabel {
         self
     }
     fn draw(&mut self, info: &mut crate::gui::DrawInfo, g: &mut speedy2d::Graphics2D) {
-        if self.config.redraw
+        if self.config.redraw()
             || self.config.pixel_pos.size() != info.pos.size()
             || self
                 .content
                 .iter()
                 .any(|v| v.iter().any(|(c, _, _)| c.will_redraw()))
         {
-            self.config.redraw = false;
+            self.config.redrawn();
             let mut max_len = 0.0;
             let mut total_height = 0.0;
             for line in &self.content {
@@ -461,7 +461,7 @@ impl GuiElem for AdvancedLabel {
                                 if handle.is_none() {
                                     match source {
                                         ImageSource::Cover(id) => {
-                                            if let Some(img) = info.covers.get_mut(&id) {
+                                            if let Some(img) = info.covers.get_mut(id) {
                                                 if let Some(img) = img.get_init(g) {
                                                     *handle = Some(Some(img));
                                                 } else {

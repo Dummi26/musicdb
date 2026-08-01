@@ -1,9 +1,9 @@
 use musicdb_lib::{
     data::{
+        AlbumId, ArtistId,
         database::Database,
         queue::{Queue, QueueContent, QueueDuration},
         song::Song,
-        AlbumId, ArtistId,
     },
     server::{Action, Req},
 };
@@ -16,7 +16,7 @@ use speedy2d::{
 
 use crate::{
     gui::{Dragging, DrawInfo, EventInfo, GuiAction, GuiElem, GuiElemCfg},
-    gui_base::{Panel, ScrollBox},
+    gui_base::{Button, Panel, ScrollBox},
     gui_text::{self, AdvancedLabel, Label, TextField},
 };
 
@@ -95,7 +95,7 @@ impl QueueViewer {
                 musicdb_lib::data::queue::QueueFolder {
                     index: 0,
                     content: vec![],
-                    name: format!("folder name"),
+                    name: "folder name".to_owned(),
                     order: None,
                 },
                 false,
@@ -104,7 +104,7 @@ impl QueueViewer {
             {
                 let mut tf = TextField::new(
                     GuiElemCfg::at(Rectangle::from_tuples((0.5, 0.5), (1.0, 1.0))),
-                    format!("folder name"),
+                    "folder name".to_owned(),
                     Color::from_rgb(0.0, 0.33, 0.0),
                     Color::from_rgb(0.0, 0.67, 0.0),
                 );
@@ -219,8 +219,8 @@ impl GuiElem for QueueViewer {
                     }
                 }
             }
-            let dt = fmt_dur(info.database.queue.duration_total(&info.database));
-            let dr = fmt_dur(info.database.queue.duration_remaining(&info.database));
+            let dt = fmt_dur(info.database.queue.duration_total(info.database));
+            let dr = fmt_dur(info.database.queue.duration_remaining(info.database));
             label.content = vec![
                 vec![(
                     gui_text::AdvancedContent::Text(gui_text::Content::new(
@@ -239,15 +239,15 @@ impl GuiElem for QueueViewer {
                     1.0,
                 )],
             ];
-            label.config_mut().redraw = true;
+            label.config_mut().redraw_once();
         }
-        if self.config.redraw || info.pos.size() != self.config.pixel_pos.size() {
-            self.config.redraw = false;
+        if self.config.redraw() || info.pos.size() != self.config.pixel_pos.size() {
+            self.config.redrawn();
             let mut c = vec![];
             let mut h = vec![];
             queue_gui(
                 &info.database.queue,
-                &info.database,
+                info.database,
                 0.0,
                 0.02,
                 info.line_height,
@@ -260,12 +260,12 @@ impl GuiElem for QueueViewer {
             let scroll_box = &mut self.c_scroll_box;
             scroll_box.children = c;
             scroll_box.children_heights = h;
-            scroll_box.config_mut().redraw = true;
+            scroll_box.config_mut().redraw_once();
         }
     }
     fn updated_queue(&mut self) {
         self.queue_updated = true;
-        self.config.redraw = true;
+        self.config.redraw_once();
     }
 }
 
@@ -353,7 +353,7 @@ fn queue_gui(
                 Box::new(QueueLoop::new(cfg.clone(), path, queue.clone(), current)),
             );
             if let Some(mut inner) = queue_gui(
-                &inner,
+                inner,
                 db,
                 depth,
                 depth_inc_by,
@@ -423,7 +423,7 @@ impl GuiElem for QueueEmptySpaceDragHandler {
 
 fn generic_queue_draw(
     info: &mut DrawInfo,
-    path: &Vec<usize>,
+    path: &[usize],
     queue: impl FnOnce() -> Queue,
     mouse: &mut bool,
     copy_on_mouse_down: bool,
@@ -435,7 +435,7 @@ fn generic_queue_draw(
             Dragging::Queue(if copy_on_mouse_down {
                 Ok(queue())
             } else {
-                Err(path.clone())
+                Err(path.to_vec())
             }),
             None,
         ))));
@@ -567,8 +567,24 @@ impl GuiElem for QueueSong {
         if button == MouseButton::Left && e.take() {
             self.mouse = true;
             self.copy_on_mouse_down = self.copy;
+            vec![]
+        } else if button == MouseButton::Right && e.take() {
+            let me = self.song.clone();
+            let menu_actions: Vec<Box<dyn GuiElem + 'static>> = vec![Box::new(Button::new(
+                GuiElemCfg::default(),
+                move |_| vec![GuiAction::EditSongs(vec![me.clone()])],
+                [Label::new(
+                    GuiElemCfg::default(),
+                    "Edit this song".to_owned(),
+                    Color::WHITE,
+                    None,
+                    Vec2::new_y(0.5),
+                )],
+            ))];
+            vec![GuiAction::ContextMenu(Some(menu_actions))]
+        } else {
+            vec![]
         }
-        vec![]
     }
     fn mouse_up(&mut self, e: &mut EventInfo, button: MouseButton) -> Vec<GuiAction> {
         if self.mouse && button == MouseButton::Left {
@@ -648,10 +664,8 @@ impl GuiElem for QueueSong {
                     }
                 },
                 move |mut p, q| {
-                    if insert_below {
-                        if let Some(l) = p.last_mut() {
-                            *l += 1;
-                        }
+                    if insert_below && let Some(l) = p.last_mut() {
+                        *l += 1;
                     }
                     Action::QueueMove(q, p)
                 },
@@ -971,9 +985,9 @@ impl QueueLoop {
         match queue.content() {
             QueueContent::Loop(total, _current, _) => {
                 if *total == 0 {
-                    format!("repeat forever")
+                    "repeat forever".to_owned()
                 } else if *total == 1 {
-                    format!("repeat 1 time")
+                    "repeat 1 time".to_owned()
                 } else {
                     format!("repeat {total} times")
                 }
@@ -1141,46 +1155,38 @@ fn dragged_add_to_queue<T: 'static>(
 }
 
 fn add_to_queue_album_by_id(id: AlbumId, db: &Database) -> Option<Queue> {
-    if let Some(album) = db.albums().get(&id) {
-        Some(
-            QueueContent::Folder(musicdb_lib::data::queue::QueueFolder {
-                index: 0,
-                content: album
-                    .songs
-                    .iter()
-                    .map(|id| QueueContent::Song(*id).into())
-                    .collect(),
-                name: album.name.clone(),
-                order: None,
-            })
-            .into(),
-        )
-    } else {
-        None
-    }
+    db.albums().get(&id).map(|album| {
+        QueueContent::Folder(musicdb_lib::data::queue::QueueFolder {
+            index: 0,
+            content: album
+                .songs
+                .iter()
+                .map(|id| QueueContent::Song(*id).into())
+                .collect(),
+            name: album.name.clone(),
+            order: None,
+        })
+        .into()
+    })
 }
 fn add_to_queue_artist_by_id(id: ArtistId, db: &Database) -> Option<Queue> {
-    if let Some(artist) = db.artists().get(&id) {
-        Some(
-            QueueContent::Folder(musicdb_lib::data::queue::QueueFolder {
-                index: 0,
-                content: artist
-                    .singles
-                    .iter()
-                    .map(|id| QueueContent::Song(*id).into())
-                    .chain(
-                        artist
-                            .albums
-                            .iter()
-                            .filter_map(|id| add_to_queue_album_by_id(*id, db)),
-                    )
-                    .collect(),
-                name: artist.name.clone(),
-                order: None,
-            })
-            .into(),
-        )
-    } else {
-        None
-    }
+    db.artists().get(&id).map(|artist| {
+        QueueContent::Folder(musicdb_lib::data::queue::QueueFolder {
+            index: 0,
+            content: artist
+                .singles
+                .iter()
+                .map(|id| QueueContent::Song(*id).into())
+                .chain(
+                    artist
+                        .albums
+                        .iter()
+                        .filter_map(|id| add_to_queue_album_by_id(*id, db)),
+                )
+                .collect(),
+            name: artist.name.clone(),
+            order: None,
+        })
+        .into()
+    })
 }

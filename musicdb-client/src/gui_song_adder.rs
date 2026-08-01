@@ -1,5 +1,5 @@
 use musicdb_lib::data::{AlbumId, ArtistId};
-use speedy2d::{color::Color, dimen::Vec2, Graphics2D};
+use speedy2d::{Graphics2D, color::Color, dimen::Vec2};
 
 use crate::{
     gui::{DrawInfo, GuiElem, GuiElemCfg},
@@ -30,13 +30,13 @@ impl SongAdder {
         scroll_sensitivity_lines: f64,
         scroll_sensitivity_pages: f64,
     ) -> Self {
-        config.redraw = true;
+        config.redraw_once();
         Self {
             config,
             state: 0,
             c_loading: Some(Label::new(
                 GuiElemCfg::default(),
-                format!("Loading..."),
+                "Loading...".to_owned(),
                 Color::GRAY,
                 None,
                 Vec2::new(0.5, 0.5),
@@ -99,7 +99,7 @@ impl GuiElem for SongAdder {
                             .iter()
                             .map(|(path, is_bad)| AddableSong::new(path.to_owned(), *is_bad))
                             .collect();
-                        self.c_scroll_box.config_mut().redraw = true;
+                        self.c_scroll_box.config_mut().redraw_once();
                         self.data = Some(
                             data.into_iter()
                                 .map(|(p, b)| AddSong {
@@ -125,9 +125,9 @@ impl GuiElem for SongAdder {
             }
         }
 
-        if self.config.redraw {
-            self.config.redraw = false;
-            self.c_scroll_box.config_mut().redraw = true;
+        if self.config.redraw() {
+            self.config.redrawn();
+            self.c_scroll_box.config_mut().redraw_once();
         }
     }
 }
@@ -147,7 +147,7 @@ impl AddableSong {
                 |_| vec![],
                 [Label::new(
                     GuiElemCfg::default(),
-                    format!("{path}"),
+                    path.to_string(),
                     if is_bad {
                         Color::LIGHT_GRAY
                     } else {

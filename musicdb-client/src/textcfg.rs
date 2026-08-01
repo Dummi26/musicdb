@@ -113,7 +113,7 @@ impl TextBuilder {
         }
         for part in &self.0 {
             match part {
-                TextPart::LineBreak => out.push(std::mem::replace(line, vec![])),
+                TextPart::LineBreak => out.push(std::mem::take(line)),
                 TextPart::SetColor(c) => *color = *c,
                 TextPart::SetScale(v) => *scale = *v,
                 TextPart::SetHeightAlign(v) => *align = *v,
@@ -124,17 +124,17 @@ impl TextBuilder {
                     }
                 }
                 TextPart::AlbumName => {
-                    if let Some(s) = current_song {
-                        if let Some(album) = s.album.and_then(|id| db.albums().get(&id)) {
-                            push!(album.name.to_owned());
-                        }
+                    if let Some(s) = current_song
+                        && let Some(album) = s.album.and_then(|id| db.albums().get(&id))
+                    {
+                        push!(album.name.to_owned());
                     }
                 }
                 TextPart::ArtistName => {
-                    if let Some(s) = current_song {
-                        if let Some(artist) = db.artists().get(&s.artist) {
-                            push!(artist.name.to_owned());
-                        }
+                    if let Some(s) = current_song
+                        && let Some(artist) = db.artists().get(&s.artist)
+                    {
+                        push!(artist.name.to_owned());
                     }
                 }
                 TextPart::SongDuration(show_millis) => {
@@ -152,7 +152,7 @@ impl TextBuilder {
                 }
                 TextPart::TagEq(p) => {
                     for (i, g) in all_general(db, &current_song).into_iter().enumerate() {
-                        if let Some(_) = g.and_then(|g| g.tags.iter().find(|t| *t == p)) {
+                        if g.and_then(|g| g.tags.iter().find(|t| *t == p)).is_some() {
                             push!(
                                 match i {
                                     0 => 's',
@@ -223,174 +223,165 @@ impl TextBuilder {
                     if current.starts_with(' ') {
                         current = current.replacen(' ', "\u{00A0}", 1);
                     }
-                    vec.push(TextPart::Literal(std::mem::replace(
-                        &mut current,
-                        String::new(),
-                    )));
+                    vec.push(TextPart::Literal(std::mem::take(&mut current)));
                 }
             };
         }
-        loop {
-            if let Some(ch) = chars.next() {
-                match ch {
-                    '\n' => {
+        while let Some(ch) = chars.next() {
+            match ch {
+                '\n' => {
+                    done!();
+                    vec.push(TextPart::LineBreak);
+                }
+                '\\' => match chars.next() {
+                    None => current.push('\\'),
+                    Some('t') => {
                         done!();
-                        vec.push(TextPart::LineBreak);
+                        vec.push(TextPart::SongTitle);
                     }
-                    '\\' => match chars.next() {
-                        None => current.push('\\'),
-                        Some('t') => {
-                            done!();
-                            vec.push(TextPart::SongTitle);
-                        }
-                        Some('a') => {
-                            done!();
-                            vec.push(TextPart::AlbumName);
-                        }
-                        Some('A') => {
-                            done!();
-                            vec.push(TextPart::ArtistName);
-                        }
-                        Some('d') => {
-                            done!();
-                            vec.push(TextPart::SongDuration(false));
-                        }
-                        Some('D') => {
-                            done!();
-                            vec.push(TextPart::SongDuration(true));
-                        }
-                        Some('s') => {
-                            done!();
-                            vec.push(TextPart::SetScale({
-                                let mut str = String::new();
-                                loop {
-                                    match chars.next() {
-                                        None | Some(';') => break,
-                                        Some(c) => str.push(c),
-                                    }
-                                }
-                                if let Ok(v) = str.parse() {
-                                    v
-                                } else {
-                                    return Err(TextBuilderParseError::CouldntParse(
-                                        str,
-                                        "number (float)".to_string(),
-                                    ));
-                                }
-                            }))
-                        }
-                        Some('h') => {
-                            done!();
-                            vec.push(TextPart::SetHeightAlign({
-                                let mut str = String::new();
-                                loop {
-                                    match chars.next() {
-                                        None | Some(';') => break,
-                                        Some(c) => str.push(c),
-                                    }
-                                }
-                                if let Ok(v) = str.parse() {
-                                    v
-                                } else {
-                                    return Err(TextBuilderParseError::CouldntParse(
-                                        str,
-                                        "number (float)".to_string(),
-                                    ));
-                                }
-                            }))
-                        }
-                        Some('c') => {
-                            done!();
-                            vec.push(TextPart::SetColor({
-                                let mut str = String::new();
-                                for _ in 0..6 {
-                                    if let Some(ch) = chars.next() {
-                                        str.push(ch);
-                                    } else {
-                                        return Err(TextBuilderParseError::TooFewCharsForColor);
-                                    }
-                                }
-                                if let Ok(i) = u32::from_str_radix(&str, 16) {
-                                    Color::from_hex_rgb(i)
-                                } else {
-                                    return Err(TextBuilderParseError::ColorNotHex);
-                                }
-                            }));
-                        }
-                        Some('i') => {
-                            done!();
-                            let mut src = String::new();
+                    Some('a') => {
+                        done!();
+                        vec.push(TextPart::AlbumName);
+                    }
+                    Some('A') => {
+                        done!();
+                        vec.push(TextPart::ArtistName);
+                    }
+                    Some('d') => {
+                        done!();
+                        vec.push(TextPart::SongDuration(false));
+                    }
+                    Some('D') => {
+                        done!();
+                        vec.push(TextPart::SongDuration(true));
+                    }
+                    Some('s') => {
+                        done!();
+                        vec.push(TextPart::SetScale({
+                            let mut str = String::new();
                             loop {
                                 match chars.next() {
-                                    None => {
-                                        return Err(TextBuilderParseError::InvalidImageSourceName(
-                                            src,
-                                        ));
-                                    }
-                                    Some(':') => break,
-                                    Some(c) => src.push(c),
+                                    None | Some(';') => break,
+                                    Some(c) => str.push(c),
                                 }
                             }
-                            vec.push(match src.as_str() {
-                                "Cover" => {
-                                    let mut id = String::new();
-                                    loop {
-                                        match chars.next() {
-                                            None | Some(';') => break,
-                                            Some(c) => id.push(c),
-                                        }
-                                    }
-                                    if let Ok(id) = id.parse() {
-                                        TextPart::ImgCover(id)
-                                    } else {
-                                        return Err(TextBuilderParseError::InvalidImageCoverId(id));
-                                    }
-                                }
-                                "CustomFile" => TextPart::ImgCustom(Self::from_chars(chars)?),
-                                _ => {
-                                    return Err(TextBuilderParseError::InvalidImageSourceName(src));
-                                }
-                            });
-                        }
-                        Some(ch) => current.push(ch),
-                    },
-                    '%' => {
+                            if let Ok(v) = str.parse() {
+                                v
+                            } else {
+                                return Err(TextBuilderParseError::CouldntParse(
+                                    str,
+                                    "number (float)".to_string(),
+                                ));
+                            }
+                        }))
+                    }
+                    Some('h') => {
                         done!();
-                        let mode = if let Some(ch) = chars.next() {
-                            ch
-                        } else {
-                            return Err(TextBuilderParseError::UnclosedPercent);
-                        };
+                        vec.push(TextPart::SetHeightAlign({
+                            let mut str = String::new();
+                            loop {
+                                match chars.next() {
+                                    None | Some(';') => break,
+                                    Some(c) => str.push(c),
+                                }
+                            }
+                            if let Ok(v) = str.parse() {
+                                v
+                            } else {
+                                return Err(TextBuilderParseError::CouldntParse(
+                                    str,
+                                    "number (float)".to_string(),
+                                ));
+                            }
+                        }))
+                    }
+                    Some('c') => {
+                        done!();
+                        vec.push(TextPart::SetColor({
+                            let mut str = String::new();
+                            for _ in 0..6 {
+                                if let Some(ch) = chars.next() {
+                                    str.push(ch);
+                                } else {
+                                    return Err(TextBuilderParseError::TooFewCharsForColor);
+                                }
+                            }
+                            if let Ok(i) = u32::from_str_radix(&str, 16) {
+                                Color::from_hex_rgb(i)
+                            } else {
+                                return Err(TextBuilderParseError::ColorNotHex);
+                            }
+                        }));
+                    }
+                    Some('i') => {
+                        done!();
+                        let mut src = String::new();
                         loop {
                             match chars.next() {
-                                Some('%') => {
-                                    let s = std::mem::replace(&mut current, String::new());
-                                    vec.push(match mode {
-                                        '=' => TextPart::TagEq(s),
-                                        '>' => TextPart::TagEnd(s),
-                                        '_' => TextPart::TagContains(s),
-                                        c => return Err(TextBuilderParseError::TagModeUnknown(c)),
-                                    });
-                                    break;
+                                None => {
+                                    return Err(TextBuilderParseError::InvalidImageSourceName(src));
                                 }
-                                Some(ch) => current.push(ch),
-                                None => return Err(TextBuilderParseError::UnclosedPercent),
+                                Some(':') => break,
+                                Some(c) => src.push(c),
                             }
                         }
+                        vec.push(match src.as_str() {
+                            "Cover" => {
+                                let mut id = String::new();
+                                loop {
+                                    match chars.next() {
+                                        None | Some(';') => break,
+                                        Some(c) => id.push(c),
+                                    }
+                                }
+                                if let Ok(id) = id.parse() {
+                                    TextPart::ImgCover(id)
+                                } else {
+                                    return Err(TextBuilderParseError::InvalidImageCoverId(id));
+                                }
+                            }
+                            "CustomFile" => TextPart::ImgCustom(Self::from_chars(chars)?),
+                            _ => {
+                                return Err(TextBuilderParseError::InvalidImageSourceName(src));
+                            }
+                        });
                     }
-                    '?' => {
-                        done!();
-                        vec.push(TextPart::If(
-                            Self::from_chars(chars)?,
-                            Self::from_chars(chars)?,
-                            Self::from_chars(chars)?,
-                        ));
+                    Some(ch) => current.push(ch),
+                },
+                '%' => {
+                    done!();
+                    let mode = if let Some(ch) = chars.next() {
+                        ch
+                    } else {
+                        return Err(TextBuilderParseError::UnclosedPercent);
+                    };
+                    loop {
+                        match chars.next() {
+                            Some('%') => {
+                                let s = std::mem::take(&mut current);
+                                vec.push(match mode {
+                                    '=' => TextPart::TagEq(s),
+                                    '>' => TextPart::TagEnd(s),
+                                    '_' => TextPart::TagContains(s),
+                                    c => return Err(TextBuilderParseError::TagModeUnknown(c)),
+                                });
+                                break;
+                            }
+                            Some(ch) => current.push(ch),
+                            None => return Err(TextBuilderParseError::UnclosedPercent),
+                        }
                     }
-                    '#' => break,
-                    ch => current.push(ch),
                 }
-            } else {
-                break;
+                '?' => {
+                    done!();
+                    vec.push(TextPart::If(
+                        Self::from_chars(chars)?,
+                        Self::from_chars(chars)?,
+                        Self::from_chars(chars)?,
+                    ));
+                }
+                '#' => break,
+                ch => current.push(ch),
             }
         }
         done!();

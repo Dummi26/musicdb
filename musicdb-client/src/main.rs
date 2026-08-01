@@ -1,5 +1,7 @@
 #![allow(dead_code)]
 #![allow(unused_variables)]
+#![allow(clippy::type_complexity)]
+#![allow(clippy::too_many_arguments)]
 
 use std::{
     io::{BufReader, Write},
@@ -18,8 +20,8 @@ use musicdb_lib::data::cache_manager::CacheManager;
 use musicdb_lib::player::{Player, PlayerBackendFeat};
 use musicdb_lib::{
     data::{
-        database::{ClientIo, Database},
         CoverId, SongId,
+        database::{ClientIo, Database},
     },
     load::ToFromBytes,
     server::Command,
@@ -107,7 +109,9 @@ fn main() {
     #[cfg(not(feature = "speedy2d"))]
     #[cfg(not(feature = "mers"))]
     #[cfg(not(feature = "playback"))]
-    compile_error!("None of the optional features are enabled. Without at least one of these, the application is useless! See Cargo.toml for info.");
+    compile_error!(
+        "None of the optional features are enabled. Without at least one of these, the application is useless! See Cargo.toml for info."
+    );
     // parse args
     let args = Args::parse();
     // start
@@ -215,7 +219,7 @@ fn main() {
                 }
                 #[cfg(feature = "playback")]
                 if let Some(player) = &mut player {
-                    player.update_dont_uncache(&mut *db);
+                    player.update_dont_uncache(&mut db);
                 }
                 drop(db);
                 #[cfg(feature = "speedy2d")]
@@ -250,10 +254,12 @@ fn main() {
                     Some(Arc::clone(&get_con));
             }
             let occasional_refresh_sender = Arc::clone(&sender);
-            thread::spawn(move || loop {
-                std::thread::sleep(std::time::Duration::from_secs(1));
-                if let Some(v) = &*occasional_refresh_sender.lock().unwrap() {
-                    v.send_event(GuiEvent::Refresh).unwrap();
+            thread::spawn(move || {
+                loop {
+                    std::thread::sleep(std::time::Duration::from_secs(1));
+                    if let Some(v) = &*occasional_refresh_sender.lock().unwrap() {
+                        v.send_event(GuiEvent::Refresh).unwrap();
+                    }
                 }
             });
             gui::main(
@@ -328,12 +334,8 @@ fn main() {
 
 pub fn accumulate<F: FnMut() -> Option<T>, T>(mut f: F) -> Vec<T> {
     let mut o = vec![];
-    loop {
-        if let Some(v) = f() {
-            o.push(v);
-        } else {
-            break;
-        }
+    while let Some(v) = f() {
+        o.push(v);
     }
     o
 }

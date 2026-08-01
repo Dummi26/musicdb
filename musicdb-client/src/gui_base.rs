@@ -73,7 +73,7 @@ pub struct Square<T: GuiElem> {
 #[allow(unused)]
 impl<T: GuiElem> Square<T> {
     pub fn new(mut config: GuiElemCfg, inner: T) -> Self {
-        config.redraw = true;
+        config.redraw_once();
         Self { config, inner }
     }
 }
@@ -101,10 +101,10 @@ impl<T: GuiElem + 'static> GuiElem for Square<T> {
     }
     fn draw(&mut self, info: &mut DrawInfo, _g: &mut speedy2d::Graphics2D) {
         if info.pos.size() != self.config.pixel_pos.size() {
-            self.config.redraw = true;
+            self.config.redraw_once();
         }
-        if self.config.redraw {
-            self.config.redraw = false;
+        if self.config.redraw() {
+            self.config.redrawn();
             if info.pos.width() > info.pos.height() {
                 let w = 0.5 * info.pos.height() / info.pos.width();
                 self.inner.config_mut().pos =
@@ -193,7 +193,7 @@ impl<C: GuiElemChildren + 'static> GuiElem for ScrollBox<C> {
     }
     fn draw(&mut self, info: &mut DrawInfo, g: &mut speedy2d::Graphics2D) {
         if self.config.pixel_pos.size() != info.pos.size() {
-            self.config.redraw = true;
+            self.config.redraw_once();
         }
         // smooth scrolling animation
         if self.scroll_target > self.max_scroll {
@@ -202,7 +202,7 @@ impl<C: GuiElemChildren + 'static> GuiElem for ScrollBox<C> {
             self.scroll_target = 0.0;
         }
         if self.scroll_target != self.scroll_display {
-            self.config.redraw = true;
+            self.config.redraw_once();
             if info.high_performance {
                 self.scroll_display = self.scroll_target;
             } else {
@@ -215,7 +215,7 @@ impl<C: GuiElemChildren + 'static> GuiElem for ScrollBox<C> {
             }
         }
         // recalculate positions
-        if self.config.redraw {
+        if self.config.redraw() {
             // adjust height vector length if necessary
             if self.children_heights.len() != self.children.len() {
                 let target = self.children.len();
@@ -229,7 +229,7 @@ impl<C: GuiElemChildren + 'static> GuiElem for ScrollBox<C> {
             //
             self.mouse_scroll_margin_right = info.line_height * 0.2;
             let max_x = 1.0 - self.mouse_scroll_margin_right / info.pos.width();
-            self.config.redraw = false;
+            self.config.redrawn();
             let mut y_pos = -self.scroll_display;
             for (e, h) in self.children.iter().zip(self.children_heights.iter()) {
                 let h_rel = self.size_unit.to_rel(*h, info.pos.height());
@@ -292,8 +292,8 @@ impl<C: GuiElemChildren + 'static> GuiElem for ScrollBox<C> {
         }
     }
     fn mouse_wheel(&mut self, e: &mut EventInfo, diff: f32) -> Vec<crate::gui::GuiAction> {
-        let nst = (self.scroll_target - self.size_unit.from_abs(diff as f32, self.last_height_px))
-            .max(0.0);
+        let nst =
+            (self.scroll_target - self.size_unit.from_abs(diff, self.last_height_px)).max(0.0);
         // only take the event if this would actually scroll, and only scroll if we can actually take the event
         if nst != self.scroll_target && e.take() {
             self.scroll_target = nst;
@@ -323,12 +323,14 @@ impl ScrollBoxSizeUnit {
             Self::Pixels => val / draw_height,
         }
     }
+    #[allow(clippy::wrong_self_convention)]
     fn from_rel(&self, val: f32, draw_height: f32) -> f32 {
         match self {
             Self::Relative => val,
             Self::Pixels => val * draw_height,
         }
     }
+    #[allow(clippy::wrong_self_convention)]
     fn from_abs(&self, val: f32, draw_height: f32) -> f32 {
         match self {
             Self::Relative => val / draw_height,
@@ -545,21 +547,13 @@ impl Slider {
                         {
                             if since >= 1.0 {
                                 s.display_since = None;
-                                if s.display {
-                                    1.0
-                                } else {
-                                    0.0
-                                }
+                                if s.display { 1.0 } else { 0.0 }
                             } else {
                                 if let Some(h) = &i.helper {
                                     h.request_redraw();
                                 }
-                                s.config.redraw = true;
-                                if s.display {
-                                    since
-                                } else {
-                                    1.0 - since
-                                }
+                                s.config.redraw_once();
+                                if s.display { since } else { 1.0 - since }
                             }
                         } else {
                             1.0
@@ -613,7 +607,7 @@ impl GuiElem for Slider {
         if self.display != (self.config.mouse_down.0 || info.pos.contains(info.mouse_pos)) {
             self.display = !self.display;
             self.display_since = Some(info.time);
-            self.config.redraw = true;
+            self.config.redraw_once();
         }
         let dot_size = (info.pos.height() * 0.9).min(info.pos.width() * 0.25);
         let y_mid_line = 0.5 * (info.pos.top_left().y + info.pos.bottom_right().y);
@@ -634,10 +628,8 @@ impl GuiElem for Slider {
                         (info.mouse_pos.x - line_pos.top_left().x) as f64 / line_pos.width() as f64,
                     ));
             self.val_changed = true;
-            for v in &mut self.val_changed_subs {
-                *v = true;
-            }
-            self.config.redraw = true;
+            self.val_changed_subs.fill(true);
+            self.config.redraw_once();
         }
         let line_color = Color::from_int_rgb(50, 50, 100);
         g.draw_circle(
@@ -660,8 +652,8 @@ impl GuiElem for Slider {
             0.5 * dot_size,
             Color::CYAN,
         );
-        if self.config.redraw {
-            self.config.redraw = false;
+        if self.config.redraw() {
+            self.config.redrawn();
             (Arc::clone(&self.on_update))(self, info);
         }
     }

@@ -1,16 +1,16 @@
 use std::{collections::BTreeSet, time::Instant};
 
 use speedy2d::{
+    Graphics2D,
     color::Color,
     dimen::{Vec2, Vector2},
     shape::Rectangle,
-    Graphics2D,
 };
 
 use crate::{
     gui::{DrawInfo, GuiElem, GuiElemCfg},
     gui_anim::AnimationController,
-    gui_base::{Button, ScrollBox},
+    gui_base::{Button, Panel, ScrollBox},
     gui_text::{Label, TextField},
 };
 
@@ -24,36 +24,62 @@ pub enum Event {
 pub struct EditorForAnyTagInList {
     config: GuiElemCfg,
     pub tag: String,
-    label: Label,
-    rm_button: Button<[IconDelete; 1]>,
+    panel: Panel<(Label, Button<[IconDelete; 1]>)>,
 }
 
 impl EditorForAnyTagInList {
     pub fn new<T: From<Event> + 'static>(
         tag: String,
+        index: usize,
         sender: std::sync::mpsc::Sender<T>,
         config: GuiElemCfg,
     ) -> Self {
-        Self {
-            config,
-            tag: tag.clone(),
-            label: Label::new(
-                GuiElemCfg::default(),
-                tag.clone(),
-                Color::WHITE,
-                None,
-                Vector2::new(0.0, 0.5),
-            ),
-            rm_button: Button::new(
-                GuiElemCfg::default(),
+        let label = Label::new(
+            GuiElemCfg::default(),
+            tag.clone(),
+            Color::WHITE,
+            None,
+            Vector2::new(0.0, 0.5),
+        );
+        let rm_button = Button::new(
+            GuiElemCfg::default(),
+            {
+                let tag = tag.clone();
                 move |btn| {
                     btn.disable();
                     sender.send(Event::RemoveTag(tag.clone()).into()).unwrap();
                     vec![]
-                },
-                [IconDelete::new(GuiElemCfg::default())],
-            ),
-        }
+                }
+            },
+            [IconDelete::new(GuiElemCfg::default())],
+        );
+        let panel = Panel::with_background(
+            GuiElemCfg::default(),
+            (label, rm_button),
+            match index % 2 {
+                1 => Color::from_rgba(0.0, 1.0, 0.0, 0.1),
+                _ => Color::from_rgba(0.0, 0.0, 1.0, 0.14),
+            },
+        );
+        Self { config, tag, panel }
+    }
+    fn row(&self) -> &(Label, Button<[IconDelete; 1]>) {
+        &self.panel.children
+    }
+    fn row_mut(&mut self) -> &mut (Label, Button<[IconDelete; 1]>) {
+        &mut self.panel.children
+    }
+    fn label(&self) -> &Label {
+        &self.panel.children.0
+    }
+    fn rm_button(&self) -> &Button<[IconDelete; 1]> {
+        &self.panel.children.1
+    }
+    fn label_mut(&mut self) -> &mut Label {
+        &mut self.panel.children.0
+    }
+    fn rm_button_mut(&mut self) -> &mut Button<[IconDelete; 1]> {
+        &mut self.panel.children.1
     }
 }
 
@@ -63,11 +89,11 @@ impl GuiElem for EditorForAnyTagInList {
         let rm_button_padding = (info.pos.height() - rm_button_size) / 2.0;
         let label_padding = info.pos.height() * 0.05;
         let x_split = (info.pos.width() - rm_button_size) / info.pos.width();
-        self.rm_button.config_mut().pos = Rectangle::from_tuples(
+        self.rm_button_mut().config_mut().pos = Rectangle::from_tuples(
             (x_split, rm_button_padding / info.pos.height()),
             (1.0, 1.0 - rm_button_padding / info.pos.height()),
         );
-        self.label.config_mut().pos = Rectangle::from_tuples(
+        self.label_mut().config_mut().pos = Rectangle::from_tuples(
             (0.0, label_padding / info.pos.height()),
             (x_split, 1.0 - label_padding / info.pos.height()),
         );
@@ -79,7 +105,7 @@ impl GuiElem for EditorForAnyTagInList {
         &mut self.config
     }
     fn children(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElem> + '_> {
-        Box::new([self.label.elem_mut(), self.rm_button.elem_mut()].into_iter())
+        Box::new([self.panel.elem_mut()].into_iter())
     }
     fn any(&self) -> &dyn std::any::Any {
         self
@@ -162,7 +188,7 @@ impl<T: From<Event> + 'static> EditorForAnyTagAdder<T> {
             expand_to,
             c_value: TextField::new(
                 GuiElemCfg::default(),
-                "artist".to_owned(),
+                "tag".to_owned(),
                 Color::DARK_GRAY,
                 Color::WHITE,
             ),
@@ -180,7 +206,7 @@ impl<T: From<Event> + 'static> EditorForAnyTagAdder<T> {
         self.last_search = "\n".to_owned();
         self.c_value.c_input.content.text().clear();
         self.open_prog.set_target(now, 1.0);
-        self.config_mut().redraw = true;
+        self.config_mut().redraw_once();
     }
 }
 impl<T: From<Event> + 'static> GuiElem for EditorForAnyTagAdder<T> {
@@ -196,8 +222,8 @@ impl<T: From<Event> + 'static> GuiElem for EditorForAnyTagAdder<T> {
         }
 
         let search = self.c_value.c_input.content.get_text().to_lowercase();
-        let search_changed = &self.last_search != &search;
-        if self.config.redraw || search_changed {
+        let search_changed = self.last_search != search;
+        if self.config.redraw() || search_changed {
             *self.c_value.c_input.content.color() = Color::WHITE;
             if search_changed {
                 if search.is_empty() {
@@ -224,7 +250,7 @@ impl<T: From<Event> + 'static> GuiElem for EditorForAnyTagAdder<T> {
                         .flat_map(|s| s.general.tags.iter()),
                 )
                 .filter(|tag| tag.to_lowercase().contains(&search))
-                .map(|tag| tag.clone())
+                .cloned()
                 .collect::<BTreeSet<_>>();
             if !tags.contains(self.c_value.c_input.content.get_text()) {
                 tags.insert(self.c_value.c_input.content.get_text().clone());
@@ -252,8 +278,9 @@ impl<T: From<Event> + 'static> GuiElem for EditorForAnyTagAdder<T> {
                     )
                 })
                 .collect();
-            self.c_picker.config_mut().redraw = true;
+            self.c_picker.config_mut().redraw_once();
             self.last_search = search;
+            self.config.redrawn();
         }
     }
     fn config(&self) -> &GuiElemCfg {

@@ -1,7 +1,7 @@
 use std::time::Instant;
 
 use musicdb_lib::{
-    data::{song::Song, ArtistId},
+    data::{ArtistId, song::Song},
     server::{Action, Req},
 };
 use speedy2d::{color::Color, dimen::Vec2, shape::Rectangle};
@@ -11,7 +11,7 @@ use crate::{
     gui::{GuiAction, GuiElem, GuiElemCfg, GuiElemChildren},
     gui_anim::AnimationController,
     gui_base::{Button, Panel, ScrollBox},
-    gui_edit_any::{EditorForAnyTagAdder, EditorForAnyTagInList, SpacerForScrollBox, ELEM_HEIGHT},
+    gui_edit_any::{ELEM_HEIGHT, EditorForAnyTagAdder, EditorForAnyTagInList, SpacerForScrollBox},
     gui_text::{Label, TextField},
 };
 
@@ -28,6 +28,7 @@ pub struct EditorForSongs {
     event_sender: std::sync::mpsc::Sender<Event>,
     event_recv: std::sync::mpsc::Receiver<Event>,
 }
+#[allow(clippy::enum_variant_names)]
 pub enum Event {
     Close,
     Apply,
@@ -102,7 +103,7 @@ impl EditorForSongs {
                     c_artist: EditorForSongArtistChooser::new(sender.clone()),
                     c_album: Label::new(
                         GuiElemCfg::default(),
-                        format!("(todo...)"),
+                        "(todo...)".to_owned(),
                         Color::GRAY,
                         None,
                         Vec2::new(0.0, 0.5),
@@ -117,9 +118,11 @@ impl EditorForSongs {
                             }
                         }
                         tags.into_iter()
-                            .map(|tag| {
+                            .enumerate()
+                            .map(|(i, tag)| {
                                 EditorForAnyTagInList::new(
                                     tag.to_owned(),
+                                    i,
                                     sender.clone(),
                                     GuiElemCfg::default(),
                                 )
@@ -198,110 +201,112 @@ impl GuiElem for EditorForSongs {
         )
     }
     fn draw(&mut self, info: &mut crate::gui::DrawInfo, g: &mut speedy2d::Graphics2D) {
-        loop {
-            match self.event_recv.try_recv() {
-                Ok(e) => match e {
-                    Event::Close => info.actions.push(GuiAction::Do(Box::new(|gui| {
-                        gui.gui.c_editing_songs = None;
-                        gui.gui.set_normal_ui_enabled(true);
-                    }))),
-                    Event::Apply => {
-                        let mut actions = Vec::new();
-                        for song in self.songs.iter() {
-                            let mut song = song.clone();
+        while let Ok(e) = self.event_recv.try_recv() {
+            match e {
+                Event::Close => info.actions.push(GuiAction::Do(Box::new(|gui| {
+                    gui.gui.c_editing_songs = None;
+                    gui.gui.set_normal_ui_enabled(true);
+                }))),
+                Event::Apply => {
+                    let mut actions = Vec::new();
+                    for song in self.songs.iter() {
+                        let mut song = song.clone();
 
-                            let new_title = self
-                                .c_scrollbox
-                                .children
-                                .c_title
-                                .c_input
-                                .content
-                                .get_text()
-                                .trim();
-                            if !new_title.is_empty() {
-                                song.title = new_title.to_owned();
-                            }
-
-                            if let Some(artist_id) = self.c_scrollbox.children.c_artist.chosen_id {
-                                song.artist = artist_id;
-                                song.album = None;
-                            }
-                            actions.push(Action::ModifySong(song, Req::none()));
-                        }
-                        if actions.len() == 1 {
-                            info.actions
-                                .push(GuiAction::SendToServer(actions.pop().unwrap()));
-                        } else if actions.len() > 1 {
-                            info.actions
-                                .push(GuiAction::SendToServer(Action::Multiple(actions)));
-                        }
-                    }
-                    Event::SetArtist(name, id) => {
-                        self.c_scrollbox.children.c_artist.chosen_id = id;
-                        self.c_scrollbox.children.c_artist.last_search = name.to_lowercase();
-                        self.c_scrollbox
-                            .children
-                            .c_artist
-                            .open_prog
-                            .set_target(info.time, 1.0);
-                        *self
+                        let new_title = self
                             .c_scrollbox
                             .children
-                            .c_artist
-                            .c_name
+                            .c_title
                             .c_input
                             .content
-                            .text() = name;
-                        self.c_scrollbox.children.c_artist.config_mut().redraw = true;
+                            .get_text()
+                            .trim();
+                        if !new_title.is_empty() {
+                            song.title = new_title.to_owned();
+                        }
+
+                        if let Some(artist_id) = self.c_scrollbox.children.c_artist.chosen_id {
+                            song.artist = artist_id;
+                            song.album = None;
+                        }
+                        actions.push(Action::ModifySong(song, Req::none()));
                     }
-                    Event::GeneralEvent(e) => {
-                        use super::gui_edit_any::Event as GeneralEvent;
-                        match e {
-                            GeneralEvent::RemoveTag(tag) => {
-                                for song in self.songs.iter_mut() {
-                                    if let Some(i) =
-                                        song.general.tags.iter().position(|t| *t == tag)
-                                    {
-                                        song.general.tags.remove(i);
-                                    }
-                                }
-                                if let Some(i) = (&self.c_scrollbox.children.c_tags)
-                                    .into_iter()
-                                    .position(|e| e.tag == tag)
-                                {
-                                    self.c_scrollbox.children.c_tags.remove(i);
-                                    self.c_scrollbox.config_mut().redraw = true;
+                    if actions.len() == 1 {
+                        info.actions
+                            .push(GuiAction::SendToServer(actions.pop().unwrap()));
+                    } else if actions.len() > 1 {
+                        info.actions
+                            .push(GuiAction::SendToServer(Action::Multiple(actions)));
+                    }
+                }
+                Event::SetArtist(name, id) => {
+                    self.c_scrollbox.children.c_artist.chosen_id = id;
+                    self.c_scrollbox.children.c_artist.last_search = name.to_lowercase();
+                    self.c_scrollbox
+                        .children
+                        .c_artist
+                        .open_prog
+                        .set_target(info.time, 1.0);
+                    *self
+                        .c_scrollbox
+                        .children
+                        .c_artist
+                        .c_name
+                        .c_input
+                        .content
+                        .text() = name;
+                    self.c_scrollbox
+                        .children
+                        .c_artist
+                        .config_mut()
+                        .redraw_once();
+                }
+                Event::GeneralEvent(e) => {
+                    use super::gui_edit_any::Event as GeneralEvent;
+                    match e {
+                        GeneralEvent::RemoveTag(tag) => {
+                            for song in self.songs.iter_mut() {
+                                if let Some(i) = song.general.tags.iter().position(|t| *t == tag) {
+                                    song.general.tags.remove(i);
                                 }
                             }
-                            GeneralEvent::AddTag(tag) => {
-                                self.c_scrollbox.children.c_new_tag.clear(info.time);
-                                for song in self.songs.iter_mut() {
-                                    if !song.general.tags.contains(&tag) {
-                                        song.general.tags.push(tag.clone());
-                                    }
+                            if let Some(i) = (&self.c_scrollbox.children.c_tags)
+                                .into_iter()
+                                .position(|e| e.tag == tag)
+                            {
+                                self.c_scrollbox.children.c_tags.remove(i);
+                                self.c_scrollbox.config_mut().redraw_once();
+                            }
+                        }
+                        GeneralEvent::AddTag(tag) => {
+                            self.c_scrollbox.children.c_new_tag.clear(info.time);
+                            for song in self.songs.iter_mut() {
+                                if !song.general.tags.contains(&tag) {
+                                    song.general.tags.push(tag.clone());
                                 }
-                                if !(&self.c_scrollbox.children.c_tags)
-                                    .into_iter()
-                                    .any(|e| e.tag == tag)
-                                {
-                                    self.c_scrollbox.children_heights.insert(
-                                        3 + self.c_scrollbox.children.c_tags.len(),
-                                        ELEM_HEIGHT,
-                                    );
-                                    self.c_scrollbox.children.c_tags.push(
-                                        EditorForAnyTagInList::new(
-                                            tag,
-                                            self.event_sender.clone(),
-                                            GuiElemCfg::default(),
-                                        ),
-                                    );
-                                    self.c_scrollbox.config_mut().redraw = true;
-                                }
+                            }
+                            if !(&self.c_scrollbox.children.c_tags)
+                                .into_iter()
+                                .any(|e| e.tag == tag)
+                            {
+                                self.c_scrollbox.children_heights.insert(
+                                    3 + self.c_scrollbox.children.c_tags.len(),
+                                    ELEM_HEIGHT,
+                                );
+                                let i = self.c_scrollbox.children.c_tags.len();
+                                self.c_scrollbox
+                                    .children
+                                    .c_tags
+                                    .push(EditorForAnyTagInList::new(
+                                        tag,
+                                        i,
+                                        self.event_sender.clone(),
+                                        GuiElemCfg::default(),
+                                    ));
+                                self.c_scrollbox.config_mut().redraw_once();
                             }
                         }
                     }
-                },
-                Err(_) => break,
+                }
             }
         }
         // animation
@@ -332,7 +337,7 @@ impl GuiElem for EditorForSongs {
         {
             if let Some(v) = self.c_scrollbox.children_heights.get_mut(1) {
                 *v = ELEM_HEIGHT * val as f32;
-                self.c_scrollbox.config_mut().redraw = true;
+                self.c_scrollbox.config_mut().redraw_once();
             }
             if let Some(h) = &info.helper {
                 h.request_redraw();
@@ -351,7 +356,7 @@ impl GuiElem for EditorForSongs {
                 .get_mut(3 + self.c_scrollbox.children.c_tags.len())
             {
                 *v = ELEM_HEIGHT * val as f32;
-                self.c_scrollbox.config_mut().redraw = true;
+                self.c_scrollbox.config_mut().redraw_once();
             }
             if let Some(h) = &info.helper {
                 h.request_redraw();
@@ -428,8 +433,8 @@ impl GuiElem for EditorForSongArtistChooser {
         }
 
         let search = self.c_name.c_input.content.get_text().to_lowercase();
-        let search_changed = &self.last_search != &search;
-        if self.config.redraw || search_changed {
+        let search_changed = self.last_search != search;
+        if self.config.redraw() || search_changed {
             *self.c_name.c_input.content.color() = if self.chosen_id.is_some() {
                 Color::GREEN
             } else {
@@ -480,8 +485,9 @@ impl GuiElem for EditorForSongArtistChooser {
                     )
                 })
                 .collect();
-            self.c_picker.config_mut().redraw = true;
+            self.c_picker.config_mut().redraw_once();
             self.last_search = search;
+            self.config.redrawn();
         }
     }
     fn config(&self) -> &GuiElemCfg {

@@ -177,10 +177,10 @@ impl GuiElem for NotifOverlay {
             }
         }
         // redraw
-        if !self.notifs.is_empty() {
-            if let Some(h) = &info.helper {
-                h.request_redraw();
-            }
+        if !self.notifs.is_empty()
+            && let Some(h) = &info.helper
+        {
+            h.request_redraw();
         }
     }
     fn draw_rev(&self) -> bool {
