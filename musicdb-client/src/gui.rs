@@ -3,22 +3,23 @@ use std::{
     collections::{BTreeMap, HashMap},
     io::Cursor,
     net::TcpStream,
-    sync::{mpsc::Sender, Arc, Mutex},
+    sync::{Arc, Mutex, mpsc::Sender},
     thread::JoinHandle,
     time::{Duration, Instant},
 };
 
 use musicdb_lib::{
     data::{
+        AlbumId, ArtistId, CoverId, SongId,
         database::{ClientIo, Database},
         queue::Queue,
         song::Song,
-        AlbumId, ArtistId, CoverId, SongId,
     },
     load::ToFromBytes,
-    server::{get, Action},
+    server::{Action, get},
 };
 use speedy2d::{
+    Graphics2D,
     color::Color,
     dimen::{UVec2, Vec2},
     font::Font,
@@ -28,7 +29,6 @@ use speedy2d::{
         KeyScancode, ModifiersState, MouseButton, MouseScrollDistance, UserEventSender,
         VirtualKeyCode, WindowCreationOptions, WindowHandler, WindowHelper,
     },
-    Graphics2D,
 };
 
 #[cfg(feature = "merscfg")]
@@ -775,7 +775,7 @@ pub(crate) trait GuiElemInternal: GuiElem {
                                 v.config_mut().mouse_down.2 = true;
                                 v.config_mut().mouse_pressed.2 = true;
                             }
-                            MouseButton::Other(_) => {}
+                            _ => {}
                         }
                         Some(v.mouse_down(e, button))
                     } else {
@@ -820,7 +820,7 @@ pub(crate) trait GuiElemInternal: GuiElem {
                             v.config_mut().mouse_down.2 = false;
                             v.config_mut().mouse_pressed.2 = false;
                         }
-                        MouseButton::Other(_) => {}
+                        _ => {}
                     }
                     vec.extend(v.mouse_up(e, button));
                 }
@@ -1791,7 +1791,9 @@ impl WindowHandler<GuiEvent> for Gui {
                     MersCfg::run(&mut gc, self, |m| &m.func_library_updated);
                     self.gui_config = Some(gc);
                 } else {
-                    eprintln!("WARN: Skipping call to merscfg's library_updated because gui_config is not available");
+                    eprintln!(
+                        "WARN: Skipping call to merscfg's library_updated because gui_config is not available"
+                    );
                 }
                 self.gui._recursive_all(true, &mut |e| e.updated_library());
                 helper.request_redraw();
@@ -1802,7 +1804,9 @@ impl WindowHandler<GuiEvent> for Gui {
                     MersCfg::run(&mut gc, self, |m| &m.func_queue_updated);
                     self.gui_config = Some(gc);
                 } else {
-                    eprintln!("WARN: Skipping call to merscfg's queue_updated because gui_config is not available");
+                    eprintln!(
+                        "WARN: Skipping call to merscfg's queue_updated because gui_config is not available"
+                    );
                 }
                 self.gui._recursive_all(true, &mut |e| e.updated_queue());
                 helper.request_redraw();

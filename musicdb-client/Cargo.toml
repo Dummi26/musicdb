@@ -10,8 +10,8 @@ musicdb-lib = { path = "../musicdb-lib", default-features = false }
 clap = { version = "4.6.5", features = ["derive"] }
 directories = "6.0.0"
 regex = "1.13.1"
-speedy2d = { version = "2.1.0", optional = true }
-toml = "0.9.5"
+speedy2d = { version = "3.1.0", optional = true }
+toml = "1.1.4"
 # musicdb-mers = { version = "0.1.0", path = "../musicdb-mers", optional = true }
 uianimator = "0.1.1"
 
