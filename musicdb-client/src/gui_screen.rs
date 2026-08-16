@@ -57,6 +57,7 @@ pub struct GuiScreen {
     // pub settings: (bool, Option<Instant>),
     pub settings: (bool, Option<Instant>),
     pub last_interaction: Instant,
+    idle_changing: bool,
     idle_timeout: Option<f64>,
     pub prev_mouse_pos: Vec2,
     pub hotkey: Hotkey,
@@ -173,6 +174,7 @@ impl GuiScreen {
             idle: DefaultAnimatorF64Quadratic::new(0.0, 0.67),
             settings: (false, None),
             last_interaction: Instant::now(),
+            idle_changing: false,
             idle_timeout: Some(60.0),
             prev_mouse_pos: Vec2::ZERO,
         }
@@ -371,7 +373,7 @@ impl GuiElem for GuiScreen {
                 .duration_since(self.last_interaction)
                 .as_secs_f32()
                 / 3.0;
-            let cv = if hide >= 1.0 {
+            if hide >= 1.0 {
                 self.c_idle_display.c_idle_exit_hint.config_mut().enabled = false;
                 false
             } else {
@@ -383,18 +385,14 @@ impl GuiElem for GuiScreen {
                 self.c_idle_display.c_idle_exit_hint.config_mut().pos =
                     Rectangle::from_tuples((-dx, -dy), (w - dx, h - dy));
                 true
-            };
-            if let Some(h) = &info.helper {
-                h.set_cursor_visible(cv);
             }
-            cv
         } else {
             false
         };
         // request_redraw for animations
         let idle_value = self.idle.get_value(info.time) as f32;
         let idle_changed = self.idle.target() as f32 != idle_value;
-        if idle_changed || idle_exit_anim || self.settings.1.is_some() {
+        if idle_changed || idle_exit_anim || self.settings.1.is_some() || self.idle_changing {
             if let Some(h) = &info.helper {
                 h.request_redraw()
             }
@@ -402,7 +400,7 @@ impl GuiElem for GuiScreen {
             let enable_normal_ui = idle_value < 1.0;
             self.set_normal_ui_enabled(enable_normal_ui);
             if let Some(h) = &info.helper {
-                h.set_cursor_visible(enable_normal_ui);
+                h.set_cursor_visible(enable_normal_ui || idle_exit_anim);
             }
             let idcfg = self.c_idle_display.config_mut();
             let top = 1.0 - idle_value;
@@ -412,6 +410,7 @@ impl GuiElem for GuiScreen {
             self.c_status_bar.idle_mode = idle_value;
             self.c_idle_display.idle_mode = idle_value;
         }
+        self.idle_changing = idle_changed || idle_exit_anim || self.settings.1.is_some();
         // animations: settings
         if self.settings.1.is_some() {
             let p1 = Self::get_prog(&mut self.settings, 0.3);
