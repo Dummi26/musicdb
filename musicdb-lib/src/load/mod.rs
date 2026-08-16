@@ -55,6 +55,20 @@ impl ToFromBytes for PathBuf {
     }
 }
 
+pub fn vec_to_bytes<'a, C, T>(
+    vec: impl ExactSizeIterator<Item = &'a C>,
+    s: &mut T,
+) -> Result<(), std::io::Error>
+where
+    C: ToFromBytes + 'a,
+    T: Write,
+{
+    vec.len().to_bytes(s)?;
+    for elem in vec {
+        elem.to_bytes(s)?;
+    }
+    Ok(())
+}
 impl<C> ToFromBytes for Vec<C>
 where
     C: ToFromBytes,

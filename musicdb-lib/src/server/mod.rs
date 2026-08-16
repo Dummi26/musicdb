@@ -12,7 +12,6 @@ use colorize::AnsiColor;
 
 #[cfg(feature = "playback")]
 use crate::player::Player;
-use crate::server::get::handle_one_connection_as_get;
 use crate::{
     data::{
         AlbumId, ArtistId, SongId,
@@ -24,6 +23,7 @@ use crate::{
     },
     load::ToFromBytes,
 };
+use crate::{load::vec_to_bytes, server::get::handle_one_connection_as_get};
 
 #[derive(Clone, Debug)]
 pub struct Command {
@@ -522,6 +522,21 @@ const SUBBYTE_TAG_ALBUM_PROPERTY_UNSET: u8 = 0b10_100_001;
 const SUBBYTE_TAG_ARTIST_PROPERTY_SET: u8 = 0b10_100_010;
 const SUBBYTE_TAG_ARTIST_PROPERTY_UNSET: u8 = 0b10_100_100;
 
+pub fn sync_database_to_bytes_packed<'a, T>(
+    seq: u8,
+    a: impl ExactSizeIterator<Item = &'a Artist>,
+    b: impl ExactSizeIterator<Item = &'a Album>,
+    c: impl ExactSizeIterator<Item = &'a Song>,
+    s: &mut T,
+) -> Result<(), std::io::Error>
+where
+    T: Write,
+{
+    s.write_all(&[seq])?;
+    sync_database_to_bytes(a, b, c, s)?;
+    Ok(())
+}
+
 impl ToFromBytes for Command {
     fn to_bytes<T>(&self, s: &mut T) -> Result<(), std::io::Error>
     where
@@ -556,6 +571,22 @@ impl ToFromBytes for Req {
         Ok(Self(ToFromBytes::from_bytes(s)?))
     }
 }
+
+pub fn sync_database_to_bytes<'a, T>(
+    a: impl ExactSizeIterator<Item = &'a Artist>,
+    b: impl ExactSizeIterator<Item = &'a Album>,
+    c: impl ExactSizeIterator<Item = &'a Song>,
+    s: &mut T,
+) -> Result<(), std::io::Error>
+where
+    T: Write,
+{
+    s.write_all(&[BYTE_SYNC_DATABASE])?;
+    vec_to_bytes(a, s)?;
+    vec_to_bytes(b, s)?;
+    vec_to_bytes(c, s)?;
+    Ok(())
+}
 impl ToFromBytes for Action {
     fn to_bytes<T>(&self, s: &mut T) -> Result<(), std::io::Error>
     where
@@ -567,10 +598,7 @@ impl ToFromBytes for Action {
             Self::Stop => s.write_all(&[BYTE_STOP])?,
             Self::NextSong => s.write_all(&[BYTE_NEXT_SONG])?,
             Self::SyncDatabase(a, b, c) => {
-                s.write_all(&[BYTE_SYNC_DATABASE])?;
-                a.to_bytes(s)?;
-                b.to_bytes(s)?;
-                c.to_bytes(s)?;
+                sync_database_to_bytes(a.iter(), b.iter(), c.iter(), s)?;
             }
             Self::QueueUpdate(index, new_data, req) => {
                 s.write_all(&[BYTE_QUEUE_UPDATE])?;

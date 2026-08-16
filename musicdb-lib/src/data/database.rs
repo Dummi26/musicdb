@@ -4,7 +4,7 @@ use std::{
     fs::{self, File},
     io::{BufReader, Read, Write},
     path::{Path, PathBuf},
-    sync::{mpsc, Arc, Mutex},
+    sync::{Arc, Mutex, mpsc},
     time::{Duration, Instant},
 };
 
@@ -13,15 +13,15 @@ use rand::rng;
 
 use crate::{
     load::ToFromBytes,
-    server::{Action, Command, Commander, Req},
+    server::{Action, Command, Commander, Req, sync_database_to_bytes_packed},
 };
 
 use super::{
+    AlbumId, ArtistId, CoverId, DatabaseLocation, SongId,
     album::Album,
     artist::Artist,
     queue::{Queue, QueueContent, QueueFolder},
     song::Song,
-    AlbumId, ArtistId, CoverId, DatabaseLocation, SongId,
 };
 
 pub struct Database {
@@ -211,7 +211,7 @@ impl Database {
                             "[{}] Couldn't remove Song {} from previous album, because no album with the ID {} was found.",
                             "ERR!".red(),
                             song.id,
-                                        a
+                            a
                         );
                     }
                 } else {
@@ -219,17 +219,30 @@ impl Database {
                         if let Some(i) = a.singles.iter().position(|s| *s == song.id) {
                             a.singles.remove(i);
                         } else {
-                            eprintln!("[{}] Couldn't remove Song {} from Artist {} singles, because that song wasn't found in that artist.", "WARN".yellow(), song.id, prev_song.artist);
+                            eprintln!(
+                                "[{}] Couldn't remove Song {} from Artist {} singles, because that song wasn't found in that artist.",
+                                "WARN".yellow(),
+                                song.id,
+                                prev_song.artist
+                            );
                         }
                     } else {
-                        eprintln!("[{}] Couldn't remove Song {} from Artist {} singles, because that artist wasn't found.", "ERR!".red(), song.id, prev_song.artist);
+                        eprintln!(
+                            "[{}] Couldn't remove Song {} from Artist {} singles, because that artist wasn't found.",
+                            "ERR!".red(),
+                            song.id,
+                            prev_song.artist
+                        );
                     }
                 }
                 // add new song to album/artist
                 if let Some(a) = song.album {
                     if let Some(a) = self.albums.get_mut(&a) {
                         if song.artist != a.artist {
-                            eprintln!("[{}] Changing song's artist because it doesn't match the specified album's artist.", "WARN".yellow());
+                            eprintln!(
+                                "[{}] Changing song's artist because it doesn't match the specified album's artist.",
+                                "WARN".yellow()
+                            );
                             song.artist = a.artist;
                         }
                         if !a.songs.contains(&song.id) {
@@ -239,7 +252,8 @@ impl Database {
                         eprintln!(
                             "[{}] Couldn't add Song {} to new album, because no album with the ID {} was found.",
                             "ERR!".red(),
-                            song.id, a
+                            song.id,
+                            a
                         );
                     }
                 } else {
@@ -248,7 +262,12 @@ impl Database {
                             a.singles.push(song.id);
                         }
                     } else {
-                        eprintln!("[{}] Couldn't add Song {} to Artist {} singles, because that artist wasn't found.", "ERR!".red(), song.id, song.artist);
+                        eprintln!(
+                            "[{}] Couldn't add Song {} to Artist {} singles, because that artist wasn't found.",
+                            "ERR!".red(),
+                            song.id,
+                            song.artist
+                        );
                     }
                 }
             }
@@ -271,7 +290,11 @@ impl Database {
             let prev_songs = album.songs.iter().copied().collect::<BTreeSet<_>>();
             // check if we would end up with songs that aren't referenced anywhere, and, if yes, don't do anything.
             if prev_songs.difference(&new_songs).next().is_some() {
-                eprintln!("[{}] Can't update Album {} because some songs that used to be in this album are not included in the new data.", "ERR!".red(), album.id);
+                eprintln!(
+                    "[{}] Can't update Album {} because some songs that used to be in this album are not included in the new data.",
+                    "ERR!".red(),
+                    album.id
+                );
                 return Err(());
             }
 
@@ -291,11 +314,11 @@ impl Database {
                     }
                 } else {
                     eprintln!(
-                            "[{}] Couldn't remove Album {} from Artist {}, because no artist with that ID exists.",
-                            "ERR!".red(),
-                            prev_album.id,
-                            prev_album.artist
-                        );
+                        "[{}] Couldn't remove Album {} from Artist {}, because no artist with that ID exists.",
+                        "ERR!".red(),
+                        prev_album.id,
+                        prev_album.artist
+                    );
                 }
                 // add album to new artist
                 if let Some(artist) = self.artists.get_mut(&album.artist) {
@@ -311,11 +334,11 @@ impl Database {
                     }
                 } else {
                     eprintln!(
-                            "[{}] Couldn't add Album {} to Artist {}, because no artist with that ID exists.",
-                            "ERR!".red(),
-                            album.id,
-                            album.artist
-                        );
+                        "[{}] Couldn't add Album {} to Artist {}, because no artist with that ID exists.",
+                        "ERR!".red(),
+                        album.id,
+                        album.artist
+                    );
                 }
                 // change artist of songs in album (if album artist is changed AND album has gotten more songs, this will be done twice for some songs, but that is okay)
                 for song in &album.songs {
@@ -356,11 +379,11 @@ impl Database {
                                 }
                             } else {
                                 eprintln!(
-                                        "[{}] Couldn't remove Song {} from its previous album, Album {}, because no album with that ID exists.",
-                                        "WARN".yellow(),
-                                        song.id,
-                                        prev_album
-                                    );
+                                    "[{}] Couldn't remove Song {} from its previous album, Album {}, because no album with that ID exists.",
+                                    "WARN".yellow(),
+                                    song.id,
+                                    prev_album
+                                );
                             }
                         }
                     }
@@ -392,14 +415,22 @@ impl Database {
             let prev_albums = prev_artist.albums.iter().copied().collect::<BTreeSet<_>>();
             let new_albums = artist.albums.iter().copied().collect::<BTreeSet<_>>();
             if prev_albums.difference(&new_albums).next().is_some() {
-                eprintln!("[{}] Can't update Artist {} because some albums that used to be in this artist are not included in the new data.", "ERR!".red(), artist.id);
+                eprintln!(
+                    "[{}] Can't update Artist {} because some albums that used to be in this artist are not included in the new data.",
+                    "ERR!".red(),
+                    artist.id
+                );
                 return Err(());
             }
 
             let prev_singles = prev_artist.singles.iter().copied().collect::<BTreeSet<_>>();
             let new_singles = artist.singles.iter().copied().collect::<BTreeSet<_>>();
             if prev_singles.difference(&new_singles).next().is_some() {
-                eprintln!("[{}] Can't update Artist {} because some singles that used to be in this artist are not included in the new data.", "ERR!".red(), artist.id);
+                eprintln!(
+                    "[{}] Can't update Artist {} because some singles that used to be in this artist are not included in the new data.",
+                    "ERR!".red(),
+                    artist.id
+                );
                 return Err(());
             }
 
@@ -410,21 +441,42 @@ impl Database {
                         if let Some(i) = a.albums.iter().position(|a| *a == album.id) {
                             a.albums.remove(i);
                         } else {
-                            eprintln!("[{}] Couldn't remove Album {} from Artist {} because that artist doesn't contain that album.", "ERR!".red(), album.id, album.artist);
+                            eprintln!(
+                                "[{}] Couldn't remove Album {} from Artist {} because that artist doesn't contain that album.",
+                                "ERR!".red(),
+                                album.id,
+                                album.artist
+                            );
                         }
                     } else {
-                        eprintln!("[{}] Couldn't remove Album {} from Artist {} because that artist doesn't exist.", "ERR!".red(), album.id, album.artist);
+                        eprintln!(
+                            "[{}] Couldn't remove Album {} from Artist {} because that artist doesn't exist.",
+                            "ERR!".red(),
+                            album.id,
+                            album.artist
+                        );
                     }
                     album.artist = artist.id;
                     for song in &album.songs {
                         if let Some(song) = self.songs.get_mut(song) {
                             song.artist = artist.id;
                         } else {
-                            eprintln!("[{}] Couldn't change Song {} artist to Artist {} because no song with that ID exists (should change because song is newly added to Album {}).", "ERR!".red(), song, artist.id, album.id);
+                            eprintln!(
+                                "[{}] Couldn't change Song {} artist to Artist {} because no song with that ID exists (should change because song is newly added to Album {}).",
+                                "ERR!".red(),
+                                song,
+                                artist.id,
+                                album.id
+                            );
                         }
                     }
                 } else {
-                    eprintln!("[{}] Couldn't move Album {} to Artist {} because no album with that ID exists.", "ERR!".red(), album, artist.id);
+                    eprintln!(
+                        "[{}] Couldn't move Album {} to Artist {} because no album with that ID exists.",
+                        "ERR!".red(),
+                        album,
+                        artist.id
+                    );
                 }
             }
 
@@ -437,25 +489,50 @@ impl Database {
                             if let Some(i) = a.songs.iter().position(|s| *s == song.id) {
                                 a.songs.remove(i);
                             } else {
-                                eprintln!("[{}] Couldn't remove Song {} from Album {} because the album doesn't contain that song.", "ERR!".red(), song.id, a.id);
+                                eprintln!(
+                                    "[{}] Couldn't remove Song {} from Album {} because the album doesn't contain that song.",
+                                    "ERR!".red(),
+                                    song.id,
+                                    a.id
+                                );
                             }
                         } else {
-                            eprintln!("[{}] Couldn't remove Song {} from Album {} because no album with that ID exists.", "ERR!".red(), song.id, a);
+                            eprintln!(
+                                "[{}] Couldn't remove Song {} from Album {} because no album with that ID exists.",
+                                "ERR!".red(),
+                                song.id,
+                                a
+                            );
                         }
                     } else {
                         if let Some(a) = self.artists.get_mut(&song.artist) {
                             if let Some(i) = a.singles.iter().position(|s| *s == song.id) {
                                 a.singles.remove(i);
                             } else {
-                                eprintln!("[{}] Couldn't remove Song {} from Artist {} because the artist doesn't contain that song.", "ERR!".red(), song.id, a.id);
+                                eprintln!(
+                                    "[{}] Couldn't remove Song {} from Artist {} because the artist doesn't contain that song.",
+                                    "ERR!".red(),
+                                    song.id,
+                                    a.id
+                                );
                             }
                         } else {
-                            eprintln!("[{}] Couldn't remove Song {} from Artist {} because no artist with that ID exists.", "ERR!".red(), song.id, song.artist);
+                            eprintln!(
+                                "[{}] Couldn't remove Song {} from Artist {} because no artist with that ID exists.",
+                                "ERR!".red(),
+                                song.id,
+                                song.artist
+                            );
                         }
                     }
                     song.artist = artist.id;
                 } else {
-                    eprintln!("[{}] Couldn't move Song {} to Artist {} singles because no song with that ID exists.", "ERR!".red(), song, artist.id);
+                    eprintln!(
+                        "[{}] Couldn't move Song {} to Artist {} singles because no song with that ID exists.",
+                        "ERR!".red(),
+                        song,
+                        artist.id
+                    );
                 }
             }
 
@@ -499,14 +576,21 @@ impl Database {
     }
 
     pub fn init_connection<T: Write>(&self, con: &mut T) -> Result<(), std::io::Error> {
-        // TODO! this is slow because it clones everything - there has to be a better way...
-        self.seq
-            .pack(Action::SyncDatabase(
-                self.artists().iter().map(|v| v.1.clone()).collect(),
-                self.albums().iter().map(|v| v.1.clone()).collect(),
-                self.songs().iter().map(|v| v.1.clone()).collect(),
-            ))
-            .to_bytes(con)?;
+        // // TODO! this is slow because it clones everything - there has to be a better way...
+        // self.seq
+        //     .pack(Action::SyncDatabase(
+        //         self.artists().iter().map(|v| v.1.clone()).collect(),
+        //         self.albums().iter().map(|v| v.1.clone()).collect(),
+        //         self.songs().iter().map(|v| v.1.clone()).collect(),
+        //     ))
+        //     .to_bytes(con)?;
+        sync_database_to_bytes_packed(
+            self.seq.pack(Action::Multiple(vec![])).seq,
+            self.artists().values(),
+            self.albums().values(),
+            self.songs().values(),
+            con,
+        )?;
         self.seq
             .pack(Action::QueueUpdate(vec![], self.queue.clone(), Req::none()))
             .to_bytes(con)?;
