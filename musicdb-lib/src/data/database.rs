@@ -644,15 +644,24 @@ impl Database {
         self.apply_action_unchecked_seq(command.action, client)
     }
     pub fn apply_action_unchecked_seq(&mut self, action: Action, client: Option<u64>) {
-        self.apply_action_impl(action, client, true, |s| &mut s.queue)
+        self.apply_action_impl(action, client, true, None)
     }
     fn apply_action_impl(
         &mut self,
         mut action: Action,
         client: Option<u64>,
         broadcast: bool,
-        queue: impl for<'a> Fn(&'a mut Self) -> &'a mut Queue,
+        queue: Option<&str>,
     ) {
+        fn q<'a>(queue: Option<&str>, s: &'a mut Database) -> &'a mut Queue {
+            if let Some(queue) = queue {
+                s.queues
+                    .entry(queue.to_owned())
+                    .or_insert_with(|| QueueContent::Folder(QueueFolder::default()).into())
+            } else {
+                &mut s.queue
+            }
+        }
         if !self.is_client() {
             if let Action::ErrorInfo(t, _) = &mut action {
                 // clients can send ErrorInfo to the server and it will show up on other clients,
@@ -683,8 +692,8 @@ impl Database {
             Action::NextSong => {
                 if !Queue::advance_index_db(self) {
                     // end of queue
-                    self.apply_action_impl(Action::Pause, client, broadcast, &queue);
-                    queue(self).init();
+                    self.apply_action_impl(Action::Pause, client, broadcast, queue);
+                    q(queue, self).init();
                 }
             }
             Action::Save => {
@@ -694,22 +703,22 @@ impl Database {
             }
             Action::SyncDatabase(a, b, c) => self.sync(a, b, c),
             Action::QueueUpdate(index, new_data, _) => {
-                if let Some(v) = queue(self).get_item_at_index_mut(&index, 0) {
+                if let Some(v) = q(queue, self).get_item_at_index_mut(&index, 0) {
                     *v = new_data;
                 }
             }
             Action::QueueAdd(index, new_data, _) => {
-                if let Some(v) = queue(self).get_item_at_index_mut(&index, 0) {
+                if let Some(v) = q(queue, self).get_item_at_index_mut(&index, 0) {
                     v.add_to_end(new_data, false);
                 }
             }
             Action::QueueInsert(index, pos, new_data, _) => {
-                if let Some(v) = queue(self).get_item_at_index_mut(&index, 0) {
+                if let Some(v) = q(queue, self).get_item_at_index_mut(&index, 0) {
                     v.insert(new_data, pos, false);
                 }
             }
             Action::QueueRemove(index) => {
-                queue(self).remove_by_index(&index, 0);
+                q(queue, self).remove_by_index(&index, 0);
             }
             Action::QueueMove(index_from, mut index_to) => 'queue_move: {
                 if index_to.len() == 0 || index_to.starts_with(&index_from) {
@@ -717,8 +726,8 @@ impl Database {
                 }
                 // if same parent path, perform folder move operation instead
                 if index_from[0..index_from.len() - 1] == index_to[0..index_to.len() - 1] {
-                    if let Some(parent) =
-                        queue(self).get_item_at_index_mut(&index_from[0..index_from.len() - 1], 0)
+                    if let Some(parent) = q(queue, self)
+                        .get_item_at_index_mut(&index_from[0..index_from.len() - 1], 0)
                     {
                         if let QueueContent::Folder(folder) = parent.content_mut() {
                             let i1 = index_from[index_from.len() - 1];
@@ -733,8 +742,8 @@ impl Database {
                     }
                 }
                 // otherwise, remove then insert
-                let was_current = queue(self).is_current(&index_from);
-                if let Some(elem) = queue(self).remove_by_index(&index_from, 0) {
+                let was_current = q(queue, self).is_current(&index_from);
+                if let Some(elem) = q(queue, self).remove_by_index(&index_from, 0) {
                     if index_to.len() >= index_from.len()
                         && index_to.starts_with(&index_from[0..index_from.len() - 1])
                         && index_to[index_from.len() - 1] > index_from[index_from.len() - 1]
@@ -742,11 +751,11 @@ impl Database {
                         index_to[index_from.len() - 1] -= 1;
                     }
                     if let Some(parent) =
-                        queue(self).get_item_at_index_mut(&index_to[0..index_to.len() - 1], 0)
+                        q(queue, self).get_item_at_index_mut(&index_to[0..index_to.len() - 1], 0)
                     {
                         parent.insert(vec![elem], index_to[index_to.len() - 1], true);
                         if was_current {
-                            queue(self).set_index_inner(&index_to, 0, vec![], true);
+                            q(queue, self).set_index_inner(&index_to, 0, vec![], true);
                         }
                     }
                 }
@@ -756,19 +765,19 @@ impl Database {
                     break 'queue_move_into;
                 }
                 // remove then insert
-                let was_current = queue(self).is_current(&index_from);
-                if let Some(elem) = queue(self).remove_by_index(&index_from, 0) {
+                let was_current = q(queue, self).is_current(&index_from);
+                if let Some(elem) = q(queue, self).remove_by_index(&index_from, 0) {
                     if parent_to.len() >= index_from.len()
                         && parent_to.starts_with(&index_from[0..index_from.len() - 1])
                         && parent_to[index_from.len() - 1] > index_from[index_from.len() - 1]
                     {
                         parent_to[index_from.len() - 1] -= 1;
                     }
-                    if let Some(parent) = queue(self).get_item_at_index_mut(&parent_to, 0) {
+                    if let Some(parent) = q(queue, self).get_item_at_index_mut(&parent_to, 0) {
                         if let Some(i) = parent.add_to_end(vec![elem], true) {
                             if was_current {
                                 parent_to.push(i);
-                                queue(self).set_index_inner(&parent_to, 0, vec![], true);
+                                q(queue, self).set_index_inner(&parent_to, 0, vec![], true);
                             }
                         }
                     }
@@ -777,7 +786,7 @@ impl Database {
             Action::QueueGoto(index) => Queue::set_index_db(self, &index),
             Action::QueueShuffle(path, set_index) => {
                 if !self.is_client() {
-                    if let Some(elem) = queue(self).get_item_at_index_mut(&path, 0) {
+                    if let Some(elem) = q(queue, self).get_item_at_index_mut(&path, 0) {
                         if let QueueContent::Folder(QueueFolder {
                             index: _,
                             content,
@@ -802,7 +811,7 @@ impl Database {
                 }
             }
             Action::QueueSetShuffle(path, ord, set_index) => {
-                if let Some(elem) = queue(self).get_item_at_index_mut(&path, 0) {
+                if let Some(elem) = q(queue, self).get_item_at_index_mut(&path, 0) {
                     if let QueueContent::Folder(QueueFolder {
                         index,
                         content,
@@ -841,7 +850,7 @@ impl Database {
                 }
             }
             Action::QueueUnshuffle(path) => {
-                if let Some(elem) = queue(self).get_item_at_index_mut(&path, 0) {
+                if let Some(elem) = q(queue, self).get_item_at_index_mut(&path, 0) {
                     if let QueueContent::Folder(QueueFolder {
                         index,
                         content: _,
@@ -858,11 +867,7 @@ impl Database {
             }
             Action::SavedQueue(queue, actions) => {
                 for action in actions {
-                    self.apply_action_impl(action, client, false, |s| {
-                        s.queues
-                            .entry(queue.clone())
-                            .or_insert_with(|| QueueContent::Folder(QueueFolder::default()).into())
-                    });
+                    self.apply_action_impl(action, client, false, Some(queue.as_str()));
                 }
             }
             Action::AddSong(song, _) => {
@@ -990,7 +995,7 @@ impl Database {
             }
             Action::Multiple(actions) => {
                 for action in actions {
-                    self.apply_action_impl(action, client, broadcast, &queue);
+                    self.apply_action_impl(action, client, broadcast, queue);
                 }
             }
             Action::InitComplete => {
