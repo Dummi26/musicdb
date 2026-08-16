@@ -158,6 +158,7 @@ fn main() {
                         | QueueGoto(..) | QueueShuffle(..) | QueueSetShuffle(..)
                         | QueueUnshuffle(..) | Denied(..) => None,
                         SyncDatabase(..)
+                        | SavedQueue(..)
                         | AddSong(..)
                         | AddAlbum(..)
                         | AddArtist(..)
@@ -230,7 +231,9 @@ fn main() {
             #[cfg(not(feature = "website"))]
             {
                 let _ = addr;
-                eprintln!("Website support requires the 'website' feature to be enabled when compiling the server!");
+                eprintln!(
+                    "Website support requires the 'website' feature to be enabled when compiling the server!"
+                );
                 std::process::exit(80);
             }
             #[cfg(feature = "website")]

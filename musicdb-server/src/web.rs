@@ -1,16 +1,16 @@
 use std::net::SocketAddr;
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
 
+use musicdb_lib::data::SongId;
 use musicdb_lib::data::album::Album;
 use musicdb_lib::data::artist::Artist;
 use musicdb_lib::data::database::{Database, UpdateEndpoint};
 use musicdb_lib::data::queue::{Queue, QueueContent, QueueFolder};
 use musicdb_lib::data::song::Song;
-use musicdb_lib::data::SongId;
 use musicdb_lib::server::{Action, Command, Req};
 use rocket::futures::{SinkExt, StreamExt};
 use rocket::response::content::RawHtml;
-use rocket::{get, routes, Config, State};
+use rocket::{Config, State, get, routes};
 use rocket_seek_stream::SeekStream;
 use rocket_ws::{Message, WebSocket};
 use tokio::select;
@@ -38,8 +38,7 @@ use tokio::sync::mpsc::Sender;
 
 */
 
-const HTML_START: &'static str =
-    "<!DOCTYPE html><html><head><meta charset=\"UTF-8\"><meta name=\"color-scheme\" content=\"light dark\">";
+const HTML_START: &'static str = "<!DOCTYPE html><html><head><meta charset=\"UTF-8\"><meta name=\"color-scheme\" content=\"light dark\">";
 const HTML_SEP: &'static str = "</head><body>";
 const HTML_END: &'static str = "</body></html>";
 
@@ -839,6 +838,7 @@ pub fn main(
                     Action::Stop => msgs.push(Message::text("stop")),
                     Action::NextSong => msgs.push(Message::text("next")),
                     Action::SyncDatabase(..)
+                    | Action::SavedQueue(..)
                     | Action::AddSong(..)
                     | Action::AddAlbum(..)
                     | Action::AddArtist(..)
