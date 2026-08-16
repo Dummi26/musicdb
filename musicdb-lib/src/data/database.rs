@@ -1,6 +1,6 @@
 use rand::prelude::SliceRandom;
 use std::{
-    collections::{BTreeSet, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap},
     fs::{self, File},
     io::{BufReader, Read, Write},
     path::{Path, PathBuf},
@@ -36,6 +36,7 @@ pub struct Database {
     albums: HashMap<AlbumId, Album>,
     songs: HashMap<SongId, Song>,
     covers: HashMap<CoverId, Cover>,
+    queues: BTreeMap<String, Queue>,
     /// clients can access files in this directory if they know the relative path.
     /// can be used to embed custom images in tags of songs/albums/artists.
     /// None -> no access
@@ -642,7 +643,16 @@ impl Database {
         }
         self.apply_action_unchecked_seq(command.action, client)
     }
-    pub fn apply_action_unchecked_seq(&mut self, mut action: Action, client: Option<u64>) {
+    pub fn apply_action_unchecked_seq(&mut self, action: Action, client: Option<u64>) {
+        self.apply_action_impl(action, client, true, |s| &mut s.queue)
+    }
+    fn apply_action_impl(
+        &mut self,
+        mut action: Action,
+        client: Option<u64>,
+        broadcast: bool,
+        queue: impl for<'a> Fn(&'a mut Self) -> &'a mut Queue,
+    ) {
         if !self.is_client() {
             if let Action::ErrorInfo(t, _) = &mut action {
                 // clients can send ErrorInfo to the server and it will show up on other clients,
@@ -660,7 +670,11 @@ impl Database {
             // will be broadcast individually
             Action::Multiple(_) => (),
             // since db.update_endpoints is empty for clients, this won't cause unwanted back and forth
-            _ => action = self.broadcast_update(action, client),
+            _ => {
+                if broadcast {
+                    action = self.broadcast_update(action, client);
+                }
+            }
         }
         match action {
             Action::Resume => self.playing = true,
@@ -669,8 +683,8 @@ impl Database {
             Action::NextSong => {
                 if !Queue::advance_index_db(self) {
                     // end of queue
-                    self.apply_action_unchecked_seq(Action::Pause, client);
-                    self.queue.init();
+                    self.apply_action_impl(Action::Pause, client, broadcast, &queue);
+                    queue(self).init();
                 }
             }
             Action::Save => {
@@ -680,22 +694,22 @@ impl Database {
             }
             Action::SyncDatabase(a, b, c) => self.sync(a, b, c),
             Action::QueueUpdate(index, new_data, _) => {
-                if let Some(v) = self.queue.get_item_at_index_mut(&index, 0) {
+                if let Some(v) = queue(self).get_item_at_index_mut(&index, 0) {
                     *v = new_data;
                 }
             }
             Action::QueueAdd(index, new_data, _) => {
-                if let Some(v) = self.queue.get_item_at_index_mut(&index, 0) {
+                if let Some(v) = queue(self).get_item_at_index_mut(&index, 0) {
                     v.add_to_end(new_data, false);
                 }
             }
             Action::QueueInsert(index, pos, new_data, _) => {
-                if let Some(v) = self.queue.get_item_at_index_mut(&index, 0) {
+                if let Some(v) = queue(self).get_item_at_index_mut(&index, 0) {
                     v.insert(new_data, pos, false);
                 }
             }
             Action::QueueRemove(index) => {
-                self.queue.remove_by_index(&index, 0);
+                queue(self).remove_by_index(&index, 0);
             }
             Action::QueueMove(index_from, mut index_to) => 'queue_move: {
                 if index_to.len() == 0 || index_to.starts_with(&index_from) {
@@ -703,9 +717,8 @@ impl Database {
                 }
                 // if same parent path, perform folder move operation instead
                 if index_from[0..index_from.len() - 1] == index_to[0..index_to.len() - 1] {
-                    if let Some(parent) = self
-                        .queue
-                        .get_item_at_index_mut(&index_from[0..index_from.len() - 1], 0)
+                    if let Some(parent) =
+                        queue(self).get_item_at_index_mut(&index_from[0..index_from.len() - 1], 0)
                     {
                         if let QueueContent::Folder(folder) = parent.content_mut() {
                             let i1 = index_from[index_from.len() - 1];
@@ -720,21 +733,20 @@ impl Database {
                     }
                 }
                 // otherwise, remove then insert
-                let was_current = self.queue.is_current(&index_from);
-                if let Some(elem) = self.queue.remove_by_index(&index_from, 0) {
+                let was_current = queue(self).is_current(&index_from);
+                if let Some(elem) = queue(self).remove_by_index(&index_from, 0) {
                     if index_to.len() >= index_from.len()
                         && index_to.starts_with(&index_from[0..index_from.len() - 1])
                         && index_to[index_from.len() - 1] > index_from[index_from.len() - 1]
                     {
                         index_to[index_from.len() - 1] -= 1;
                     }
-                    if let Some(parent) = self
-                        .queue
-                        .get_item_at_index_mut(&index_to[0..index_to.len() - 1], 0)
+                    if let Some(parent) =
+                        queue(self).get_item_at_index_mut(&index_to[0..index_to.len() - 1], 0)
                     {
                         parent.insert(vec![elem], index_to[index_to.len() - 1], true);
                         if was_current {
-                            self.queue.set_index_inner(&index_to, 0, vec![], true);
+                            queue(self).set_index_inner(&index_to, 0, vec![], true);
                         }
                     }
                 }
@@ -744,19 +756,19 @@ impl Database {
                     break 'queue_move_into;
                 }
                 // remove then insert
-                let was_current = self.queue.is_current(&index_from);
-                if let Some(elem) = self.queue.remove_by_index(&index_from, 0) {
+                let was_current = queue(self).is_current(&index_from);
+                if let Some(elem) = queue(self).remove_by_index(&index_from, 0) {
                     if parent_to.len() >= index_from.len()
                         && parent_to.starts_with(&index_from[0..index_from.len() - 1])
                         && parent_to[index_from.len() - 1] > index_from[index_from.len() - 1]
                     {
                         parent_to[index_from.len() - 1] -= 1;
                     }
-                    if let Some(parent) = self.queue.get_item_at_index_mut(&parent_to, 0) {
+                    if let Some(parent) = queue(self).get_item_at_index_mut(&parent_to, 0) {
                         if let Some(i) = parent.add_to_end(vec![elem], true) {
                             if was_current {
                                 parent_to.push(i);
-                                self.queue.set_index_inner(&parent_to, 0, vec![], true);
+                                queue(self).set_index_inner(&parent_to, 0, vec![], true);
                             }
                         }
                     }
@@ -765,7 +777,7 @@ impl Database {
             Action::QueueGoto(index) => Queue::set_index_db(self, &index),
             Action::QueueShuffle(path, set_index) => {
                 if !self.is_client() {
-                    if let Some(elem) = self.queue.get_item_at_index_mut(&path, 0) {
+                    if let Some(elem) = queue(self).get_item_at_index_mut(&path, 0) {
                         if let QueueContent::Folder(QueueFolder {
                             index: _,
                             content,
@@ -775,9 +787,11 @@ impl Database {
                         {
                             let mut ord: Vec<usize> = (0..content.len()).collect();
                             ord.shuffle(&mut rng());
-                            self.apply_action_unchecked_seq(
+                            self.apply_action_impl(
                                 Action::QueueSetShuffle(path, ord, set_index),
                                 client,
+                                broadcast,
+                                queue,
                             );
                         } else {
                             eprintln!("(QueueShuffle) QueueElement at {path:?} not a folder!");
@@ -788,7 +802,7 @@ impl Database {
                 }
             }
             Action::QueueSetShuffle(path, ord, set_index) => {
-                if let Some(elem) = self.queue.get_item_at_index_mut(&path, 0) {
+                if let Some(elem) = queue(self).get_item_at_index_mut(&path, 0) {
                     if let QueueContent::Folder(QueueFolder {
                         index,
                         content,
@@ -827,7 +841,7 @@ impl Database {
                 }
             }
             Action::QueueUnshuffle(path) => {
-                if let Some(elem) = self.queue.get_item_at_index_mut(&path, 0) {
+                if let Some(elem) = queue(self).get_item_at_index_mut(&path, 0) {
                     if let QueueContent::Folder(QueueFolder {
                         index,
                         content: _,
@@ -840,6 +854,15 @@ impl Database {
                         }
                         *order = None;
                     }
+                }
+            }
+            Action::SavedQueue(queue, actions) => {
+                for action in actions {
+                    self.apply_action_impl(action, client, false, |s| {
+                        s.queues
+                            .entry(queue.clone())
+                            .or_insert_with(|| QueueContent::Folder(QueueFolder::default()).into())
+                    });
                 }
             }
             Action::AddSong(song, _) => {
@@ -956,7 +979,7 @@ impl Database {
             }
             Action::TagArtistPropertyUnset(id, key) => {
                 if let Some(v) = self.artists.get_mut(&id) {
-                    let tags = std::mem::replace(&mut v.general.tags, vec![]);
+                    let tags = std::mem::take(&mut v.general.tags);
                     v.general.tags = tags.into_iter().filter(|v| !v.starts_with(&key)).collect();
                 }
             }
@@ -967,7 +990,7 @@ impl Database {
             }
             Action::Multiple(actions) => {
                 for action in actions {
-                    self.apply_action_unchecked_seq(action, client);
+                    self.apply_action_impl(action, client, broadcast, &queue);
                 }
             }
             Action::InitComplete => {
@@ -1001,6 +1024,7 @@ impl Database {
             albums: HashMap::new(),
             songs: HashMap::new(),
             covers: HashMap::new(),
+            queues: BTreeMap::new(),
             custom_files: None,
             queue: QueueContent::Folder(QueueFolder::default()).into(),
             update_endpoints: vec![],
@@ -1023,6 +1047,7 @@ impl Database {
             albums: HashMap::new(),
             songs: HashMap::new(),
             covers: HashMap::new(),
+            queues: BTreeMap::new(),
             custom_files: None,
             queue: QueueContent::Folder(QueueFolder::default()).into(),
             update_endpoints: vec![],
@@ -1050,6 +1075,7 @@ impl Database {
             albums: ToFromBytes::from_bytes(&mut file)?,
             songs: ToFromBytes::from_bytes(&mut file)?,
             covers: ToFromBytes::from_bytes(&mut file)?,
+            queues: ToFromBytes::from_bytes(&mut file)?,
             custom_files: None,
             queue: QueueContent::Folder(QueueFolder::default()).into(),
             update_endpoints: vec![],
@@ -1100,15 +1126,15 @@ impl Database {
         self.albums.to_bytes(&mut file)?;
         self.songs.to_bytes(&mut file)?;
         self.covers.to_bytes(&mut file)?;
+        self.queues.to_bytes(&mut file)?;
         eprintln!("[{}] saved db", "INFO".green());
         // all changes saved, data no longer modified
         self.times_data_modified = None;
         Ok(path)
     }
     pub fn broadcast_update(&mut self, update: Action, client: Option<u64>) -> Action {
-        match update {
-            Action::InitComplete => return update,
-            _ => {}
+        if matches!(update, Action::InitComplete) {
+            return update;
         }
         if !self.is_client() {
             self.seq.inc();

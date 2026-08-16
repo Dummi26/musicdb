@@ -89,6 +89,7 @@ impl Action {
             | Self::QueueShuffle(_, _)
             | Self::QueueSetShuffle(_, _, _)
             | Self::QueueUnshuffle(_)
+            | Self::SavedQueue(_, _)
             | Self::RemoveSong(_)
             | Self::RemoveAlbum(_)
             | Self::RemoveArtist(_)
@@ -193,6 +194,10 @@ pub enum Action {
     /// last parameter, see QueueShuffle
     QueueSetShuffle(Vec<usize>, Vec<usize>, u8),
     QueueUnshuffle(Vec<usize>),
+    /// Contains queue-related actions (move, insert, ...) using the normal Queue* actions,
+    /// but they will be applied to a saved queue instead of the active one.
+    /// Any actions except Queue* (and Multiple) contained in this are undefined (server may ignore them).
+    SavedQueue(String, Vec<Self>),
 
     /// .id field is ignored!
     AddSong(Song, Req),
@@ -292,7 +297,7 @@ pub fn run_server_caching_thread_opt(
     use std::time::Instant;
 
     use crate::data::cache_manager::CacheManager;
-    #[cfg(any(feature = "playback"))]
+    #[cfg(feature = "playback")]
     use crate::player::PlayerBackend;
 
     // commands sent to this will be handeled later in this function in an infinite loop.
@@ -498,6 +503,7 @@ const BYTE_QUEUE_ACTION: u8 = 0b10_001_100;
 const SUBBYTE_ACTION_SHUFFLE: u8 = 0b01_000_001;
 const SUBBYTE_ACTION_SET_SHUFFLE: u8 = 0b01_000_010;
 const SUBBYTE_ACTION_UNSHUFFLE: u8 = 0b01_000_100;
+const SUBBYTE_ACTION_SAVED_QUEUE: u8 = 0b01_000_111;
 
 const BYTE_SYNC_DATABASE: u8 = 0b10_010_100;
 
@@ -654,6 +660,12 @@ impl ToFromBytes for Action {
                 s.write_all(&[BYTE_QUEUE_ACTION])?;
                 s.write_all(&[SUBBYTE_ACTION_UNSHUFFLE])?;
                 path.to_bytes(s)?;
+            }
+            Self::SavedQueue(name, actions) => {
+                s.write_all(&[BYTE_QUEUE_ACTION])?;
+                s.write_all(&[SUBBYTE_ACTION_SAVED_QUEUE])?;
+                name.to_bytes(s)?;
+                actions.to_bytes(s)?;
             }
             Self::AddSong(song, req) => {
                 s.write_all(&[BYTE_LIB_ADD])?;
@@ -842,6 +854,7 @@ impl ToFromBytes for Action {
                     Self::QueueSetShuffle(from_bytes!(), from_bytes!(), from_bytes!())
                 }
                 SUBBYTE_ACTION_UNSHUFFLE => Self::QueueUnshuffle(from_bytes!()),
+                SUBBYTE_ACTION_SAVED_QUEUE => Self::SavedQueue(from_bytes!(), from_bytes!()),
                 _ => {
                     eprintln!(
                         "[{}] unexpected byte when reading command:queueAction; stopping playback.",
