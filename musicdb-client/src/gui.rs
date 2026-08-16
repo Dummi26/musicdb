@@ -399,6 +399,7 @@ impl Gui {
                                 }
                             }
                             Action::SyncDatabase(..)
+                            | Action::SavedQueue(..)
                             | Action::AddSong(_, _)
                             | Action::AddAlbum(_, _)
                             | Action::AddArtist(_, _)
