@@ -23,9 +23,13 @@ struct Args {
     /// requires the `assets/` folder to be present!
     #[arg(long)]
     web: Option<SocketAddr>,
-    /// play audio instead of acting like a server
+    /// also play audio (without this, clients have to play audio)
     #[arg(long)]
     play_audio: bool,
+
+    /// load this playlist into the queue after startup
+    #[arg(long)]
+    initial_queue: Option<String>,
 
     /// allow clients to access files in this directory, or the lib_dir if not specified.
     ///
@@ -139,6 +143,11 @@ fn main() {
         }
     };
     database.custom_files = args.custom_files;
+    if let Some(queue) = &args.initial_queue
+        && let Some(queue) = database.queues.get(queue)
+    {
+        database.queue = queue.clone();
+    }
     // database can be shared by multiple threads using Arc<Mutex<_>>
     let database = Arc::new(Mutex::new(database));
     // thread to communicate with the remote server

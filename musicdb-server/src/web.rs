@@ -1,46 +1,20 @@
+use std::borrow::Cow;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex, mpsc};
 
-use musicdb_lib::data::SongId;
-use musicdb_lib::data::album::Album;
-use musicdb_lib::data::artist::Artist;
 use musicdb_lib::data::database::{Database, UpdateEndpoint};
 use musicdb_lib::data::queue::{Queue, QueueContent, QueueFolder};
-use musicdb_lib::data::song::Song;
+use musicdb_lib::data::{AlbumId, CoverId, SongId};
 use musicdb_lib::server::{Action, Command, Req};
 use rocket::futures::{SinkExt, StreamExt};
-use rocket::response::content::RawHtml;
+use rocket::http::{ContentType, Status};
+use rocket::response::content::{RawHtml, RawJson};
 use rocket::{Config, State, get, routes};
 use rocket_seek_stream::SeekStream;
 use rocket_ws::{Message, WebSocket};
+use serde::Serialize;
 use tokio::select;
 use tokio::sync::mpsc::Sender;
-
-/*
-
-23E9 ⏩︎ fast forward
-23EA ⏪︎ rewind, fast backwards
-23EB ⏫︎ fast increase
-23EC ⏬︎ fast decrease
-23ED ⏭︎ skip to end, next
-23EE ⏮︎ skip to start, previous
-23EF ⏯︎ play/pause toggle
-23F1 ⏱︎ stopwatch
-23F2 ⏲︎ timer clock
-23F3 ⏳︎ hourglass
-23F4 ⏴︎ reverse, back
-23F5 ⏵︎ forward, next, play
-23F6 ⏶︎ increase
-23F7 ⏷︎ decrease
-23F8 ⏸︎ pause
-23F9 ⏹︎ stop
-23FA ⏺︎ record
-
-*/
-
-const HTML_START: &'static str = "<!DOCTYPE html><html><head><meta charset=\"UTF-8\"><meta name=\"color-scheme\" content=\"light dark\">";
-const HTML_SEP: &'static str = "</head><body>";
-const HTML_END: &'static str = "</body></html>";
 
 struct Data {
     db: Arc<Mutex<Database>>,
@@ -49,255 +23,79 @@ struct Data {
 }
 
 #[get("/")]
-fn index(data: &State<Data>) -> RawHtml<String> {
-    let script = r#"<script>
-const sleep = ms => new Promise(r => setTimeout(r, ms));
-async function performSearch() {
-    var searchResultDiv = document.getElementById("searchResultDiv");
-    searchResultDiv.innerHTML = "Loading...";
-    var sfArtist = document.getElementById("searchFieldArtist").value;
-    var sfAlbum = document.getElementById("searchFieldAlbum").value;
-    var sfTitle = document.getElementById("searchFieldTitle").value;
-    var query = "";
-    if (sfArtist) {
-        query += "artist=" + encodeURIComponent(sfArtist);
-    }
-    if (sfAlbum) {
-        if (query) {
-            query += "&";
-        }
-        query += "album=" + encodeURIComponent(sfAlbum);
-    }
-    if (sfTitle) {
-        if (query) {
-            query += "&";
-        }
-        query += "title=" + encodeURIComponent(sfTitle);
-    }
-    if (query || confirm("You didn't search for anything specific. If you continue, the whole library will be loaded, which can take a while, use a lot of bandwidth, and may crash your browser!")) {
-        console.log("Performing search with query '" + query + "'.");
-        var r1 = await fetch("/search?" + query);
-        var r2 = await r1.text();
-        searchResultDiv.innerHTML = r2;
+fn index() -> RawHtml<&'static str> {
+    RawHtml(include_str!("index.html"))
+}
+
+fn is_false(b: &bool) -> bool {
+    !b
+}
+#[derive(Serialize)]
+struct SongInfo<'a> {
+    #[serde(skip_serializing_if = "is_false")]
+    on: bool,
+    id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    title: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    album: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    artist: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cover: Option<String>,
+}
+#[get("/current")]
+fn current(data: &State<Data>) -> Option<RawJson<String>> {
+    let db_lock = data.db.lock().unwrap();
+    let db: &Database = &db_lock;
+    if let Some(id) = db.queue.get_current_song()
+        && let Some(song) = db.get_song(id)
+    {
+        Some(RawJson(
+            serde_json::to_string(&SongInfo {
+                on: db.playing,
+                id: id.to_string(),
+                title: Some(&song.title),
+                album: song
+                    .album
+                    .and_then(|i| db.albums().get(&i))
+                    .map(|v| v.name.as_str()),
+                artist: db.artists().get(&song.artist).map(|v| v.name.as_str()),
+                cover: db
+                    .get_song(id)
+                    .and_then(|song| {
+                        song.cover
+                            .or_else(|| {
+                                song.album.and_then(|id| {
+                                    db.albums().get(&id).and_then(|album| album.cover)
+                                })
+                            })
+                            .or_else(|| {
+                                db.artists()
+                                    .get(&song.artist)
+                                    .and_then(|artist| artist.cover)
+                            })
+                    })
+                    .map(|v| v.to_string()),
+            })
+            .unwrap(),
+        ))
     } else {
-        searchResultDiv.innerHTML = "";
+        None
     }
 }
-async function addSong(id) {
-    await fetch("/add-song/" + id);
+#[get("/cover/<id>")]
+fn cover(data: &State<Data>, id: CoverId) -> Option<(ContentType, Vec<u8>)> {
+    let mut db = data.db.lock().unwrap();
+    let db: &mut Database = &mut db;
+    db.covers()
+        .get(&id)
+        .and_then(|cover| cover.get_bytes_from_file(|p| db.get_path(p), |b| b.clone()))
+        .map(|bytes| (ContentType::new("image", "jpeg"), bytes))
 }
-</script>
-"#;
-    let script2 = r#"<script>
-const searchDiv = document.getElementById("searchDiv");
-searchDiv.style.display = "";
-document.getElementById("warnLag").innerText = "connecting...";
-const nowPlayingDiv = document.getElementById("nowPlayingDiv");
-const queueDiv = document.getElementById("queueDiv");
-var didFinish = false;
-var averageLoopTimeMs = 250;
-var dbPlaying = null;
-function showDbPlaying() {
-    if (dbPlaying === true) {
-        document.getElementById("playLiveCurrent").play();
-    } else if (dbPlaying === false) {
-        document.getElementById("playLiveCurrent").pause();
-    } else {
-        document.getElementById("playLiveCurrent").pause();
-    }
-    const postheader = document.getElementById("postheader");
-    if (postheader) {
-        if (dbPlaying === true) {
-            postheader.innerText = "";
-        } else if (dbPlaying === false) {
-            postheader.innerText = "(paused)";
-        } else {
-            postheader.innerText = "";
-        }
-    }
-}
-async function updateNowPlaying() {
-    nowPlayingDiv.innerHTML = await (await fetch("/now-playing-html")).text();
-    showDbPlaying();
-}
-async function updateQueue() {
-    queueDiv.innerHTML = await (await fetch("/queue-html")).text();
-}
-var livePlaybackCurrentId = null;
-var livePlaybackNextId = null;
-async function updateLivePlaybackIds() {
-    if (document.getElementById("playLiveEnabled").checked) {
-        let resp = (await (await fetch("/now-playing-ids")).text()).trim();
-        let current = null;
-        let next = null;
-        if (resp != "") {
-            if (resp.includes("/")) {
-                let [c, n] = resp.split("/");
-                current = c.trim();
-                next = n.trim();
-            } else {
-                current = resp;
-            }
-        }
-        if (current !== livePlaybackCurrentId) {
-            livePlaybackCurrentId = current;
-            document.getElementById("playLiveCurrentSrc").src = livePlaybackCurrentId == null ? "" : "/song/" + livePlaybackCurrentId + "/current";
-            let audioElem = document.getElementById("playLiveCurrent");
-            audioElem.pause();
-            audioElem.currentTime = 0;
-            if (dbPlaying) {
-                audioElem.setAttribute("autoplay", "");
-            } else {
-                audioElem.removeAttribute("autoplay");
-            }
-            audioElem.load();
-            if (dbPlaying) {
-                audioElem.play();
-            }
-        }
-        if (next !== livePlaybackNextId) {
-            livePlaybackNextId = next;
-            document.getElementById("playLiveNextSrc").src = livePlaybackNextId == null ? "" : "/song/" + livePlaybackNextId + "/next";
-            document.getElementById("playLiveNext").load();
-        }
-    } else {
-        if (livePlaybackCurrentId !== null) {
-            livePlaybackCurrentId = null;
-            let audioElem = document.getElementById("playLiveCurrent");
-            audioElem.pause();
-            audioElem.currentTime = 0;
-            document.getElementById("playLiveCurrentSrc").src = "";
-            audioElem.load();
-        }
-        if (livePlaybackNextId !== null) {
-            livePlaybackNextId = null;
-            document.getElementById("playLiveNextSrc").src = "";
-            document.getElementById("playLiveNext").load();
-        }
-    }
-}
-async function runLoop() {
-    let websocketConnection = null;
-    try {
-        websocketConnection = new WebSocket("/ws");
-        var websocketCounter = 0;
-        websocketConnection.addEventListener("message", async function(e) {
-            ++websocketCounter;
-            if (websocketCounter > 2) {
-                websocketCounter = 0;
-            }
-            document.getElementById("warnLag").innerText = "using websocket" + (websocketCounter == 0 ? "." : (websocketCounter == 1 ? ".." : "..."));
-            switch (e.data.trim()) {
-                case "init/playing=true":
-                    if (dbPlaying === null) {
-                        dbPlaying = true;
-                        showDbPlaying();
-                    }
-                    break;
-                case "init/playing=false":
-                    if (dbPlaying === null) {
-                        dbPlaying = false;
-                        showDbPlaying();
-                    }
-                    break;
-                case "pause":
-                    dbPlaying = false;
-                    showDbPlaying();
-                    break;
-                case "stop":
-                    dbPlaying = false;
-                    document.getElementById("playLiveCurrent").pause();
-                    document.getElementById("playLiveCurrent").currentTime = 0;
-                    showDbPlaying();
-                    break;
-                case "resume":
-                    dbPlaying = true;
-                    showDbPlaying();
-                    break;
-                case "next":
-                    await updateLivePlaybackIds();
-                    await updateNowPlaying();
-                    await updateQueue();
-                    break;
-                case "update/data":
-                    await updateLivePlaybackIds();
-                    await updateNowPlaying();
-                    await updateQueue();
-                    break;
-                case "update/queue":
-                    await updateLivePlaybackIds();
-                    await updateNowPlaying();
-                    await updateQueue();
-                    break;
-                default:
-                    console.log("Unknown websocket message: ", e.data.trim());
-                    break;
-            }
-        });
-        return;
-    } catch (e) {
-        console.log("Error in websocket connection:");
-        console.log(e);
-        console.log("Falling back to polling.");
-        websocketConnection = null;
-    }
-    while (true) {
-        await sleep(1000);
-        didFinish = false;
-        var startTime = new Date();
-        sleep(averageLoopTimeMs*2).then(async function() {
-            while (!didFinish) {
-                var elapsed = new Date() - startTime;
-                document.getElementById("warnLag").innerText = "Warning: slow connection, server may be busy. be patient. (" + Math.round(averageLoopTimeMs) + "ms exceeded by " + Math.round((elapsed-averageLoopTimeMs)/averageLoopTimeMs) + "x)";
-                await sleep(100);
-            }
-        });
-        await updateNowPlaying();
-        await updateQueue();
-        var elapsedTime = new Date() - startTime;
-        didFinish = true;
-        averageLoopTimeMs = ((averageLoopTimeMs * 4) + elapsedTime) / 5;
-        document.getElementById("warnLag").innerText = "Average update time: " + Math.round(averageLoopTimeMs) + "ms";
-    }
-}
-updateLivePlaybackIds();
-runLoop();
-</script>
-"#;
-    let buttons = "<button onclick=\"fetch('/play')\">play</button><button onclick=\"fetch('/pause')\">pause</button><button onclick=\"fetch('/stop')\">stop</button><button onclick=\"fetch('/skip')\">skip</button><button onclick=\"fetch('/clear-queue')\">clear queue</button>";
-    let search = "<input id=\"searchFieldArtist\" placeholder=\"artist\"><input id=\"searchFieldAlbum\" placeholder=\"album\"><input id=\"searchFieldTitle\" placeholder=\"title\">
-<button onclick=\"performSearch()\">search</button><div id=\"searchResultDiv\"></div>";
-    let playback_live = r#"<div><input id="playLiveEnabled" onchange="updateLivePlaybackIds();" type="checkbox"><audio controls autoplay id="playLiveCurrent"><source id="playLiveCurrentSrc" src=""></audio><audio style="visibility:hidden;" id="playLiveNext"><source id="playLiveNextSrc" src=""></audio></span></div>"#;
-    let db = data.db.lock().unwrap();
-    let now_playing = gen_now_playing(&db);
-    let mut queue = String::new();
-    gen_queue_html(&db.queue, &mut queue, &db);
-    drop(db);
-    RawHtml(format!(
-        "{HTML_START}<title>MusicDb</title>{script}{HTML_SEP}<small><small><div id=\"warnLag\">no javascript? reload to see updated information.</div></small></small><div id=\"nowPlayingDiv\">{now_playing}</div><div>{buttons}</div>{playback_live}<div id=\"searchDiv\" style=\"display:none;\">{search}</div><div id=\"queueDiv\">{queue}</div>{script2}{HTML_END}",
-    ))
-}
-#[get("/now-playing-html")]
-fn now_playing_html(data: &State<Data>) -> RawHtml<String> {
-    RawHtml(gen_now_playing(&*data.db.lock().unwrap()))
-}
-#[get("/now-playing-ids")]
-fn now_playing_ids(data: &State<Data>) -> String {
-    let db = data.db.lock().unwrap();
-    let (c, n) = (
-        db.queue.get_current_song().copied(),
-        db.queue.get_next_song().copied(),
-    );
-    drop(db);
-    if let Some(c) = c {
-        if let Some(n) = n {
-            format!("{c}/{n}")
-        } else {
-            format!("{c}")
-        }
-    } else {
-        "".to_owned()
-    }
+#[get("/favicon")]
+fn favicon() -> (ContentType, Vec<u8>) {
+    (ContentType::new("image", "jpeg"), vec![])
 }
 
 #[get("/song/<id>")]
@@ -311,7 +109,7 @@ fn song2(data: &State<Data>, id: SongId) -> Option<SeekStream<'_>> {
 fn song(data: &State<Data>, id: SongId) -> Option<SeekStream<'_>> {
     let db = data.db.lock().unwrap();
     if let Some(song) = db.get_song(&id) {
-        song.cached_data().cache_data_start_thread(&*db, song);
+        song.cached_data().cache_data_start_thread(&db, song);
         if let Some(bytes) = song.cached_data().cached_data_await() {
             drop(db);
             Some(SeekStream::new(std::io::Cursor::new(ArcBytes(bytes))))
@@ -329,134 +127,261 @@ impl AsRef<[u8]> for ArcBytes {
     }
 }
 
-#[get("/queue-html")]
-fn queue_html(data: &State<Data>) -> RawHtml<String> {
-    let mut str = String::new();
-    let db = data.db.lock().unwrap();
-    gen_queue_html(&db.queue, &mut str, &db);
-    RawHtml(str)
-}
-fn gen_now_playing(db: &Database) -> String {
-    if let Some(current_song) = db.queue.get_current_song().and_then(|id| db.get_song(id)) {
-        format!(
-            "<h1>Now Playing <small id=\"postheader\"></small></h1><h4>{}</h4>",
-            html_escape::encode_safe(&current_song.title),
-        )
+#[get("/add-song/<id>/<path>")]
+fn add_song(id: SongId, path: &str, data: &State<Data>) -> Status {
+    let mut db = data.db.lock().unwrap();
+    let db: &mut Database = &mut db;
+    if db.get_song(&id).is_some() {
+        add_any(QueueContent::Song(id).into(), path, data)
     } else {
-        format!("<h1>Now Playing</h1><p>nothing</p>",)
+        Status::BadRequest
     }
 }
-fn gen_queue_html(queue: &Queue, str: &mut String, db: &Database) {
-    gen_queue_html_impl(queue, str, db, true, &mut "".to_owned());
+#[get("/add-album/<id>/<path>")]
+fn add_album(id: AlbumId, path: &str, data: &State<Data>) -> Status {
+    let mut db = data.db.lock().unwrap();
+    let db: &mut Database = &mut db;
+    if let Some(album) = db.albums().get(&id) {
+        add_any(
+            QueueContent::Folder(QueueFolder {
+                index: 0,
+                content: album
+                    .songs
+                    .iter()
+                    .filter_map(|id| db.get_song(id).map(|_| QueueContent::Song(*id).into()))
+                    .collect(),
+                name: album.name.to_owned(),
+                order: None,
+            })
+            .into(),
+            path,
+            data,
+        )
+    } else {
+        Status::BadRequest
+    }
 }
-fn gen_queue_html_impl(
-    queue: &Queue,
-    str: &mut String,
-    db: &Database,
-    active_highlight: bool,
-    path: &mut String,
-) {
-    match queue.content() {
-        QueueContent::Song(id) => {
-            if let Some(song) = db.songs().get(id) {
-                str.push_str("<div>");
-                str.push_str(&format!("<button onclick=\"fetch('/queue-goto/{path}')\">"));
-                if active_highlight {
-                    str.push_str("<b>");
-                }
-                str.push_str(&html_escape::encode_text(&song.title));
-                if active_highlight {
-                    str.push_str("</b>");
-                }
-                str.push_str("</button>");
-                str.push_str("<small>");
-                if let Some(artist) = db.artists().get(&song.artist) {
-                    str.push_str(" by ");
-                    str.push_str(&html_escape::encode_text(&artist.name));
-                }
-                if let Some(album) = song.album.as_ref().and_then(|id| db.albums().get(id)) {
-                    str.push_str(" on ");
-                    str.push_str(&html_escape::encode_text(&album.name));
-                }
-                str.push_str(&format!(
-                    "<button onclick=\"fetch('/queue-remove/{path}')\">rm</button>"
-                ));
-                str.push_str("</small></div>");
-            } else {
-                str.push_str("<div><small>unknown song</small></div>");
-            }
+#[get("/add-artist/<id>/<path>")]
+fn add_artist(id: AlbumId, path: &str, data: &State<Data>) -> Status {
+    let mut db = data.db.lock().unwrap();
+    let db: &mut Database = &mut db;
+    if let Some(artist) = db.artists().get(&id) {
+        add_any(
+            QueueContent::Folder(QueueFolder {
+                index: 0,
+                content: artist
+                    .singles
+                    .iter()
+                    .filter_map(|id| db.get_song(id).map(|_| QueueContent::Song(*id).into()))
+                    .chain(
+                        artist
+                            .albums
+                            .iter()
+                            .filter_map(|id| db.albums().get(id))
+                            .map(|album| {
+                                QueueContent::Folder(QueueFolder {
+                                    index: 0,
+                                    content: album
+                                        .songs
+                                        .iter()
+                                        .filter_map(|id| {
+                                            db.get_song(id).map(|_| QueueContent::Song(*id).into())
+                                        })
+                                        .collect(),
+                                    name: album.name.to_owned(),
+                                    order: None,
+                                })
+                                .into()
+                            }),
+                    )
+                    .collect(),
+                name: artist.name.to_owned(),
+                order: None,
+            })
+            .into(),
+            path,
+            data,
+        )
+    } else {
+        Status::BadRequest
+    }
+}
+fn add_any(queue: Queue, path: &str, data: &Data) -> Status {
+    let (into, path) = path
+        .strip_prefix('!')
+        .map(|p| (true, p))
+        .unwrap_or((false, path));
+    if let Some(mut path) = path
+        .split('_')
+        .skip_while(|v| v.is_empty())
+        .map(|v| v.parse().ok())
+        .collect()
+    {
+        if into {
+            data.command_sender
+                .send((
+                    Action::QueueAdd(path, vec![queue], Req::none()).cmd(0xFF),
+                    None,
+                ))
+                .unwrap();
+            Status::Ok
+        } else if let Some(last) = path.pop() {
+            data.command_sender
+                .send((
+                    Action::QueueInsert(path, last, vec![queue], Req::none()).cmd(0xFF),
+                    None,
+                ))
+                .unwrap();
+            Status::Ok
+        } else {
+            Status::BadRequest
         }
-        QueueContent::Folder(f) => {
-            let html_shuf: &'static str = " <small><small>shuffled</small></small>";
-            if f.content.is_empty() {
-                str.push_str("[0/0] ");
-                if active_highlight {
-                    str.push_str("<b>");
-                }
-                str.push_str(&html_escape::encode_text(&f.name));
-                if active_highlight {
-                    str.push_str("</b>");
-                }
-                if f.order.is_some() {
-                    str.push_str(html_shuf);
-                }
-            } else {
-                str.push_str(&format!("[{}/{}] ", f.index + 1, f.content.len(),));
-                if active_highlight {
-                    str.push_str("<b>");
-                }
-                str.push_str(&html_escape::encode_text(&f.name));
-                if active_highlight {
-                    str.push_str("</b>");
-                }
-                if f.order.is_some() {
-                    str.push_str(html_shuf);
-                }
-                str.push_str("<ol>");
-                for (i, v) in f.iter().enumerate() {
-                    str.push_str("<li>");
-                    if !path.is_empty() {
-                        path.push('_');
-                    }
-                    path.push_str(&format!("{i}"));
-                    gen_queue_html_impl(v, str, db, active_highlight && i == f.index, path);
-                    while !(path.is_empty() || path.ends_with('_')) {
-                        path.pop();
-                    }
-                    path.pop();
-                    str.push_str("</li>");
-                }
-                str.push_str("</ol>");
-            }
-        }
-        QueueContent::Loop(d, t, i) => {
-            if active_highlight {
-                str.push_str("<b>");
-            }
-            if *t == 0 {
-                str.push_str(&format!("<small>[{}/&infin;]</small>", d + 1));
-            } else {
-                str.push_str(&format!("<small>[{}/{}]</small>", d + 1, t));
-            }
-            if active_highlight {
-                str.push_str("</b>");
-            }
-            if !path.is_empty() {
-                path.push('_');
-            }
-            path.push('0');
-            gen_queue_html_impl(i, str, db, active_highlight, path);
-            while !(path.is_empty() || path.ends_with('_')) {
-                path.pop();
-            }
-            path.pop();
-        }
+    } else {
+        Status::BadRequest
     }
 }
 
+#[derive(Serialize)]
+struct QueueElement<'a> {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    title: Option<Cow<'a, str>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    extra: Option<Cow<'a, str>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    children: Option<Vec<Self>>,
+}
+#[get("/queue")]
+fn queue(data: &State<Data>) -> RawJson<String> {
+    fn build_queue_element<'a>(queue: &'a Queue, db: &'a Database) -> QueueElement<'a> {
+        match queue.content() {
+            QueueContent::Song(id) => {
+                if let Some(song) = db.get_song(id)
+                    && let Some(artist) = db.artists().get(&song.artist)
+                {
+                    if let Some(album) = song.album
+                        && let Some(album) = db.albums().get(&album)
+                    {
+                        QueueElement {
+                            title: Some(Cow::Borrowed(song.title.as_str())),
+                            extra: Some(Cow::Owned(format!(
+                                "by {} on {}",
+                                artist.name, album.name
+                            ))),
+                            children: None,
+                        }
+                    } else {
+                        QueueElement {
+                            title: Some(Cow::Borrowed(song.title.as_str())),
+                            extra: Some(Cow::Owned(format!("by {}", artist.name))),
+                            children: None,
+                        }
+                    }
+                } else {
+                    QueueElement {
+                        title: None,
+                        extra: None,
+                        children: None,
+                    }
+                }
+            }
+            QueueContent::Folder(folder) => QueueElement {
+                title: Some(Cow::Borrowed(folder.name.as_str())),
+                extra: None,
+                children: Some(if let Some(order) = &folder.order {
+                    order
+                        .iter()
+                        .map(|q| folder.content.get(*q))
+                        .map(|q| {
+                            q.map(|q| build_queue_element(q, db))
+                                .unwrap_or_else(|| QueueElement {
+                                    title: None,
+                                    extra: None,
+                                    children: None,
+                                })
+                        })
+                        .collect()
+                } else {
+                    folder
+                        .content
+                        .iter()
+                        .map(|q| build_queue_element(q, db))
+                        .collect()
+                }),
+            },
+            QueueContent::Loop(total, done, queue) => {
+                let mut queue = build_queue_element(queue, db);
+                let extra = if *total == 0 {
+                    format!("{}/∞", *done)
+                } else {
+                    format!("{}/{}", *done, *total)
+                };
+                if queue.extra.is_none() {
+                    queue.extra = Some(Cow::Owned(extra));
+                    queue
+                } else {
+                    QueueElement {
+                        title: None,
+                        extra: Some(Cow::Owned(extra)),
+                        children: Some(vec![queue]),
+                    }
+                }
+            }
+        }
+    }
+    let db = data.db.lock().unwrap();
+    RawJson(serde_json::to_string(&build_queue_element(&db.queue, &db)).unwrap())
+}
+
+#[get("/queue-move/<p1>/<p2>")]
+fn queue_move(p1: &str, p2: &str, data: &State<Data>) -> Status {
+    if let Some(p1) = p1
+        .split('_')
+        .skip_while(|v| v.is_empty())
+        .map(|v| v.parse().ok())
+        .collect()
+        && let Some(p2) = p2
+            .split('_')
+            .skip_while(|v| v.is_empty())
+            .map(|v| v.parse().ok())
+            .collect()
+    {
+        data.command_sender
+            .send((Action::QueueMove(p1, p2).cmd(0xFF), None))
+            .unwrap();
+        Status::Ok
+    } else {
+        Status::BadRequest
+    }
+}
+#[get("/queue-moveinto/<p1>/<p2>")]
+fn queue_move_into(p1: &str, p2: &str, data: &State<Data>) -> Status {
+    if let Some(p1) = p1
+        .split('_')
+        .skip_while(|v| v.is_empty())
+        .map(|v| v.parse().ok())
+        .collect()
+        && let Some(p2) = p2
+            .split('_')
+            .skip_while(|v| v.is_empty())
+            .map(|v| v.parse().ok())
+            .collect()
+    {
+        data.command_sender
+            .send((Action::QueueMoveInto(p1, p2).cmd(0xFF), None))
+            .unwrap();
+        Status::Ok
+    } else {
+        Status::BadRequest
+    }
+}
 #[get("/queue-remove/<path>")]
 fn queue_remove(data: &State<Data>, path: &str) {
-    if let Some(path) = path.split('_').map(|v| v.parse().ok()).collect() {
+    if let Some(path) = path
+        .split('_')
+        .skip_while(|v| v.is_empty())
+        .map(|v| v.parse().ok())
+        .collect()
+    {
         data.command_sender
             .send((Action::QueueRemove(path).cmd(0xFFu8), None))
             .unwrap();
@@ -464,7 +389,12 @@ fn queue_remove(data: &State<Data>, path: &str) {
 }
 #[get("/queue-goto/<path>")]
 fn queue_goto(data: &State<Data>, path: &str) {
-    if let Some(path) = path.split('_').map(|v| v.parse().ok()).collect() {
+    if let Some(path) = path
+        .split('_')
+        .skip_while(|v| v.is_empty())
+        .map(|v| v.parse().ok())
+        .collect()
+    {
         data.command_sender
             .send((Action::QueueGoto(path).cmd(0xFFu8), None))
             .unwrap();
@@ -516,233 +446,92 @@ fn clear_queue(data: &State<Data>) {
         .unwrap();
 }
 
-#[get("/add-song/<id>")]
-fn add_song(data: &State<Data>, id: SongId) {
-    data.command_sender
-        .send((
-            Action::QueueAdd(vec![], vec![QueueContent::Song(id).into()], Req::none()).cmd(0xFFu8),
-            None,
-        ))
-        .unwrap();
+#[derive(Serialize)]
+#[serde(tag = "t")]
+enum SearchResult {
+    #[serde(rename = "a")]
+    Artist {
+        name: String,
+        id: String,
+        has: Vec<Self>,
+    },
+    #[serde(rename = "b")]
+    Album {
+        name: String,
+        id: String,
+        has: Vec<Self>,
+    },
+    #[serde(rename = "s")]
+    Song { title: String, id: String },
 }
-
-#[get("/search?<artist>&<album>&<title>&<artist_tags>&<album_tags>&<song_tags>")]
+#[get("/search?<artist>&<album>&<title>")]
 fn search(
     data: &State<Data>,
     artist: Option<&str>,
     album: Option<&str>,
     title: Option<&str>,
-    artist_tags: Vec<&str>,
-    album_tags: Vec<&str>,
-    song_tags: Vec<&str>,
-) -> RawHtml<String> {
+) -> RawJson<String> {
     let db = data.db.lock().unwrap();
-    let mut out = String::new();
+    let db: &Database = &db;
     let artist = artist.map(|v| v.to_lowercase());
-    let artist = artist.as_ref().map(|v| v.as_str());
+    let artist = artist.as_deref().unwrap_or("");
     let album = album.map(|v| v.to_lowercase());
-    let album = album.as_ref().map(|v| v.as_str());
+    let album = album.as_deref().unwrap_or("");
     let title = title.map(|v| v.to_lowercase());
-    let title = title.as_ref().map(|v| v.as_str());
-    find1(
-        &*db,
-        artist,
-        album,
-        title,
-        &artist_tags,
-        &album_tags,
-        &song_tags,
-        &mut out,
-    );
-    fn find1(
-        db: &Database,
-        artist: Option<&str>,
-        album: Option<&str>,
-        title: Option<&str>,
-        artist_tags: &[&str],
-        album_tags: &[&str],
-        song_tags: &[&str],
-        out: &mut String,
-    ) {
-        if let Some(f) = artist {
-            find2(
-                db,
-                db.artists()
-                    .values()
-                    .filter(|v| v.name.to_lowercase().contains(f)),
-                album,
-                title,
-                artist_tags,
-                album_tags,
-                song_tags,
-                out,
-            )
-        } else {
-            find2(
-                db,
-                db.artists().values(),
-                album,
-                title,
-                artist_tags,
-                album_tags,
-                song_tags,
-                out,
-            )
+    let title = title.as_deref().unwrap_or("");
+    let mut out = vec![];
+    for artist in db
+        .artists()
+        .values()
+        .filter(|a| a.name.to_lowercase().contains(artist))
+    {
+        let mut a1 = vec![];
+        for song in artist
+            .singles
+            .iter()
+            .filter_map(|id| db.get_song(id))
+            .filter(|a| a.title.to_lowercase().contains(title))
+        {
+            a1.push(SearchResult::Song {
+                title: song.title.clone(),
+                id: song.id.to_string(),
+            });
         }
-    }
-    fn find2<'a>(
-        db: &'a Database,
-        artists: impl IntoIterator<Item = &'a Artist>,
-        album: Option<&str>,
-        title: Option<&str>,
-        artist_tags: &[&str],
-        album_tags: &[&str],
-        song_tags: &[&str],
-        out: &mut String,
-    ) {
-        for artist in artists {
-            if artist_tags
+        for album in artist
+            .albums
+            .iter()
+            .filter_map(|id| db.albums().get(id))
+            .filter(|a| a.name.to_lowercase().contains(album))
+        {
+            let mut a2 = vec![];
+            for song in album
+                .songs
                 .iter()
-                .all(|t| artist.general.tags.iter().any(|v| v == t))
+                .filter_map(|id| db.get_song(id))
+                .filter(|a| a.title.contains(title))
             {
-                let mut func_artist = Some(|out: &mut String| {
-                    out.push_str("<h3>");
-                    out.push_str(&artist.name);
-                    out.push_str("</h3>");
+                a2.push(SearchResult::Song {
+                    title: song.title.clone(),
+                    id: song.id.to_string(),
                 });
-                let mut func_album = None;
-                if false {
-                    // so they have the same type
-                    std::mem::swap(&mut func_artist, &mut func_album);
-                }
-                if album.is_none() && album_tags.is_empty() {
-                    find4(
-                        db,
-                        artist.singles.iter().filter_map(|v| db.get_song(v)),
-                        title,
-                        song_tags,
-                        out,
-                        &mut func_artist,
-                        &mut func_album,
-                    );
-                }
-                let iter = artist.albums.iter().filter_map(|v| db.albums().get(v));
-                if let Some(f) = album {
-                    find3(
-                        db,
-                        iter.filter(|v| v.name.to_lowercase().contains(f)),
-                        title,
-                        album_tags,
-                        song_tags,
-                        out,
-                        &mut func_artist,
-                    )
-                } else {
-                    find3(
-                        db,
-                        iter,
-                        title,
-                        album_tags,
-                        song_tags,
-                        out,
-                        &mut func_artist,
-                    )
-                }
             }
-        }
-    }
-    fn find3<'a>(
-        db: &'a Database,
-        albums: impl IntoIterator<Item = &'a Album>,
-        title: Option<&str>,
-        album_tags: &[&str],
-        song_tags: &[&str],
-        out: &mut String,
-        func_artist: &mut Option<impl FnOnce(&'_ mut String)>,
-    ) {
-        for album in albums {
-            if album_tags
-                .iter()
-                .all(|t| album.general.tags.iter().any(|v| v == t))
-            {
-                let mut func_album = Some(|out: &mut String| {
-                    out.push_str("<h4>");
-                    out.push_str(&album.name);
-                    out.push_str("</h4>");
+            if !a2.is_empty() {
+                a1.push(SearchResult::Album {
+                    name: album.name.clone(),
+                    id: album.id.to_string(),
+                    has: a2,
                 });
-                find4(
-                    db,
-                    album.songs.iter().filter_map(|v| db.get_song(v)),
-                    title,
-                    song_tags,
-                    out,
-                    func_artist,
-                    &mut func_album,
-                )
             }
         }
-    }
-    fn find4<'a>(
-        db: &'a Database,
-        songs: impl IntoIterator<Item = &'a Song>,
-        title: Option<&str>,
-        song_tags: &[&str],
-        out: &mut String,
-        func_artist: &mut Option<impl FnOnce(&'_ mut String)>,
-        func_album: &mut Option<impl FnOnce(&'_ mut String)>,
-    ) {
-        if let Some(f) = title {
-            find5(
-                db,
-                songs
-                    .into_iter()
-                    .filter(|v| v.title.to_lowercase().contains(f)),
-                song_tags,
-                out,
-                func_artist,
-                func_album,
-            )
-        } else {
-            find5(db, songs, song_tags, out, func_artist, func_album)
+        if !a1.is_empty() {
+            out.push(SearchResult::Artist {
+                name: artist.name.clone(),
+                id: artist.id.to_string(),
+                has: a1,
+            });
         }
     }
-    fn find5<'a>(
-        db: &'a Database,
-        songs: impl IntoIterator<Item = &'a Song>,
-        song_tags: &[&str],
-        out: &mut String,
-        func_artist: &mut Option<impl FnOnce(&'_ mut String)>,
-        func_album: &mut Option<impl FnOnce(&'_ mut String)>,
-    ) {
-        for song in songs {
-            if song_tags
-                .iter()
-                .all(|t| song.general.tags.iter().any(|v| v == t))
-            {
-                find6(db, song, out, func_artist, func_album)
-            }
-        }
-    }
-    fn find6<'a>(
-        _db: &Database,
-        song: &Song,
-        out: &mut String,
-        func_artist: &mut Option<impl FnOnce(&'_ mut String)>,
-        func_album: &mut Option<impl FnOnce(&'_ mut String)>,
-    ) {
-        if let Some(f) = func_artist.take() {
-            f(out)
-        }
-        if let Some(f) = func_album.take() {
-            f(out)
-        }
-        out.push_str("<button onclick=\"addSong('");
-        out.push_str(&format!("{}", song.id));
-        out.push_str("')\">");
-        out.push_str(&song.title);
-        out.push_str("</button><br>");
-    }
-    RawHtml(out)
+    RawJson(serde_json::to_string(&out).unwrap())
 }
 
 #[get("/ws")]
@@ -908,6 +697,7 @@ pub fn main(
         .unwrap()
         .block_on(async_main(data, addr));
 }
+
 async fn async_main(data: Data, addr: SocketAddr) {
     rocket::build()
         .configure(Config {
@@ -928,13 +718,18 @@ async fn async_main(data: Data, addr: SocketAddr) {
                 clear_queue,
                 queue_goto,
                 queue_remove,
+                queue_move,
+                queue_move_into,
+                queue,
                 add_song,
+                add_album,
+                add_artist,
                 search,
-                now_playing_html,
-                now_playing_ids,
+                current,
+                cover,
+                favicon,
                 song1,
                 song2,
-                queue_html,
             ],
         )
         .launch()

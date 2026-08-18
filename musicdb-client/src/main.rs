@@ -34,7 +34,8 @@ mod gui;
 mod gui_anim;
 #[cfg(feature = "speedy2d")]
 mod gui_base;
-pub mod gui_edit_any;
+#[cfg(feature = "speedy2d")]
+mod gui_edit_any;
 #[cfg(feature = "speedy2d")]
 mod gui_edit_song;
 #[cfg(feature = "speedy2d")]
@@ -45,6 +46,8 @@ mod gui_library;
 mod gui_notif;
 #[cfg(feature = "speedy2d")]
 mod gui_playback;
+#[cfg(feature = "speedy2d")]
+mod gui_playlists;
 #[cfg(feature = "speedy2d")]
 mod gui_playpause;
 #[cfg(feature = "speedy2d")]

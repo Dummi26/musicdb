@@ -2,7 +2,7 @@ use std::ops::AddAssign;
 
 use crate::{load::ToFromBytes, server::Action};
 
-use super::{database::Database, SongId};
+use super::{SongId, database::Database};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Queue {
@@ -14,6 +14,19 @@ pub enum QueueContent {
     Song(SongId),
     Folder(QueueFolder),
     Loop(usize, usize, Box<Queue>),
+}
+impl Queue {
+    pub const fn empty_folder() -> Self {
+        Self {
+            enabled: false,
+            content: QueueContent::Folder(QueueFolder {
+                index: 0,
+                content: vec![],
+                name: String::new(),
+                order: None,
+            }),
+        }
+    }
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct QueueFolder {
@@ -72,6 +85,13 @@ impl Queue {
             QueueContent::Song(_) => false,
             QueueContent::Folder(folder) => folder.content.iter().all(|v| v.is_empty()),
             QueueContent::Loop(_total, _done, inner) => inner.is_empty(),
+        }
+    }
+    pub fn is_completely_empty(&self) -> bool {
+        match &self.content {
+            QueueContent::Song(_) => false,
+            QueueContent::Folder(folder) => folder.content.is_empty(),
+            QueueContent::Loop(_total, _done, inner) => inner.is_completely_empty(),
         }
     }
     /// returns true if there is at most one song in the queue
@@ -280,9 +300,9 @@ impl Queue {
         }
     }
 
-    pub fn set_index_db(db: &mut Database, index: &[usize]) {
-        db.queue.reset_index();
-        db.queue.set_index_inner(index, 0, vec![], false);
+    pub fn set_index_full(&mut self, index: &[usize]) {
+        self.reset_index();
+        self.set_index_inner(index, 0, vec![], false);
     }
     pub fn set_index_inner(
         &mut self,

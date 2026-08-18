@@ -1256,6 +1256,8 @@ pub enum GuiAction {
     EndIdle(bool),
     SetHighPerformance(bool),
     OpenSettings(bool),
+    SelectSourceTab(u8),
+    SetShowingSavedQueue(String),
     ShowNotification(Box<dyn FnOnce(&NotifOverlay) -> (Box<dyn GuiElem>, NotifInfo) + Send>),
     /// Build the GuiAction(s) later, when we have access to the Database (can turn an AlbumId into a QueueContent::Folder, etc)
     Build(Box<dyn FnOnce(&mut Database) -> Vec<Self>>),
@@ -1285,7 +1287,7 @@ pub enum Dragging {
     Artist(ArtistId),
     Album(AlbumId),
     Song(SongId),
-    Queue(Result<Queue, Vec<usize>>),
+    Queue(Queue, Option<(Option<String>, Vec<usize>)>),
     Queues(Vec<Queue>),
 }
 #[allow(clippy::enum_variant_names)]
@@ -1453,6 +1455,18 @@ impl Gui {
                     self.gui.settings = (v, Some(Instant::now()));
                 }
             }
+            GuiAction::SelectSourceTab(tab) => {
+                self.gui.c_main_view.children.selected_source_tab = tab;
+                self.gui.c_main_view.children.changed_source_tab();
+            }
+            GuiAction::SetShowingSavedQueue(queue) => {
+                self.gui
+                    .c_main_view
+                    .children
+                    .playlist_menu
+                    .c_search
+                    .set_text(queue);
+            }
             GuiAction::OpenMain => {
                 self.gui.unidle();
                 if self.gui.settings.0 {
@@ -1535,10 +1549,14 @@ impl WindowHandler<GuiEvent> for Gui {
                         25.0,
                         Color::from_int_rgba(0, 100, 255, 100),
                     ),
-                    Dragging::Queue(_) => graphics.draw_circle(
+                    Dragging::Queue(_, src) => graphics.draw_circle(
                         self.mouse_pos,
                         25.0,
-                        Color::from_int_rgba(100, 0, 255, 100),
+                        if src.is_some() {
+                            Color::from_int_rgba(200, 0, 150, 100)
+                        } else {
+                            Color::from_int_rgba(100, 0, 255, 100)
+                        },
                     ),
                     Dragging::Queues(_) => graphics.draw_circle(
                         self.mouse_pos,
@@ -1618,10 +1636,14 @@ impl WindowHandler<GuiEvent> for Gui {
                     Dragging::Artist(_)
                     | Dragging::Album(_)
                     | Dragging::Song(_)
-                    | Dragging::Queue(Ok(_))
+                    | Dragging::Queue(_, None)
                     | Dragging::Queues(_) => (),
-                    Dragging::Queue(Err(path)) => {
-                        self.exec_gui_action(GuiAction::SendToServer(Action::QueueRemove(path)))
+                    Dragging::Queue(_, Some((queue, path))) => {
+                        self.exec_gui_action(GuiAction::SendToServer(if let Some(queue) = queue {
+                            Action::SavedQueue(queue, vec![Action::QueueRemove(path)])
+                        } else {
+                            Action::QueueRemove(path)
+                        }))
                     }
                 }
             }
@@ -1697,6 +1719,12 @@ impl WindowHandler<GuiEvent> for Gui {
         {
             self.gui._keyboard_move_focus(self.modifiers.shift(), false);
         }
+        if let Some(key) = virtual_key_code {
+            let keybind = KeyBinding::new(&self.modifiers, key);
+            if let Some(action) = self.keybinds.get_mut(&keybind) {
+                action.down();
+            }
+        }
         for a in self.gui._keyboard_event(
             &mut EventInfo::new(),
             false,
@@ -1741,7 +1769,9 @@ impl WindowHandler<GuiEvent> for Gui {
             && let Some(key) = virtual_key_code
         {
             let keybind = KeyBinding::new(&self.modifiers, key);
-            if let Some(action) = self.keybinds.get(&keybind) {
+            if let Some(action) = self.keybinds.get_mut(&keybind)
+                && action.up()
+            {
                 if action.has_priority() {
                     e.take();
                     for a in self.key_actions.get(&action.id()).execute() {
@@ -1989,13 +2019,13 @@ pub struct KeyActions(Vec<KeyAction>);
 #[derive(Clone, Copy)]
 pub struct KeyActionId(usize);
 #[derive(Clone, Copy)]
-pub struct KeyActionRef(usize, bool);
+pub struct KeyActionRef(usize, bool, bool);
 impl KeyActionId {
     pub fn get_index(&self) -> usize {
         self.0
     }
     pub fn with_priority(&self, priority: bool) -> KeyActionRef {
-        KeyActionRef(self.0, priority)
+        KeyActionRef(self.0, priority, false)
     }
 }
 impl KeyActionRef {
@@ -2010,6 +2040,12 @@ impl KeyActionRef {
     }
     pub fn set_priority(&mut self, priority: bool) {
         self.1 = priority;
+    }
+    fn down(&mut self) {
+        self.2 = true;
+    }
+    fn up(&mut self) -> bool {
+        std::mem::replace(&mut self.2, false)
     }
 }
 impl KeyActions {

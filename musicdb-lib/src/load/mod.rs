@@ -34,7 +34,7 @@ impl ToFromBytes for String {
     where
         T: Read,
     {
-        let len = ToFromBytes::from_bytes(s)?;
+        let len = usize::from_bytes(s)?;
         let mut buf = vec![0; len];
         s.read_exact(&mut buf)?;
         Ok(String::from_utf8_lossy(&buf).into_owned())
@@ -87,7 +87,7 @@ where
     where
         T: Read,
     {
-        let len = ToFromBytes::from_bytes(s)?;
+        let len = usize::from_bytes(s)?;
         let mut buf = Vec::with_capacity(len);
         for _ in 0..len {
             buf.push(ToFromBytes::from_bytes(s)?);
@@ -113,7 +113,7 @@ where
     where
         T: Read,
     {
-        let len = ToFromBytes::from_bytes(s)?;
+        let len = usize::from_bytes(s)?;
         let mut buf = VecDeque::with_capacity(len);
         for _ in 0..len {
             buf.push_back(ToFromBytes::from_bytes(s)?);
@@ -150,6 +150,22 @@ where
         })
     }
 }
+pub fn map_to_bytes<'a, C1, C2, T>(
+    map: impl ExactSizeIterator<Item = (&'a C1, &'a C2)>,
+    s: &mut T,
+) -> Result<(), std::io::Error>
+where
+    C1: ToFromBytes + 'a,
+    C2: ToFromBytes + 'a,
+    T: Write,
+{
+    map.len().to_bytes(s)?;
+    for (key, val) in map {
+        key.to_bytes(s)?;
+        val.to_bytes(s)?;
+    }
+    Ok(())
+}
 impl<K, V> ToFromBytes for HashMap<K, V>
 where
     K: ToFromBytes + std::cmp::Eq + std::hash::Hash,
@@ -170,7 +186,7 @@ where
     where
         T: Read,
     {
-        let len = ToFromBytes::from_bytes(s)?;
+        let len = usize::from_bytes(s)?;
         let mut o = Self::with_capacity(len);
         for _ in 0..len {
             o.insert(ToFromBytes::from_bytes(s)?, ToFromBytes::from_bytes(s)?);
@@ -198,7 +214,7 @@ where
     where
         T: Read,
     {
-        let len = ToFromBytes::from_bytes(s)?;
+        let len = usize::from_bytes(s)?;
         let mut o = Self::new();
         for _ in 0..len {
             o.insert(ToFromBytes::from_bytes(s)?, ToFromBytes::from_bytes(s)?);

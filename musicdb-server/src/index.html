@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>MusicDB</title>
+<meta name="color-scheme" content="dark">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link id="favicon" rel="icon" type="image/jpeg" href="./favicon">
+<style>
+:root {
+  font-family: sans;
+}
+body {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+}
+
+.fixeverywhere {
+  position: fixed;
+  inset: -1em;
+  z-index: 9;
+}
+.draggable {
+  position: relative;
+}
+.dragged {
+  &.queueelem {
+    .actions {
+      background: #00F4;
+    }
+    .children {
+      transition: transform 150ms ease-in;
+      transform-origin: top;
+      transform: scaleY(0);
+    }
+  }
+}
+
+#filter {
+  overflow-y: scroll;
+  transition: height 0.3s ease, border-bottom 0.3s ease;
+  height: 0;
+  border-bottom: 2pt solid transparent;
+  &.active {
+    height: 40vh;
+    border-bottom: 2pt solid gray;
+  }
+}
+#filter_results {
+  div {
+    margin-left: 1em;
+  }
+}
+
+#current {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: 1fr 1fr auto;
+  padding-bottom: 0.1em;
+  border-bottom: 2pt solid gray;
+  margin-bottom: 0.3em;
+
+  .songtitle {
+    grid-row: 1;
+    grid-column: 2;
+    margin-top: auto;
+    font-size: x-large;
+  }
+  .subtitle {
+    grid-row: 2;
+    grid-column: 2;
+    margin-bottom: auto;
+  }
+  .buttons {
+    grid-row: 3;
+    grid-column: 2;
+    button {
+      padding-left: 0.4em;
+      padding-right: 0.4em;
+      padding-top: 0.2em;
+      padding-bottom: 0.2em;
+      margin-left: 0.3em;
+      border: 2pt solid #80808030;
+      border-radius: 5pt;
+      background: none;
+      &:hover {
+        border: 2pt solid #808080A0;
+      }
+    }
+  }
+  .coverimage {
+    height: 6em;
+    min-width: 6em;
+    grid-row: 1 / span 3;
+    grid-column: 1;
+    margin-right: 1em;
+  }
+  &.paused .coverimage {
+    filter: grayscale();
+  }
+}
+
+#queue {
+  overflow-y: scroll;
+  .queuepadding {
+    height: 100vh;
+  }
+}
+.queueelem {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-rows: auto auto auto;
+
+  .title {
+    grid-row: 1;
+    grid-column: 1;
+    font-family: serif;
+  }
+  .extra {
+    grid-row: 2;
+    grid-column: 1;
+    font-family: sans;
+    font-size: smaller;
+  }
+  .actions {
+    grid-row: 1 / span 2;
+    grid-column: 2;
+    user-select: none;
+    margin-top: auto;
+    margin-bottom: auto;
+    padding-left: 1em;
+    padding-right: 1em;
+  }
+  .children {
+    grid-row: 3;
+    grid-column: 1 / span 2;
+    margin-left: 0.4em;
+    border-left: 1pt solid gray;
+    padding-left: 0.5em;
+  }
+}
+</style>
+</head>
+<body>
+<div id="header"></div>
+<div id="current"></div>
+<div id="filter">
+<label>artist: </label><input type="text" id="input_artist">
+<label>album: </label><input type="text" id="input_album"><br>
+<label>title: </label><input type="text" id="input_title">
+<button id="input_search">search</button>
+<button id="input_close">close</button>
+<div id="filter_results"></div>
+</div>
+<div id="queue"></div>
+<script>
+var library_insert = "!";
+
+async function update_data() {
+  await update_queue();
+}
+async function update_on_events(then_func) {
+  let then_do = then_func;
+  while (true) {
+    try {
+      console.log("Trying websocket...");
+      let ws = new WebSocket("./ws");
+      ws.addEventListener("message", async (e) => {
+        switch (e.data.trim()) {
+          case "stop":
+          case "pause":
+          case "resume":
+            await update_current();
+            break;
+          case "update/data":
+            await update_data();
+            break;
+          case "next":
+          case "update/queue":
+            await update_queue();
+            break;
+          default:
+            console.log("Unknown websocket message: ", e.data.trim());
+            break;
+        }
+      });
+      if (then_do) { then_do(); then_do = null; }
+      await new Promise(r => ws.addEventListener("error", r));
+      ws.close();
+    } catch (e) {}
+    await new Promise(r => setTimeout(r, 3000));
+  }
+}
+
+async function update_current() {
+  try {
+    let r = await fetch("./current");
+    let s; if (!r.ok) s = {}; else s = await r.json();
+    if (s.on) {
+      document.title = s.title || "MusicDB";
+      if (s.cover) {
+        document.getElementById("favicon").href = "./cover/"+encodeURIComponent(s.cover);
+      } else {
+        document.getElementById("favicon").href = "./favicon";
+      }
+    } else {
+      document.title = "MusicDB";
+      document.getElementById("favicon").href = "./favicon";
+    }
+    let title = document.createElement("span");
+    title.classList.add("songtitle");
+    title.innerText = s.title || "";
+    let artist = document.createElement("span");
+    artist.classList.add("songartist");
+    artist.innerText = s.artist || "";
+    let album = document.createElement("span");
+    album.classList.add("songalbum");
+    album.innerText = s.album || "";
+    let subtitle = document.createElement("span");
+    subtitle.classList.add("subtitle");
+    subtitle.replaceChildren(s.artist ? " by " : "", artist, s.album ? " on " : "", album);
+    let coverimage = document.createElement("img");
+    coverimage.classList.add("coverimage");
+    if (s.cover)
+      coverimage.src = "./cover/"+encodeURIComponent(s.cover);
+    let buttons = document.createElement("div");
+    buttons.classList.add("buttons");
+    let btn_stop = document.createElement("button");
+    let btn_play = document.createElement("button");
+    let btn_next = document.createElement("button");
+    let btn_clear = document.createElement("button");
+    btn_stop.innerText = "⏹\u{FE0E}";
+    btn_stop.onclick = () => fetch("./stop");
+    btn_play.innerText = (s.on ? "⏸" : "▶") + "\u{FE0E}";
+    btn_play.onclick = s.on ? (() => fetch("./pause")) : (() => fetch("./play"));
+    btn_next.innerText = "⏭\u{FE0E}";
+    btn_next.onclick = () => fetch("./skip");
+    btn_clear.innerText = "⏏\u{FE0E}";
+    btn_clear.onclick = () => fetch("./clear-queue");
+    buttons.replaceChildren(btn_stop, btn_play, btn_next, btn_clear);
+    document.getElementById("current").replaceChildren(coverimage, title, subtitle, buttons);
+    if (s.on) {
+      document.getElementById("current").classList.remove("paused");
+    } else {
+      document.getElementById("current").classList.add("paused");
+    }
+  } catch (e) {
+    console.log(e);
+  }
+}
+
+async function update_queue() {
+  try {
+    await update_current();
+    let r = await fetch("./queue");
+    if (!r.ok) return;
+    let e = await r.json();
+    function mk_elem(e, path) {
+      let elem = document.createElement("div");
+      elem.classList.add("queueelem");
+      elem.dataset.path = path.join("_");
+      elem.dataset.leaf = e.children ? "0" : "1";
+      if (path.length == 0 && e.title === "") e.title = "Queue";
+      if (e.title) {
+        let title = document.createElement("div");
+        title.classList.add("title");
+        title.innerText = e.title;
+        elem.append(title);
+      }
+      if (e.extra) {
+        let extra = document.createElement("div");
+        extra.classList.add("extra");
+        extra.innerText = e.extra;
+        elem.append(extra);
+      }
+      if (true /* element .actions is required */) {
+        let actions = document.createElement("div");
+        actions.classList.add("actions");
+        actions.innerText = "≣≣";
+        elem.append(actions);
+        make_draggable(elem, actions);
+        actions.addEventListener("click", (e) => e.stopPropagation());
+        elem.addEventListener("click", (e) => {
+          e.stopPropagation();
+          fetch("./queue-goto/_"+encodeURIComponent(elem.dataset.path));
+        });
+      }
+      if (e.children) {
+        let children = document.createElement("div");
+        children.classList.add("children");
+        let i = 0;
+        for (let child of e.children) {
+          children.append(mk_elem(child, path.concat([i++])));
+        }
+        elem.append(children);
+      }
+      return elem;
+    }
+    let padding = document.createElement("div");
+    padding.classList.add("queuepadding");
+    document.getElementById("queue").replaceChildren(mk_elem(e, []), padding);
+  } catch (e) {
+    console.log(e);
+  }
+}
+
+function make_draggable(parent, elem) {
+  let s = {};
+  parent.classList.add("draggable");
+  elem.addEventListener("touchstart", (e) => {
+    e.preventDefault(); e.stopPropagation();
+  }, { passive: false });
+  elem.addEventListener("touchmove", (e) => {
+    e.preventDefault(); e.stopPropagation();
+  }, { passive: false });
+  elem.addEventListener("touchend", (e) => {
+    e.preventDefault(); e.stopPropagation();
+  }, { passive: false });
+  elem.addEventListener("pointerdown", (e) => {
+    e.preventDefault(); e.stopPropagation();
+    if (e.buttons == 1) {
+      s.down = true;
+      parent.classList.add("dragged");
+      s.x = e.clientX;
+      s.y = e.clientY;
+      if (s.bigelem) s.bigelem.remove();
+      s.bigelem = document.createElement("div");
+      s.bigelem.classList.add("fixeverywhere");
+      elem.append(s.bigelem);
+    }
+  }, { passive: false });
+  elem.addEventListener("pointermove", (e) => {
+    e.preventDefault(); e.stopPropagation();
+    if (s.down) {
+      s.dx = e.clientX - s.x;
+      s.dy = e.clientY - s.y;
+      if (Math.abs(s.dx) > Math.abs(s.dy)) {
+        parent.style.left = s.dx + "px";
+        parent.style.top = (s.dy*Math.abs(s.dy/s.dx)) + "px";
+      } else {
+        parent.style.top = s.dy + "px";
+        parent.style.left = (s.dx*Math.abs(s.dx/s.dy)) + "px";
+      }
+    }
+  }, { passive: false });
+  elem.addEventListener("pointerup", (e) => {
+    e.preventDefault(); e.stopPropagation();
+    if (s.down) {
+      s.down = false;
+      s.dx = e.clientX - s.x;
+      s.dy = e.clientY - s.y;
+      parent.classList.remove("dragged");
+      parent.style.removeProperty("left");
+      parent.style.removeProperty("top");
+      s.bigelem.remove();
+      delete s.bigelem;
+      if (Math.abs(s.dx) > Math.abs(s.dy) && Math.abs(s.dx) > elem.getBoundingClientRect().width) {
+          fetch("./queue-remove/_"+encodeURIComponent(parent.dataset.path));
+      } else {
+        let target = document.elementFromPoint(e.clientX, e.clientY);
+        while (target && !target.dataset.leaf) target = target.parentElement;
+        if (!target) return;
+        let target_pos = target.querySelector(".actions").getBoundingClientRect();
+        function next_path() {
+          let target_path = target.dataset.path;
+          let last = target_path.lastIndexOf("_")+1;
+          if (last > 0)
+            target_path = target_path.substring(0, last) + (1+parseInt(target_path.substring(last)));
+          return target_path;
+        }
+        if (parent.dataset.path == target.dataset.path) {
+          if (parent.dataset.leaf == "1") {
+            open_library(next_path(), true);
+          } else {
+            open_library(parent.dataset.path, false);
+          }
+        } else {
+          if (e.clientY - target_pos.y < (target_pos.height) / (target.dataset.leaf == "1" ? 2 : 3)) {
+            // top half (or third for non-leaf elements): move before target
+            fetch("./queue-move/_"+encodeURIComponent(parent.dataset.path)+"/_"+encodeURIComponent(target.dataset.path));
+          } else {
+            // bottom part: move after target or into non-leaf element
+            if (target.dataset.leaf == "1") {
+              fetch("./queue-move/_"+encodeURIComponent(parent.dataset.path)+"/_"+encodeURIComponent(next_path()));
+            } else {
+              fetch("./queue-moveinto/_"+encodeURIComponent(parent.dataset.path)+"/_"+encodeURIComponent(target.dataset.path));
+            }
+          }
+        }
+      }
+    }
+  }, { passive: false });
+}
+
+function open_library(path, is_leaf) {
+  library_insert = is_leaf ? path : "!"+path;
+  document.getElementById("filter").classList.add("active");
+}
+document.getElementById("input_close").addEventListener("click", () => {
+  library_insert = "!";
+  document.getElementById("filter").classList.remove("active");
+});
+document.getElementById("input_search").addEventListener("click", async () => {
+  let params = new URLSearchParams();
+  params.append("title", document.getElementById("input_title").value);
+  params.append("album", document.getElementById("input_album").value);
+  params.append("artist", document.getElementById("input_artist").value);
+  document.getElementById("filter_results").replaceChildren();
+  let r = await fetch("./search?"+params);
+  if (!r.ok) return;
+  let library = await r.json();
+  function build_library(library, parent) {
+    for (let e of library) {
+      let elem;
+      switch (e.t) {
+        case "a":
+          elem = document.createElement("div");
+          elem.classList.add("libartist");
+          elem.innerText = e.name;
+          elem.onclick = (ev) => {
+            ev.preventDefault(); ev.stopPropagation();
+            fetch("./add-artist/" + encodeURIComponent(e.id) + "/" + encodeURIComponent(library_insert));
+          };
+          break;
+        case "b":
+          elem = document.createElement("div");
+          elem.classList.add("libalbum");
+          elem.innerText = e.name;
+          elem.onclick = (ev) => {
+            ev.preventDefault(); ev.stopPropagation();
+            fetch("./add-album/" + encodeURIComponent(e.id) + "/" + encodeURIComponent(library_insert));
+          };
+          break;
+        case "s":
+          elem = document.createElement("div");
+          elem.classList.add("libsong");
+          elem.innerText = e.title;
+          elem.onclick = (ev) => {
+            ev.preventDefault(); ev.stopPropagation();
+            fetch("./add-song/" + encodeURIComponent(e.id) + "/" + encodeURIComponent(library_insert));
+          };
+          break;
+        default:
+          console.log("Unknown library element type: ", e.t);
+      }
+      if (elem) parent.append(elem);
+      if (elem && e.has) build_library(e.has, elem);
+    }
+  }
+  build_library(library, document.getElementById("filter_results"));
+});
+
+update_on_events(update_data);
+</script>
+</body>
+</html>

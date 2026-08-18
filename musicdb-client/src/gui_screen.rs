@@ -9,14 +9,16 @@ use uianimator::{Animator, default_animator_f64_quadratic::DefaultAnimatorF64Qua
 
 use crate::{
     gui::{
-        DrawInfo, EventInfo, GuiAction, GuiElem, GuiElemCfg, GuiElemChildren, KeyAction,
-        KeyBinding, SpecificGuiElem,
+        DrawInfo, EventInfo,
+        GuiAction::{self, SelectSourceTab},
+        GuiElem, GuiElemCfg, GuiElemChildren, KeyAction, KeyBinding, SpecificGuiElem,
     },
     gui_base::{Button, Panel},
     gui_edit_song::EditorForSongs,
     gui_idle_display::IdleDisplay,
     gui_library::LibraryBrowser,
     gui_notif::NotifOverlay,
+    gui_playlists::PlaylistView,
     gui_queue::QueueViewer,
     gui_settings::Settings,
     gui_song_adder::SongAdder,
@@ -66,8 +68,26 @@ pub struct MainView {
     pub button_clear_queue: Button<[Label; 1]>,
     pub button_settings: Button<[Label; 1]>,
     pub button_exit: Button<[Label; 1]>,
+    pub tab_bar: Panel<[Button<[Label; 1]>; 3]>,
     pub library_browser: LibraryBrowser,
+    pub filter_menu: Label,
+    pub playlist_menu: PlaylistView,
     pub queue_viewer: QueueViewer,
+    pub selected_source_tab: u8,
+}
+impl MainView {
+    pub fn changed_source_tab(&mut self) {
+        for (i, ch) in self.tab_bar.children.iter_mut().enumerate() {
+            *ch.children[0].content.color() = if i as u8 == self.selected_source_tab {
+                Color::WHITE
+            } else {
+                Color::GRAY
+            };
+        }
+        self.library_browser.elem_mut().config_mut().enabled = 0 == self.selected_source_tab;
+        self.filter_menu.elem_mut().config_mut().enabled = 1 == self.selected_source_tab;
+        self.playlist_menu.elem_mut().config_mut().enabled = 2 == self.selected_source_tab;
+    }
 }
 impl GuiElemChildren for MainView {
     fn iter(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElem> + '_> {
@@ -76,6 +96,9 @@ impl GuiElemChildren for MainView {
                 self.button_clear_queue.elem_mut(),
                 self.button_settings.elem_mut(),
                 self.button_exit.elem_mut(),
+                self.tab_bar.elem_mut(),
+                self.filter_menu.elem_mut(),
+                self.playlist_menu.elem_mut(),
                 self.library_browser.elem_mut(),
                 self.queue_viewer.elem_mut(),
             ]
@@ -83,7 +106,7 @@ impl GuiElemChildren for MainView {
         )
     }
     fn len(&self) -> usize {
-        5
+        8
     }
 }
 impl GuiScreen {
@@ -96,7 +119,7 @@ impl GuiScreen {
         scroll_sensitivity_lines: f64,
         scroll_sensitivity_pages: f64,
     ) -> Self {
-        Self {
+        let mut s = Self {
             config: config.w_keyboard_watch().w_mouse(),
             c_notif_overlay,
             c_status_bar: StatusBar::new(GuiElemCfg::at(Rectangle::from_tuples(
@@ -159,14 +182,63 @@ impl GuiScreen {
                             Vec2::new(0.5, 0.5),
                         )],
                     ),
+                    tab_bar: Panel::new(
+                        GuiElemCfg::at(Rectangle::from_tuples((0.0, 0.0), (0.5, 0.03))),
+                        [
+                            Button::new(
+                                GuiElemCfg::at(Rectangle::from_tuples((0.0, 0.0), (0.33, 1.0))),
+                                |_| vec![SelectSourceTab(0)],
+                                [Label::new(
+                                    GuiElemCfg::default(),
+                                    "Library".to_owned(),
+                                    Color::GRAY,
+                                    None,
+                                    Vec2::new(0.5, 0.5),
+                                )],
+                            ),
+                            Button::new(
+                                GuiElemCfg::at(Rectangle::from_tuples((0.33, 0.0), (0.67, 1.0))),
+                                |_| vec![SelectSourceTab(1)],
+                                [Label::new(
+                                    GuiElemCfg::default(),
+                                    "Filter".to_owned(),
+                                    Color::GRAY,
+                                    None,
+                                    Vec2::new(0.5, 0.5),
+                                )],
+                            ),
+                            Button::new(
+                                GuiElemCfg::at(Rectangle::from_tuples((0.67, 0.0), (1.0, 1.0))),
+                                |_| vec![SelectSourceTab(2)],
+                                [Label::new(
+                                    GuiElemCfg::default(),
+                                    "Playlists".to_owned(),
+                                    Color::GRAY,
+                                    None,
+                                    Vec2::new(0.5, 0.5),
+                                )],
+                            ),
+                        ],
+                    ),
                     library_browser: LibraryBrowser::new(GuiElemCfg::at(Rectangle::from_tuples(
-                        (0.0, 0.0),
+                        (0.0, 0.03),
                         (0.5, 1.0),
                     ))),
-                    queue_viewer: QueueViewer::new(GuiElemCfg::at(Rectangle::from_tuples(
-                        (0.5, 0.03),
-                        (1.0, 1.0),
+                    filter_menu: Label::new(
+                        GuiElemCfg::at(Rectangle::from_tuples((0.0, 0.03), (0.5, 1.0))),
+                        String::new(),
+                        Color::WHITE,
+                        None,
+                        Vec2::ZERO,
+                    ),
+                    playlist_menu: PlaylistView::new(GuiElemCfg::at(Rectangle::from_tuples(
+                        (0.0, 0.03),
+                        (0.5, 1.0),
                     ))),
+                    selected_source_tab: 0,
+                    queue_viewer: QueueViewer::new_active_queue(GuiElemCfg::at(
+                        Rectangle::from_tuples((0.5, 0.03), (1.0, 1.0)),
+                    )),
                 },
             ),
             c_context_menu: None,
@@ -177,7 +249,9 @@ impl GuiScreen {
             idle_changing: false,
             idle_timeout: Some(60.0),
             prev_mouse_pos: Vec2::ZERO,
-        }
+        };
+        s.c_main_view.children.changed_source_tab();
+        s
     }
     fn get_prog(v: &mut (bool, Option<Instant>), seconds: f32) -> f32 {
         if let Some(since) = &mut v.1 {

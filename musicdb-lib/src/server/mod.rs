@@ -1,6 +1,7 @@
 pub mod get;
 
 use std::{
+    collections::BTreeMap,
     io::{BufRead as _, BufReader, Read, Write},
     net::TcpListener,
     sync::{Arc, Mutex, mpsc},
@@ -21,7 +22,7 @@ use crate::{
         queue::Queue,
         song::Song,
     },
-    load::ToFromBytes,
+    load::{ToFromBytes, map_to_bytes},
 };
 use crate::{load::vec_to_bytes, server::get::handle_one_connection_as_get};
 
@@ -81,7 +82,7 @@ impl Action {
             | Self::Pause
             | Self::Stop
             | Self::NextSong
-            | Self::SyncDatabase(_, _, _)
+            | Self::SyncDatabase(_, _, _, _)
             | Self::QueueRemove(_)
             | Self::QueueMove(_, _)
             | Self::QueueMoveInto(_, _)
@@ -177,7 +178,7 @@ pub enum Action {
     Pause,
     Stop,
     NextSong,
-    SyncDatabase(Vec<Artist>, Vec<Album>, Vec<Song>),
+    SyncDatabase(Vec<Artist>, Vec<Album>, Vec<Song>, BTreeMap<String, Queue>),
     QueueUpdate(Vec<usize>, Queue, Req),
     QueueAdd(Vec<usize>, Vec<Queue>, Req),
     QueueInsert(Vec<usize>, usize, Vec<Queue>, Req),
@@ -533,13 +534,14 @@ pub fn sync_database_to_bytes_packed<'a, T>(
     a: impl ExactSizeIterator<Item = &'a Artist>,
     b: impl ExactSizeIterator<Item = &'a Album>,
     c: impl ExactSizeIterator<Item = &'a Song>,
+    d: impl ExactSizeIterator<Item = (&'a String, &'a Queue)>,
     s: &mut T,
 ) -> Result<(), std::io::Error>
 where
     T: Write,
 {
     s.write_all(&[seq])?;
-    sync_database_to_bytes(a, b, c, s)?;
+    sync_database_to_bytes(a, b, c, d, s)?;
     Ok(())
 }
 
@@ -582,6 +584,7 @@ pub fn sync_database_to_bytes<'a, T>(
     a: impl ExactSizeIterator<Item = &'a Artist>,
     b: impl ExactSizeIterator<Item = &'a Album>,
     c: impl ExactSizeIterator<Item = &'a Song>,
+    d: impl ExactSizeIterator<Item = (&'a String, &'a Queue)>,
     s: &mut T,
 ) -> Result<(), std::io::Error>
 where
@@ -591,6 +594,7 @@ where
     vec_to_bytes(a, s)?;
     vec_to_bytes(b, s)?;
     vec_to_bytes(c, s)?;
+    map_to_bytes(d, s)?;
     Ok(())
 }
 impl ToFromBytes for Action {
@@ -603,8 +607,8 @@ impl ToFromBytes for Action {
             Self::Pause => s.write_all(&[BYTE_PAUSE])?,
             Self::Stop => s.write_all(&[BYTE_STOP])?,
             Self::NextSong => s.write_all(&[BYTE_NEXT_SONG])?,
-            Self::SyncDatabase(a, b, c) => {
-                sync_database_to_bytes(a.iter(), b.iter(), c.iter(), s)?;
+            Self::SyncDatabase(a, b, c, d) => {
+                sync_database_to_bytes(a.iter(), b.iter(), c.iter(), d.iter(), s)?;
             }
             Self::QueueUpdate(index, new_data, req) => {
                 s.write_all(&[BYTE_QUEUE_UPDATE])?;
@@ -838,7 +842,9 @@ impl ToFromBytes for Action {
             BYTE_PAUSE => Self::Pause,
             BYTE_STOP => Self::Stop,
             BYTE_NEXT_SONG => Self::NextSong,
-            BYTE_SYNC_DATABASE => Self::SyncDatabase(from_bytes!(), from_bytes!(), from_bytes!()),
+            BYTE_SYNC_DATABASE => {
+                Self::SyncDatabase(from_bytes!(), from_bytes!(), from_bytes!(), from_bytes!())
+            }
             BYTE_QUEUE_UPDATE => Self::QueueUpdate(from_bytes!(), from_bytes!(), from_bytes!()),
             BYTE_QUEUE_ADD => Self::QueueAdd(from_bytes!(), from_bytes!(), from_bytes!()),
             BYTE_QUEUE_INSERT => {
@@ -943,9 +949,9 @@ impl ToFromBytes for Action {
             BYTE_SAVE => Self::Save,
             BYTE_ERRORINFO => Self::ErrorInfo(from_bytes!(), from_bytes!()),
             BYTE_DENIED => Self::Denied(from_bytes!()),
-            _ => {
+            unexpected => {
                 eprintln!(
-                    "[{}] unexpected byte when reading command; stopping playback.",
+                    "[{}] unexpected byte when reading command; stopping playback (0b{unexpected:b}).",
                     "WARN".yellow()
                 );
                 Self::Stop
@@ -974,7 +980,7 @@ fn test_to_from_bytes() {
         Action::Pause,
         Action::Stop,
         Action::NextSong,
-        Action::SyncDatabase(vec![], vec![], vec![]),
+        Action::SyncDatabase(vec![], vec![], vec![], BTreeMap::new()),
         Action::QueueUpdate(vec![], QueueContent::Song(12).into(), Req::none()),
         Action::QueueAdd(vec![], vec![], Req::none()),
         Action::QueueInsert(vec![], 5, vec![], Req::none()),

@@ -36,7 +36,7 @@ pub struct Database {
     albums: HashMap<AlbumId, Album>,
     songs: HashMap<SongId, Song>,
     covers: HashMap<CoverId, Cover>,
-    queues: BTreeMap<String, Queue>,
+    pub queues: BTreeMap<String, Queue>,
     /// clients can access files in this directory if they know the relative path.
     /// can be used to embed custom images in tags of songs/albums/artists.
     /// None -> no access
@@ -590,6 +590,7 @@ impl Database {
             self.artists().values(),
             self.albums().values(),
             self.songs().values(),
+            self.queues.iter(),
             con,
         )?;
         self.seq
@@ -673,6 +674,8 @@ impl Database {
         match &action {
             // Will broadcast `QueueSetShuffle`
             Action::QueueShuffle(_, _) => (),
+            // Will broadcast individually
+            Action::SavedQueue(_, _) => (),
             Action::NextSong if self.queue.is_almost_empty() => (),
             Action::Pause if !self.playing => (),
             Action::Resume if self.playing => (),
@@ -681,7 +684,65 @@ impl Database {
             // since db.update_endpoints is empty for clients, this won't cause unwanted back and forth
             _ => {
                 if broadcast {
-                    action = self.broadcast_update(action, client);
+                    action = match action {
+                        Action::QueueUpdate(..)
+                        | Action::QueueAdd(..)
+                        | Action::QueueInsert(..)
+                        | Action::QueueRemove(..)
+                        | Action::QueueMove(..)
+                        | Action::QueueMoveInto(..)
+                        | Action::QueueGoto(..)
+                        | Action::QueueShuffle(..)
+                        | Action::QueueSetShuffle(..)
+                        | Action::QueueUnshuffle(..) => {
+                            if let Some(queue) = queue {
+                                if let Action::SavedQueue(_, mut v) = self.broadcast_update(
+                                    Action::SavedQueue(queue.to_owned(), vec![action]),
+                                    client,
+                                ) {
+                                    v.pop().unwrap()
+                                } else {
+                                    unreachable!()
+                                }
+                            } else {
+                                self.broadcast_update(action, client)
+                            }
+                        }
+                        Action::Resume
+                        | Action::Pause
+                        | Action::Stop
+                        | Action::NextSong
+                        | Action::SyncDatabase(..)
+                        | Action::SavedQueue(..)
+                        | Action::AddSong(..)
+                        | Action::AddAlbum(..)
+                        | Action::AddArtist(..)
+                        | Action::AddCover(..)
+                        | Action::ModifySong(..)
+                        | Action::ModifyAlbum(..)
+                        | Action::ModifyArtist(..)
+                        | Action::RemoveSong(..)
+                        | Action::RemoveAlbum(..)
+                        | Action::RemoveArtist(..)
+                        | Action::SetSongDuration(..)
+                        | Action::TagSongFlagSet(..)
+                        | Action::TagSongFlagUnset(..)
+                        | Action::TagAlbumFlagSet(..)
+                        | Action::TagAlbumFlagUnset(..)
+                        | Action::TagArtistFlagSet(..)
+                        | Action::TagArtistFlagUnset(..)
+                        | Action::TagSongPropertySet(..)
+                        | Action::TagSongPropertyUnset(..)
+                        | Action::TagAlbumPropertySet(..)
+                        | Action::TagAlbumPropertyUnset(..)
+                        | Action::TagArtistPropertySet(..)
+                        | Action::TagArtistPropertyUnset(..)
+                        | Action::Multiple(..)
+                        | Action::InitComplete
+                        | Action::Save
+                        | Action::ErrorInfo(..)
+                        | Action::Denied(..) => self.broadcast_update(action, client),
+                    };
                 }
             }
         }
@@ -701,7 +762,7 @@ impl Database {
                     eprintln!("[{}] Couldn't save: {e}", "ERR!".red());
                 }
             }
-            Action::SyncDatabase(a, b, c) => self.sync(a, b, c),
+            Action::SyncDatabase(a, b, c, d) => self.sync(a, b, c, d),
             Action::QueueUpdate(index, new_data, _) => {
                 if let Some(v) = q(queue, self).get_item_at_index_mut(&index, 0) {
                     *v = new_data;
@@ -721,25 +782,23 @@ impl Database {
                 q(queue, self).remove_by_index(&index, 0);
             }
             Action::QueueMove(index_from, mut index_to) => 'queue_move: {
-                if index_to.len() == 0 || index_to.starts_with(&index_from) {
+                if index_to.is_empty() || index_to.starts_with(&index_from) {
                     break 'queue_move;
                 }
                 // if same parent path, perform folder move operation instead
-                if index_from[0..index_from.len() - 1] == index_to[0..index_to.len() - 1] {
-                    if let Some(parent) = q(queue, self)
+                if index_from[0..index_from.len() - 1] == index_to[0..index_to.len() - 1]
+                    && let Some(parent) = q(queue, self)
                         .get_item_at_index_mut(&index_from[0..index_from.len() - 1], 0)
-                    {
-                        if let QueueContent::Folder(folder) = parent.content_mut() {
-                            let i1 = index_from[index_from.len() - 1];
-                            let mut i2 = index_to[index_to.len() - 1];
-                            if i2 > i1 {
-                                i2 -= 1;
-                            }
-                            // this preserves "is currently active queue element" status
-                            folder.move_elem(i1, i2);
-                            break 'queue_move;
-                        }
+                    && let QueueContent::Folder(folder) = parent.content_mut()
+                {
+                    let i1 = index_from[index_from.len() - 1];
+                    let mut i2 = index_to[index_to.len() - 1];
+                    if i2 > i1 {
+                        i2 -= 1;
                     }
+                    // this preserves "is currently active queue element" status
+                    folder.move_elem(i1, i2);
+                    break 'queue_move;
                 }
                 // otherwise, remove then insert
                 let was_current = q(queue, self).is_current(&index_from);
@@ -783,7 +842,7 @@ impl Database {
                     }
                 }
             }
-            Action::QueueGoto(index) => Queue::set_index_db(self, &index),
+            Action::QueueGoto(index) => q(queue, self).set_index_full(&index),
             Action::QueueShuffle(path, set_index) => {
                 if !self.is_client() {
                     if let Some(elem) = q(queue, self).get_item_at_index_mut(&path, 0) {
@@ -866,8 +925,18 @@ impl Database {
                 }
             }
             Action::SavedQueue(queue, actions) => {
-                for action in actions {
-                    self.apply_action_impl(action, client, false, Some(queue.as_str()));
+                if !actions.is_empty() {
+                    self.modified_data();
+                    for action in actions {
+                        self.apply_action_impl(action, client, broadcast, Some(queue.as_str()));
+                    }
+                    if self
+                        .queues
+                        .get(&queue)
+                        .is_some_and(|q| q.is_completely_empty())
+                    {
+                        self.queues.remove(&queue);
+                    }
                 }
             }
             Action::AddSong(song, _) => {
@@ -1219,11 +1288,18 @@ impl Database {
         update.action.put_req_all(reqs);
         update.action
     }
-    pub fn sync(&mut self, artists: Vec<Artist>, albums: Vec<Album>, songs: Vec<Song>) {
+    pub fn sync(
+        &mut self,
+        artists: Vec<Artist>,
+        albums: Vec<Album>,
+        songs: Vec<Song>,
+        queues: BTreeMap<String, Queue>,
+    ) {
         self.modified_data();
         self.artists = artists.iter().map(|v| (v.id, v.clone())).collect();
         self.albums = albums.iter().map(|v| (v.id, v.clone())).collect();
         self.songs = songs.iter().map(|v| (v.id, v.clone())).collect();
+        self.queues = queues;
     }
 }
 

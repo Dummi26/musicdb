@@ -190,6 +190,27 @@ impl TextField {
             on_changed_mut: None,
         }
     }
+    pub fn set_text(&mut self, text: String) {
+        *self.c_input.content.text() = text;
+        self.post_change();
+    }
+    pub fn push_char(&mut self, key: char) {
+        self.c_input.content.text().push(key);
+        self.post_change();
+    }
+    fn post_change(&mut self) {
+        let content = &mut self.c_input.content;
+        let empty = content.get_text().is_empty();
+        if let Some(f) = &mut self.on_changed {
+            f(content.get_text());
+        }
+        if let Some(mut f) = self.on_changed_mut.take() {
+            let text = content.get_text().clone();
+            f(self, text);
+            self.on_changed_mut = Some(f);
+        }
+        self.c_hint.config_mut().enabled = empty;
+    }
 }
 impl GuiElem for TextField {
     fn config(&self) -> &GuiElemCfg {
@@ -242,20 +263,7 @@ impl GuiElem for TextField {
             && !key.is_control()
             && e.take()
         {
-            let content = &mut self.c_input.content;
-            let was_empty = content.get_text().is_empty();
-            content.text().push(key);
-            if let Some(f) = &mut self.on_changed {
-                f(content.get_text());
-            }
-            if let Some(mut f) = self.on_changed_mut.take() {
-                let text = content.get_text().clone();
-                f(self, text);
-                self.on_changed_mut = Some(f);
-            }
-            if was_empty {
-                self.c_hint.config_mut().enabled = false;
-            }
+            self.push_char(key);
         }
         vec![]
     }
