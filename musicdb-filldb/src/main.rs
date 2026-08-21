@@ -500,8 +500,12 @@ fn main() {
                 .map(|tag| tag.to_owned())
                 .collect::<Vec<_>>();
             for tag in srcfile_tags {
-                if !tags.contains(&tag) {
-                    tags.push(tag.to_owned());
+                if !if let Some(i) = tag.find('=') {
+                    tags.iter().any(|t| t.starts_with(&tag[..=i]))
+                } else {
+                    tags.contains(&tag)
+                } {
+                    tags.push(tag);
                 }
             }
         }
@@ -638,7 +642,7 @@ fn main() {
         let mut c = 0;
         let (artists, albums, songs) = database.artists_albums_songs_mut();
         fn push_tags(info: &str, tags: &mut Vec<String>) {
-            for line in info.lines() {
+            for line in info.lines().filter(|l| !l.starts_with("\\!")) {
                 let tag = normalized_str_to_tag(line);
                 if !tags.contains(&tag) {
                     tags.push(tag);
@@ -911,13 +915,18 @@ fn normalized_str_to_tag(str: &str) -> String {
 fn export_to_custom_files_dir(dbdir: String, path: PathBuf) {
     let database = Database::load_database_from_dir(dbdir.into(), PathBuf::new()).unwrap();
     eprintln!("Preserving artist, album, and song IDs...");
+    fn sorted<'a, T>(i: impl Iterator<Item = &'a T>, f: impl Fn(&T) -> u64) -> Vec<&'a T> {
+        let mut vec: Vec<&'a T> = i.collect();
+        vec.sort_by_key(|v| f(v));
+        vec
+    }
     if let Ok(mut file) = std::fs::OpenOptions::new()
         .create(true)
         .write(true)
         .truncate(true)
         .open(path.join("ids_artists"))
     {
-        for artist in database.artists().values() {
+        for artist in sorted(database.artists().values(), |v| v.id) {
             file.write_all(
                 format!("{}={}\n", artist.id, normalize_tag_to_str(&artist.name)).as_bytes(),
             )
@@ -932,7 +941,7 @@ fn export_to_custom_files_dir(dbdir: String, path: PathBuf) {
         .truncate(true)
         .open(path.join("ids_albums"))
     {
-        for album in database.albums().values() {
+        for album in sorted(database.albums().values(), |v| v.id) {
             file.write_all(
                 format!(
                     "{}={}={}\n",
@@ -953,7 +962,7 @@ fn export_to_custom_files_dir(dbdir: String, path: PathBuf) {
         .truncate(true)
         .open(path.join("ids_songs"))
     {
-        for song in database.songs().values() {
+        for song in sorted(database.songs().values(), |v| v.id) {
             file.write_all(
                 format!(
                     "{}={}={}={}\n",
@@ -1159,13 +1168,10 @@ fn export_custom_files_tags(tags: &[String], internals: &[String], path: &Path) 
     }
 }
 
-// TODO: load these tags, infer album and artist id from parent directories in the structure (will probably happen with no further changes required)
-fn gen_internals(id: Option<u64>, cover: Option<CoverId>) -> Vec<String> {
-    [
-        id.map(|id| format!("id={id}")),
-        cover.map(|id| format!("cover={id}")),
-    ]
-    .into_iter()
-    .flatten()
-    .collect()
+// TODO: load cover id?
+fn gen_internals(_id: Option<u64>, cover: Option<CoverId>) -> Vec<String> {
+    [cover.map(|id| format!("cover={id}"))]
+        .into_iter()
+        .flatten()
+        .collect()
 }
