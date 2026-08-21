@@ -10,11 +10,34 @@
 :root {
   font-family: sans;
 }
-body {
+#main {
   position: fixed;
   inset: 0;
   display: grid;
   grid-template-rows: auto auto 1fr;
+}
+#liveplayer {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: -16vh;
+  height: 15vh;
+  background: #0008;
+  transition: bottom 0.3s ease;
+  box-sizing: border-box;
+  padding: 0.5em;
+  > * {
+    width: 100%;
+    margin-bottom: 0.5em;
+  }
+
+  .closelive {}
+  #audioplayer {}
+  #cacheplayer {
+    opacity: 0;
+    position: fixed;
+    bottom: 200vh;
+  }
 }
 
 .fixeverywhere {
@@ -74,6 +97,7 @@ body {
     margin-bottom: auto;
   }
   .duration {
+    white-space: pre;
     font-family: monospace;
     margin-right: 0.5em;
   }
@@ -148,6 +172,7 @@ body {
 </style>
 </head>
 <body>
+<div id="main">
 <div id="header"></div>
 <div id="current"></div>
 <div id="filter">
@@ -159,6 +184,8 @@ body {
 <div id="filter_results"></div>
 </div>
 <div id="queue"></div>
+</div>
+<div id="liveplayer"></div>
 <script>
 var library_insert = "!";
 
@@ -172,6 +199,22 @@ async function update_on_events(then_func) {
       console.log("Trying websocket...");
       let ws = new WebSocket("./ws");
       ws.addEventListener("message", async (e) => {
+        let audioplayer = document.getElementById("audioplayer");
+        if (audioplayer) switch (e.data.trim()) {
+          case "pause":
+            audioplayer.pause();
+            break;
+          case "resume":
+            audioplayer.play();
+            break;
+          case "next":
+          case "stop":
+            audioplayer.pause();
+            audioplayer.currentTime = 0;
+            break;
+          default:
+            break;
+        }
         switch (e.data.trim()) {
           case "stop":
           case "pause":
@@ -213,6 +256,31 @@ async function update_current() {
       document.title = "MusicDB";
       document.getElementById("favicon").href = "./favicon";
     }
+    let audioplayer = document.getElementById("audioplayer");
+    let cacheplayer = document.getElementById("cacheplayer");
+    if (audioplayer) {
+      if (s.id) {
+        if ((""+s.id) != audioplayer.dataset.id) {
+          audioplayer.dataset.id = ""+s.id;
+          audioplayer.src = "./song/" + s.id + "/song.mp3";
+        }
+        if (cacheplayer && (""+s.next) != cacheplayer.dataset.id) {
+          cacheplayer.dataset.id = ""+s.id;
+          setTimeout(() => {
+            cacheplayer.src = s.next ? "./song/" + s.next + "/song.mp3" : "";
+          }, 500);
+        }
+        if (s.on) {
+          audioplayer.play();
+        } else {
+          audioplayer.pause();
+        }
+      } else {
+        audioplayer.pause();
+        audioplayer.currentTime = 0;
+        audioplayer.src = "";
+      }
+    }
     let title = document.createElement("span");
     title.classList.add("songtitle");
     title.innerText = s.title || "";
@@ -233,11 +301,12 @@ async function update_current() {
     buttons.classList.add("buttons");
     let duration = document.createElement("span");
     duration.classList.add("duration");
-    duration.innerText = fmt_duration_ms(s.ms);
+    duration.innerText = s.ms ? fmt_duration_ms(s.ms) : "     ";
     let btn_stop = document.createElement("button");
     let btn_play = document.createElement("button");
     let btn_next = document.createElement("button");
     let btn_clear = document.createElement("button");
+    let btn_live = document.createElement("button");
     btn_stop.innerText = "⏹\u{FE0E}";
     btn_stop.onclick = () => fetch("./stop");
     btn_play.innerText = (s.on ? "⏸" : "▶") + "\u{FE0E}";
@@ -246,7 +315,9 @@ async function update_current() {
     btn_next.onclick = () => fetch("./skip");
     btn_clear.innerText = "⏏\u{FE0E}";
     btn_clear.onclick = () => fetch("./clear-queue");
-    buttons.replaceChildren(duration, btn_stop, btn_play, btn_next, btn_clear);
+    btn_live.innerText = "♪\u{FE0E}";
+    btn_live.onclick = () => toggle_liveplayer();
+    buttons.replaceChildren(duration, btn_stop, btn_play, btn_next, btn_clear, btn_live);
     document.getElementById("current").replaceChildren(coverimage, title, subtitle, buttons);
     if (s.on) {
       document.getElementById("current").classList.remove("paused");
@@ -409,7 +480,7 @@ function fmt_duration_ms(ms) {
   m = m % 60;
   let pad = n => n >= 10 ? n : "0"+n;
   if (h == 0) return pad(m) + ":" + pad(s);
-  else return pad(h) + ":" + pad(m) + ":" + pad(s);
+  return (h + ":" + pad(m) + ":" + pad(s));
 }
 
 function open_library(path, is_leaf) {
@@ -469,6 +540,56 @@ document.getElementById("input_search").addEventListener("click", async () => {
   }
   build_library(library, document.getElementById("filter_results"));
 });
+
+function toggle_liveplayer() {
+  if (document.getElementById("audioplayer")) {
+    hide_liveplayer();
+  } else {
+    show_liveplayer();
+  }
+}
+function show_liveplayer() {
+  let lp = document.getElementById("liveplayer");
+  lp.style.bottom = "0vh";
+  let btn_close = document.createElement("button");
+  btn_close.classList.add("closelive");
+  btn_close.onclick = () => hide_liveplayer();
+  btn_close.innerText = "×";
+  let audioplayer = document.createElement("audio");
+  let cacheplayer = document.createElement("audio");
+  audioplayer.id = "audioplayer";
+  audioplayer.autoplay = true;
+  audioplayer.controls = true;
+  audioplayer.volume = 0.25;
+  for (let player of [audioplayer, cacheplayer]) {
+    player.src = "";
+    player.loading = "eager";
+    player.preload = "auto";
+    player.pause();
+  }
+  cacheplayer.id = "cacheplayer";
+  lp.replaceChildren(btn_close, audioplayer, cacheplayer);
+  update_current();
+}
+async function hide_liveplayer() {
+  let lp = document.getElementById("liveplayer");
+  let e2 = document.getElementById("cacheplayer");
+  if (e2) { e2.remove(); } else { return; }
+  document.getElementById("liveplayer").style.bottom = "-16vh";
+  let v = document.getElementById("audioplayer").volume;
+  let i = 100;
+  while (i > 0) {
+    i -= 5;
+    let e = document.getElementById("audioplayer");
+    if (e) {
+      e.volume = v * (i/100);
+    } else { break; }
+    await new Promise(r => setTimeout(r, 10));
+  }
+  let e = document.getElementById("audioplayer");
+  if (e) { e.pause(); e.remove(); }
+  lp.replaceChildren();
+}
 
 update_on_events(update_data);
 </script>

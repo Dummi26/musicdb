@@ -36,6 +36,8 @@ struct SongInfo<'a> {
     on: bool,
     id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    next: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     title: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     album: Option<&'a str>,
@@ -56,6 +58,7 @@ fn current(data: &State<Data>) -> Option<RawJson<String>> {
             serde_json::to_string(&SongInfo {
                 on: db.playing,
                 id: id.to_string(),
+                next: db.queue.get_next_song().map(|id| id.to_string()),
                 title: Some(&song.title),
                 album: song
                     .album
@@ -510,7 +513,7 @@ fn search(
                 .songs
                 .iter()
                 .filter_map(|id| db.get_song(id))
-                .filter(|a| a.title.contains(title))
+                .filter(|a| a.title.to_lowercase().contains(title))
             {
                 a2.push(SearchResult::Song {
                     title: song.title.clone(),
