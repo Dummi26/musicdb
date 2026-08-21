@@ -104,9 +104,14 @@ impl Database {
     /// ignores song.id and just assigns a new id, which it then returns.
     /// this function also adds a reference to the new song to the album (or artist.singles, if no album)
     pub fn add_song_new(&mut self, song: Song) -> SongId {
-        let album = song.album.clone();
-        let artist = song.artist.clone();
+        let album = song.album;
+        let artist = song.artist;
         let id = self.add_song_new_nomagic(song);
+        self.added_song_new(id, album, artist);
+        id
+    }
+    pub fn added_song_new(&mut self, id: SongId, album: Option<AlbumId>, artist: ArtistId) {
+        self.modified_data();
         if let Some(Some(album)) = album.map(|v| self.albums.get_mut(&v)) {
             album.songs.push(id);
         } else {
@@ -114,7 +119,6 @@ impl Database {
                 artist.singles.push(id);
             }
         }
-        id
     }
     /// used internally
     pub fn add_song_new_nomagic(&mut self, mut song: Song) -> SongId {
@@ -151,12 +155,16 @@ impl Database {
     /// ignores album.id and just assigns a new id, which it then returns.
     /// this function also adds a reference to the new album to the artist
     pub fn add_album_new(&mut self, album: Album) -> AlbumId {
-        let artist = album.artist.clone();
+        let artist = album.artist;
         let id = self.add_album_new_nomagic(album);
+        self.added_album_new(id, artist);
+        id
+    }
+    pub fn added_album_new(&mut self, id: AlbumId, artist: ArtistId) {
+        self.modified_data();
         if let Some(artist) = self.artists.get_mut(&artist) {
             artist.albums.push(id);
         }
-        id
     }
     /// used internally
     fn add_album_new_nomagic(&mut self, mut album: Album) -> AlbumId {

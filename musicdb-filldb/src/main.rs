@@ -9,12 +9,15 @@ use std::{
 };
 
 use id3::TagLike;
-use musicdb_lib::data::{
-    CoverId, DatabaseLocation, GeneralData,
-    album::Album,
-    artist::Artist,
-    database::{Cover, Database},
-    song::Song,
+use musicdb_lib::{
+    data::{
+        CoverId, DatabaseLocation, GeneralData,
+        album::Album,
+        artist::Artist,
+        database::{Cover, Database},
+        song::Song,
+    },
+    load::ToFromBytes,
 };
 
 fn main() {
@@ -140,6 +143,120 @@ fn main() {
     }
     eprintln!("\nloaded metadata of {} files.", songs.len());
     let mut database = Database::new_empty_in_dir(PathBuf::from(dbdir), PathBuf::from(&lib_dir));
+    database.covers_mut().insert(
+        u64::MAX,
+        Cover {
+            location: DatabaseLocation {
+                rel_path: PathBuf::new(),
+            },
+            data: Arc::new(Mutex::new((false, None))),
+        },
+    );
+    let mut ids_artists = HashMap::new();
+    let mut ids_albums = HashMap::new();
+    let mut ids_songs = HashMap::new();
+    if let Some(custom_files) = &custom_files {
+        eprintln!("Loading preserved IDs of artists, albums, and songs...");
+        if let Ok(file) = std::fs::read_to_string(custom_files.join("ids_artists")) {
+            for line in file.lines() {
+                if let Some((id, name)) = line.split_once('=')
+                    && let Ok(id) = id.parse()
+                {
+                    let name = normalized_str_to_tag(name);
+                    if let Some(prev) = database.artists_mut().insert(
+                        id,
+                        Artist {
+                            id,
+                            name: name.clone(),
+                            cover: Some(u64::MAX),
+                            albums: vec![],
+                            singles: vec![],
+                            general: GeneralData::default(),
+                        },
+                    ) {
+                        eprintln!(
+                            "[ERROR] Duplicate Artist ID {}, used for `{}` and `{}`!",
+                            id, prev.name, name,
+                        );
+                        std::process::exit(1);
+                    } else {
+                        ids_artists.insert(name, id);
+                    }
+                }
+            }
+        }
+        if let Ok(file) = std::fs::read_to_string(custom_files.join("ids_albums")) {
+            for line in file.lines() {
+                if let Some((id, name)) = line.split_once('=')
+                    && let Some((artist, name)) = name.split_once('=')
+                    && let Ok(artist) = artist.parse()
+                    && let Ok(id) = id.parse()
+                {
+                    let name = normalized_str_to_tag(name);
+                    if let Some(prev) = database.albums_mut().insert(
+                        id,
+                        Album {
+                            id,
+                            artist,
+                            name: name.clone(),
+                            cover: Some(u64::MAX),
+                            songs: vec![],
+                            general: GeneralData::default(),
+                        },
+                    ) {
+                        eprintln!(
+                            "[ERROR] Duplicate Album ID {}, used for `{}` and `{}`!",
+                            id, prev.name, name,
+                        );
+                        std::process::exit(1);
+                    } else {
+                        ids_albums.insert((name, artist), id);
+                    }
+                }
+            }
+        }
+        if let Ok(file) = std::fs::read_to_string(custom_files.join("ids_songs")) {
+            for line in file.lines() {
+                if let Some((id, name)) = line.split_once('=')
+                    && let Some((album, name)) = name.split_once('=')
+                    && let Some((artist, name)) = name.split_once('=')
+                    && let Ok(artist) = artist.parse()
+                    && let Ok(album) = if album.is_empty() {
+                        Ok(None)
+                    } else {
+                        album.parse().map(Some)
+                    }
+                    && let Ok(id) = id.parse()
+                {
+                    let name = normalized_str_to_tag(name);
+                    let mut new_song = Song::new(
+                        DatabaseLocation {
+                            rel_path: PathBuf::new(),
+                        },
+                        None,
+                        name.clone(),
+                        album,
+                        artist,
+                        vec![],
+                        Some(u64::MAX),
+                        0,
+                        0,
+                        GeneralData::default(),
+                    );
+                    new_song.id = id;
+                    if let Some(prev) = database.songs_mut().insert(id, new_song) {
+                        eprintln!(
+                            "[ERROR] Duplicate Song ID {}, used for `{}` and `{}`!",
+                            id, prev.title, name,
+                        );
+                        std::process::exit(1);
+                    } else {
+                        ids_songs.insert((name, album, artist), id);
+                    }
+                }
+            }
+        }
+    }
     let unknown_artist = database.add_artist_new(Artist {
         id: 0,
         name: "<unknown>".to_owned(),
@@ -214,14 +331,21 @@ fn main() {
             .or_else(|| song_tags.artist().filter(|v| !v.trim().is_empty()))
         {
             let artist_id = if !artists.contains_key(artist) {
-                let artist_id = database.add_artist_new(Artist {
+                let mut new_artist = Artist {
                     id: 0,
                     name: artist.to_string(),
                     cover: None,
                     albums: vec![],
                     singles: vec![],
                     general: GeneralData::default(),
-                });
+                };
+                let artist_id = if let Some(id) = ids_artists.get(artist) {
+                    new_artist.id = *id;
+                    *database.artists_mut().get_mut(id).unwrap() = new_artist;
+                    *id
+                } else {
+                    database.add_artist_new(new_artist)
+                };
                 artists.insert(artist.to_string(), (artist_id, HashMap::new()));
                 artist_id
             } else {
@@ -230,14 +354,23 @@ fn main() {
             if let Some(album) = song_tags.album().filter(|a| !a.trim().is_empty()) {
                 let (_, albums) = artists.get_mut(artist).unwrap();
                 let album_id = if !albums.contains_key(album) {
-                    let album_id = database.add_album_new(Album {
+                    let mut new_album = Album {
                         id: 0,
                         artist: artist_id,
                         name: album.to_string(),
                         cover: None,
                         songs: vec![],
                         general: GeneralData::default(),
-                    });
+                    };
+                    let album_id = if let Some(id) = ids_albums.get(&(album.to_owned(), artist_id))
+                    {
+                        new_album.id = *id;
+                        *database.albums_mut().get_mut(id).unwrap() = new_album;
+                        database.added_album_new(*id, artist_id);
+                        *id
+                    } else {
+                        database.add_album_new(new_album)
+                    };
                     albums.insert(
                         album.to_string(),
                         (album_id, song_path.parent().map(|dir| dir.to_path_buf())),
@@ -285,21 +418,23 @@ fn main() {
                     .to_string_lossy()
                     .into_owned()
             });
-        database.add_song_new(Song::new(
+        let mut new_song = Song::new(
             DatabaseLocation {
                 rel_path: path.to_path_buf(),
             },
             match song_path.metadata() {
                 Ok(v) => match v.modified() {
-                    Ok(v) => if let Ok(time) = v.duration_since(SystemTime::UNIX_EPOCH) {
-                        Some(time.as_secs())
-                    } else {
-                        eprintln!(
-                            "LastModified time of song {:?} is before the UNIX-EPOCH, setting `None`.",
-                            song_path
-                        );
-                        None
-                    },
+                    Ok(v) => {
+                        if let Ok(time) = v.duration_since(SystemTime::UNIX_EPOCH) {
+                            Some(time.as_secs())
+                        } else {
+                            eprintln!(
+                                "LastModified time of song {:?} is before the UNIX-EPOCH, setting `None`.",
+                                song_path
+                            );
+                            None
+                        }
+                    }
                     Err(e) => {
                         eprintln!(
                             "LastModified time of song {:?} not available: {e}.",
@@ -307,7 +442,7 @@ fn main() {
                         );
                         None
                     }
-                }
+                },
                 Err(e) => {
                     eprintln!(
                         "LastModified time of song {:?} could not be read: {e}.",
@@ -337,14 +472,24 @@ fn main() {
                     match mp3_duration::from_path(&song_path) {
                         Ok(dur) => dur.as_millis().min(u64::MAX as _) as u64,
                         Err(e) => {
-                            eprintln!("Duration of song {song_path:?} not found in tags and can't be determined from the file contents either ({e}). Using duration 0 instead.");
+                            eprintln!(
+                                "Duration of song {song_path:?} not found in tags and can't be determined from the file contents either ({e}). Using duration 0 instead."
+                            );
                             0
                         }
                     }
                 }
             },
             general,
-        ));
+        );
+        if let Some(id) = ids_songs.get(&(title.clone(), album_id, artist_id)) {
+            new_song.id = *id;
+            *database.songs_mut().get_mut(id).unwrap() = new_song;
+            database.added_song_new(*id, album_id, artist_id);
+            *id
+        } else {
+            database.add_song_new(new_song)
+        };
     }
     {
         let (artists, albums, songs) = database.artists_albums_songs_mut();
@@ -424,6 +569,32 @@ fn main() {
             eprintln!("Added the <unknown> artist as a fallback!");
         }
     }
+    let mut rm = (vec![], vec![], vec![]);
+    for artist in database.artists().values() {
+        if artist.cover == Some(u64::MAX) {
+            rm.0.push(artist.id);
+        }
+    }
+    for album in database.albums().values() {
+        if album.cover == Some(u64::MAX) {
+            rm.1.push(album.id);
+        }
+    }
+    for song in database.songs().values() {
+        if song.cover == Some(u64::MAX) {
+            rm.2.push(song.id);
+        }
+    }
+    database.covers_mut().remove(&u64::MAX);
+    for id in rm.0 {
+        database.artists_mut().remove(&id);
+    }
+    for id in rm.1 {
+        database.albums_mut().remove(&id);
+    }
+    for id in rm.2 {
+        database.songs_mut().remove(&id);
+    }
     if let Some(custom_files) = custom_files {
         if artist_img {
             eprintln!("[info] Searching for <artist>.{{png,jpg,...}} files in custom-files dir...");
@@ -460,7 +631,7 @@ fn main() {
             }
         }
         eprintln!(
-            "[info] Searching for <artist>.tags, <artist>.d/<album>.tags, <artist>.d/singles.d/<song>.tags, <artist>.d/<album>.d/<song>.tags in custom-files dir..."
+            "[info] Searching for <artist>.tags, <artist>.d/<album>.tags, <artist>.d/singles/<song>.tags, <artist>.d/<album>.d/<song>.tags in custom-files dir..."
         );
         let l = database.artists().len() + database.albums().len() + database.songs().len();
         let mut cc = 0;
@@ -550,6 +721,22 @@ fn main() {
             eprint!(" {cc}/{l} ({c})\r");
         }
         eprintln!();
+        eprintln!("Loading saved queues...");
+        let queues_dir = custom_files.join("queues");
+        if let Ok(dir) = std::fs::read_dir(&queues_dir) {
+            for name in dir {
+                let name = name.unwrap();
+                let bytes = std::fs::read(name.path()).unwrap();
+                database.queues.insert(
+                    normalize_from_file_path_component_for_custom_files(
+                        name.file_name().to_str().unwrap(),
+                    ),
+                    ToFromBytes::from_bytes(&mut std::io::Cursor::new(bytes)).unwrap(),
+                );
+            }
+        } else {
+            eprintln!("[WARN] Can't read saved queues directory `queues`");
+        }
     }
     eprintln!("saving dbfile...");
     database.save_database(None).unwrap();
@@ -697,6 +884,15 @@ fn normalize_to_file_path_component_for_custom_files(str: &str) -> String {
         .replace('\r', "%r")
         .replace('\n', "%n")
 }
+fn normalize_from_file_path_component_for_custom_files(str: &str) -> String {
+    str.replace("%0", "\0")
+        .replace("%s", "/")
+        .replace("%S", "\\")
+        .replace("%t", "\t")
+        .replace("%r", "\r")
+        .replace("%n", "\n")
+        .replace("%p", "%")
+}
 
 // may NOT set \! to a valid escape sequence, as this is used to
 // identify db-internal "tags" such as the Song-/Album-/Artist-ID
@@ -714,6 +910,79 @@ fn normalized_str_to_tag(str: &str) -> String {
 
 fn export_to_custom_files_dir(dbdir: String, path: PathBuf) {
     let database = Database::load_database_from_dir(dbdir.into(), PathBuf::new()).unwrap();
+    eprintln!("Preserving artist, album, and song IDs...");
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(path.join("ids_artists"))
+    {
+        for artist in database.artists().values() {
+            file.write_all(
+                format!("{}={}\n", artist.id, normalize_tag_to_str(&artist.name)).as_bytes(),
+            )
+            .unwrap();
+        }
+    } else {
+        eprintln!("[WARN] Can't write to file `ids_artists`");
+    }
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(path.join("ids_albums"))
+    {
+        for album in database.albums().values() {
+            file.write_all(
+                format!(
+                    "{}={}={}\n",
+                    album.id,
+                    album.artist,
+                    normalize_tag_to_str(&album.name)
+                )
+                .as_bytes(),
+            )
+            .unwrap();
+        }
+    } else {
+        eprintln!("[WARN] Can't write to file `ids_albums`");
+    }
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(path.join("ids_songs"))
+    {
+        for song in database.songs().values() {
+            file.write_all(
+                format!(
+                    "{}={}={}={}\n",
+                    song.id,
+                    song.album.map(|v| v.to_string()).unwrap_or(String::new()),
+                    song.artist,
+                    normalize_tag_to_str(&song.title)
+                )
+                .as_bytes(),
+            )
+            .unwrap();
+        }
+    } else {
+        eprintln!("[WARN] Can't write to file `ids_songs`");
+    }
+    eprintln!("Exporting saved queues...");
+    let queues_dir = path.join("queues");
+    if std::fs::create_dir_all(&queues_dir).is_ok() {
+        for (name, queue) in database.queues.iter() {
+            std::fs::write(
+                queues_dir.join(normalize_to_file_path_component_for_custom_files(name)),
+                queue.to_bytes_vec(),
+            )
+            .unwrap();
+        }
+    } else {
+        eprintln!("[WARN] Can't create directory `queues`");
+    }
+    eprintln!("Exporting .tags files...");
     for (artist_id, artist) in database.artists().iter() {
         export_custom_files_tags(
             &artist.general.tags,
