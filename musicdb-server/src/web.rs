@@ -43,6 +43,7 @@ struct SongInfo<'a> {
     artist: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     cover: Option<String>,
+    ms: u64,
 }
 #[get("/current")]
 fn current(data: &State<Data>) -> Option<RawJson<String>> {
@@ -77,6 +78,7 @@ fn current(data: &State<Data>) -> Option<RawJson<String>> {
                             })
                     })
                     .map(|v| v.to_string()),
+                ms: song.duration_millis,
             })
             .unwrap(),
         ))

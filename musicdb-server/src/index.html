@@ -73,6 +73,10 @@ body {
     grid-column: 2;
     margin-bottom: auto;
   }
+  .duration {
+    font-family: monospace;
+    margin-right: 0.5em;
+  }
   .buttons {
     grid-row: 3;
     grid-column: 2;
@@ -227,6 +231,9 @@ async function update_current() {
       coverimage.src = "./cover/"+encodeURIComponent(s.cover);
     let buttons = document.createElement("div");
     buttons.classList.add("buttons");
+    let duration = document.createElement("span");
+    duration.classList.add("duration");
+    duration.innerText = fmt_duration_ms(s.ms);
     let btn_stop = document.createElement("button");
     let btn_play = document.createElement("button");
     let btn_next = document.createElement("button");
@@ -239,7 +246,7 @@ async function update_current() {
     btn_next.onclick = () => fetch("./skip");
     btn_clear.innerText = "⏏\u{FE0E}";
     btn_clear.onclick = () => fetch("./clear-queue");
-    buttons.replaceChildren(btn_stop, btn_play, btn_next, btn_clear);
+    buttons.replaceChildren(duration, btn_stop, btn_play, btn_next, btn_clear);
     document.getElementById("current").replaceChildren(coverimage, title, subtitle, buttons);
     if (s.on) {
       document.getElementById("current").classList.remove("paused");
@@ -392,6 +399,17 @@ function make_draggable(parent, elem) {
       }
     }
   }, { passive: false });
+}
+
+function fmt_duration_ms(ms) {
+  let s = Math.round(ms / 1000);
+  let m = Math.floor(s / 60);
+  s = s % 60;
+  let h = Math.floor(m / 60);
+  m = m % 60;
+  let pad = n => n >= 10 ? n : "0"+n;
+  if (h == 0) return pad(m) + ":" + pad(s);
+  else return pad(h) + ":" + pad(m) + ":" + pad(s);
 }
 
 function open_library(path, is_leaf) {
