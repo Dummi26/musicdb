@@ -1170,8 +1170,9 @@ fn export_custom_files_tags(tags: &[String], internals: &[String], path: &Path) 
 
 // TODO: load cover id?
 fn gen_internals(_id: Option<u64>, cover: Option<CoverId>) -> Vec<String> {
-    [cover.map(|id| format!("cover={id}"))]
-        .into_iter()
-        .flatten()
-        .collect()
+    // [cover.map(|id| format!("cover={id}"))]
+    //     .into_iter()
+    //     .flatten()
+    //     .collect()
+    vec![]
 }
