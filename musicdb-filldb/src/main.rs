@@ -491,34 +491,6 @@ fn main() {
             database.add_song_new(new_song)
         };
     }
-    {
-        let (artists, albums, songs) = database.artists_albums_songs_mut();
-        fn unsrcfile(tags: &mut Vec<String>) {
-            let srcfile_tags = tags
-                .iter()
-                .filter_map(|tag| tag.strip_prefix("SRCFILE:"))
-                .map(|tag| tag.to_owned())
-                .collect::<Vec<_>>();
-            for tag in srcfile_tags {
-                if !if let Some(i) = tag.find('=') {
-                    tags.iter().any(|t| t.starts_with(&tag[..=i]))
-                } else {
-                    tags.contains(&tag)
-                } {
-                    tags.push(tag);
-                }
-            }
-        }
-        for v in artists.values_mut() {
-            unsrcfile(&mut v.general.tags);
-        }
-        for v in albums.values_mut() {
-            unsrcfile(&mut v.general.tags);
-        }
-        for v in songs.values_mut() {
-            unsrcfile(&mut v.general.tags);
-        }
-    }
     eprintln!("searching for covers...");
     let mut multiple_cover_options = vec![];
     let mut single_images = HashMap::new();
@@ -740,6 +712,34 @@ fn main() {
             }
         } else {
             eprintln!("[WARN] Can't read saved queues directory `queues`");
+        }
+    }
+    {
+        fn unsrcfile(tags: &mut Vec<String>) {
+            let srcfile_tags = tags
+                .iter()
+                .filter_map(|tag| tag.strip_prefix("SRCFILE:"))
+                .map(|tag| tag.to_owned())
+                .collect::<Vec<_>>();
+            for tag in srcfile_tags {
+                if !if let Some(i) = tag.find('=') {
+                    tags.iter().any(|t| t.starts_with(&tag[..=i]))
+                } else {
+                    tags.contains(&tag)
+                } {
+                    tags.push(tag);
+                }
+            }
+        }
+        let (artists, albums, songs) = database.artists_albums_songs_mut();
+        for v in artists.values_mut() {
+            unsrcfile(&mut v.general.tags);
+        }
+        for v in albums.values_mut() {
+            unsrcfile(&mut v.general.tags);
+        }
+        for v in songs.values_mut() {
+            unsrcfile(&mut v.general.tags);
         }
     }
     eprintln!("saving dbfile...");
