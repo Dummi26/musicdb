@@ -51,7 +51,17 @@ impl ToFromBytes for PathBuf {
     where
         T: Read,
     {
-        Ok(String::from_bytes(s)?.into())
+        let s: Self = String::from_bytes(s)?.into();
+        if s.components().any(|comp| match comp {
+            std::path::Component::Prefix(_) => true,
+            std::path::Component::RootDir => true,
+            std::path::Component::ParentDir => true,
+            std::path::Component::CurDir => false,
+            std::path::Component::Normal(_) => false,
+        }) {
+            return Err(std::io::ErrorKind::InvalidData.into());
+        }
+        Ok(s)
     }
 }
 
