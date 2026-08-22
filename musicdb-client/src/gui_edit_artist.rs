@@ -1,10 +1,7 @@
-use std::{
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 
 use musicdb_lib::{
-    data::{ArtistId, song::Song},
+    data::artist::Artist,
     server::{Action, Req},
 };
 use speedy2d::{color::Color, dimen::Vec2, shape::Rectangle};
@@ -14,8 +11,7 @@ use crate::{
     gui::{GuiAction, GuiElem, GuiElemCfg, GuiElemChildren},
     gui_base::{Button, Panel, ScrollBox},
     gui_edit_any::{
-        self, ELEM_HEIGHT, EditorArtistChooser, EditorForAnyTagAdder, EditorForAnyTagInList,
-        SpacerForScrollBox,
+        self, ELEM_HEIGHT, EditorForAnyTagAdder, EditorForAnyTagInList, SpacerForScrollBox,
     },
     gui_screen::EditorForAny,
     gui_text::{Label, TextField},
@@ -23,11 +19,11 @@ use crate::{
 
 // TODO: Fix bug where after selecting an artist you can't mouse-click the buttons anymore (to change it)
 
-pub struct EditorForSongs {
+pub struct EditorForArtists {
     config: GuiElemCfg,
-    songs: Vec<Song>,
+    artists: Vec<Artist>,
     c_title: Label,
-    c_scrollbox: ScrollBox<EditorForSongElems>,
+    c_scrollbox: ScrollBox<EditorForArtistElems>,
     c_buttons: Panel<[Button<[Label; 1]>; 2]>,
     c_background: Panel<()>,
     created: Option<Instant>,
@@ -38,7 +34,6 @@ pub struct EditorForSongs {
 pub enum Event {
     Close,
     Apply,
-    SetArtist(String, Option<ArtistId>),
     GeneralEvent(super::gui_edit_any::Event),
 }
 impl From<super::gui_edit_any::Event> for Event {
@@ -47,46 +42,40 @@ impl From<super::gui_edit_any::Event> for Event {
     }
 }
 
-pub struct EditorForSongElems {
+pub struct EditorForArtistElems {
     c_title: TextField,
-    c_artist: EditorArtistChooser,
-    c_album: Label,
     c_tags: Vec<EditorForAnyTagInList<Event>>,
     c_new_tag: EditorForAnyTagAdder<Event>,
     c_spacers: [SpacerForScrollBox; 4],
 }
-impl GuiElemChildren for EditorForSongElems {
+impl GuiElemChildren for EditorForArtistElems {
     fn iter(&mut self) -> Box<dyn Iterator<Item = &mut dyn crate::gui::GuiElem> + '_> {
         Box::new(
-            [
-                self.c_title.elem_mut(),
-                self.c_artist.elem_mut(),
-                self.c_album.elem_mut(),
-            ]
-            .into_iter()
-            .chain(self.c_tags.iter_mut().map(|e| e.elem_mut()))
-            .chain(std::iter::once(self.c_new_tag.elem_mut())),
+            [self.c_title.elem_mut()]
+                .into_iter()
+                .chain(self.c_tags.iter_mut().map(|e| e.elem_mut()))
+                .chain(std::iter::once(self.c_new_tag.elem_mut())),
         )
     }
     fn len(&self) -> usize {
-        3 + self.c_tags.len() + 1 + self.c_spacers.len()
+        1 + self.c_tags.len() + 1 + self.c_spacers.len()
     }
 }
 
-impl EditorForSongs {
-    pub fn new(songs: Vec<Song>) -> Self {
-        Self::new_internal(songs, true)
+impl EditorForArtists {
+    pub fn new(artists: Vec<Artist>) -> Self {
+        Self::new_internal(artists, true)
     }
-    pub fn new_instant(songs: Vec<Song>) -> Self {
-        Self::new_internal(songs, false)
+    pub fn new_instant(artists: Vec<Artist>) -> Self {
+        Self::new_internal(artists, false)
     }
-    fn new_internal(songs: Vec<Song>, open_animation: bool) -> Self {
+    fn new_internal(artists: Vec<Artist>, open_animation: bool) -> Self {
         let (sender, recv) = std::sync::mpsc::channel();
         Self {
             config: GuiElemCfg::at(Rectangle::from_tuples((0.0, 1.0), (1.0, 2.0))),
             c_title: Label::new(
                 GuiElemCfg::at(Rectangle::from_tuples((0.0, 0.0), (1.0, 0.05))),
-                format!("Editing {} songs", songs.len()),
+                format!("Editing {} artists", artists.len()),
                 Color::LIGHT_GRAY,
                 None,
                 Vec2::new(0.5, 0.5),
@@ -94,41 +83,28 @@ impl EditorForSongs {
             c_scrollbox: ScrollBox::new(
                 GuiElemCfg::at(Rectangle::from_tuples((0.0, 0.05), (1.0, 0.95))),
                 crate::gui_base::ScrollBoxSizeUnit::Pixels,
-                EditorForSongElems {
+                EditorForArtistElems {
                     c_title: TextField::new(
                         GuiElemCfg::default(),
                         format!(
                             "Title ({})",
-                            songs
+                            artists
                                 .iter()
                                 .enumerate()
                                 .map(|(i, s)| format!(
                                     "{}{}",
                                     if i == 0 { "" } else { ", " },
-                                    s.title
+                                    s.name
                                 ))
                                 .collect::<String>()
                         ),
                         color_scale(Color::MAGENTA, 0.6, 0.6, 0.6, Some(0.75)),
                         Color::MAGENTA,
                     ),
-                    c_artist: {
-                        let sender = sender.clone();
-                        EditorArtistChooser::new(Arc::new(move |name, id| {
-                            sender.send(Event::SetArtist(name, Some(id))).unwrap()
-                        }))
-                    },
-                    c_album: Label::new(
-                        GuiElemCfg::default(),
-                        "(todo...)".to_owned(),
-                        Color::GRAY,
-                        None,
-                        Vec2::new(0.0, 0.5),
-                    ),
                     c_tags: {
                         let mut tags = Vec::new();
-                        for song in songs.iter() {
-                            for tag in song.general.tags.iter() {
+                        for artist in artists.iter() {
+                            for tag in artist.general.tags.iter() {
                                 if !tags.contains(&tag.as_str()) {
                                     tags.push(tag.as_str());
                                 }
@@ -201,14 +177,14 @@ impl EditorForSongs {
                 (open_animation.then(Instant::now))
                     .unwrap_or_else(|| Instant::now() - Duration::from_secs(5)),
             ),
-            songs,
+            artists,
             event_sender: sender,
             event_recv: recv,
         }
     }
 }
 
-impl GuiElem for EditorForSongs {
+impl GuiElem for EditorForArtists {
     fn children(&mut self) -> Box<dyn Iterator<Item = &mut dyn GuiElem> + '_> {
         Box::new(
             [
@@ -230,11 +206,11 @@ impl GuiElem for EditorForSongs {
                 Event::Apply => {
                     let mut actions = Vec::new();
                     gui_edit_any::apply(
-                        self.songs.iter_mut().map(|v| &mut v.general),
+                        self.artists.iter_mut().map(|v| &mut v.general),
                         &mut self.c_scrollbox.children.c_tags,
                     );
-                    for song in self.songs.iter() {
-                        let mut song = song.clone();
+                    for artist in self.artists.iter() {
+                        let mut artist = artist.clone();
 
                         let new_title = self
                             .c_scrollbox
@@ -245,14 +221,9 @@ impl GuiElem for EditorForSongs {
                             .get_text()
                             .trim();
                         if !new_title.is_empty() {
-                            song.title = new_title.to_owned();
+                            artist.name = new_title.to_owned();
                         }
-
-                        if let Some(artist_id) = self.c_scrollbox.children.c_artist.chosen_id {
-                            song.artist = artist_id;
-                            song.album = None;
-                        }
-                        actions.push(Action::ModifySong(song, Req::none()));
+                        actions.push(Action::ModifyArtist(artist, Req::none()));
                     }
                     if actions.len() == 1 {
                         info.actions
@@ -261,20 +232,14 @@ impl GuiElem for EditorForSongs {
                         info.actions
                             .push(GuiAction::SendToServer(Action::Multiple(actions)));
                     }
-                    *self = Self::new_instant(std::mem::take(&mut self.songs));
-                }
-                Event::SetArtist(name, id) => {
-                    self.c_scrollbox
-                        .children
-                        .c_artist
-                        .set_artist(name, id, info.time);
+                    *self = Self::new_instant(std::mem::take(&mut self.artists));
                 }
                 Event::GeneralEvent(e) => {
                     if e.handle(
-                        self.songs.iter_mut().map(|v| &mut v.general),
+                        self.artists.iter_mut().map(|v| &mut v.general),
                         &mut self.c_scrollbox.children.c_tags,
                         &mut self.c_scrollbox.children.c_new_tag,
-                        (3, &mut self.c_scrollbox.children_heights),
+                        (1, &mut self.c_scrollbox.children_heights),
                         &self.event_sender,
                         info.time,
                     ) {
@@ -301,18 +266,6 @@ impl GuiElem for EditorForSongs {
                 self.config.pos = Rectangle::from_tuples((0.0, offset), (1.0, 1.0 + offset));
             }
         }
-        // artist sel
-        if self
-            .c_scrollbox
-            .children
-            .c_artist
-            .draw(self.c_scrollbox.children_heights.get_mut(1), info.time)
-        {
-            self.c_scrollbox.config_mut().redraw_once();
-            if let Some(h) = &info.helper {
-                h.request_redraw();
-            }
-        }
         // tag sel
         if let Ok(val) = self
             .c_scrollbox
@@ -324,7 +277,7 @@ impl GuiElem for EditorForSongs {
             if let Some(v) = self
                 .c_scrollbox
                 .children_heights
-                .get_mut(3 + self.c_scrollbox.children.c_tags.len())
+                .get_mut(1 + self.c_scrollbox.children.c_tags.len())
             {
                 *v = ELEM_HEIGHT * val as f32;
                 self.c_scrollbox.config_mut().redraw_once();

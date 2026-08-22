@@ -14,6 +14,8 @@ use crate::{
         GuiElem, GuiElemCfg, GuiElemChildren, KeyAction, KeyBinding, SpecificGuiElem,
     },
     gui_base::{Button, Panel},
+    gui_edit_album::EditorForAlbums,
+    gui_edit_artist::EditorForArtists,
     gui_edit_song::EditorForSongs,
     gui_idle_display::IdleDisplay,
     gui_library::LibraryBrowser,
@@ -49,7 +51,7 @@ pub struct GuiScreen {
     config: GuiElemCfg,
     pub c_notif_overlay: NotifOverlay,
     pub c_idle_display: IdleDisplay,
-    pub c_editing_songs: Option<EditorForSongs>,
+    pub c_editing: EditorForAny,
     pub c_status_bar: StatusBar,
     pub c_settings: Settings,
     pub c_song_adder: Option<SongAdder>,
@@ -126,7 +128,7 @@ impl GuiScreen {
                 (0.0, 0.9),
                 (1.0, 1.0),
             ))),
-            c_editing_songs: None,
+            c_editing: EditorForAny::None,
             c_idle_display: IdleDisplay::new(GuiElemCfg::default().disabled()),
             c_settings: Settings::new(
                 GuiElemCfg::default().disabled(),
@@ -317,7 +319,12 @@ impl GuiElem for GuiScreen {
                     self.c_idle_display.elem_mut(),
                 ]
                 .into_iter()
-                .chain(self.c_editing_songs.as_mut().map(|v| v.elem_mut()))
+                .chain(match &mut self.c_editing {
+                    EditorForAny::None => None,
+                    EditorForAny::Songs(e) => Some(e.elem_mut()),
+                    EditorForAny::Albums(e) => Some(e.elem_mut()),
+                    EditorForAny::Artists(e) => Some(e.elem_mut()),
+                })
                 .chain(self.c_song_adder.as_mut().map(|v| v.elem_mut()))
                 .chain([
                     self.c_status_bar.elem_mut(),
@@ -498,4 +505,11 @@ impl GuiElem for GuiScreen {
             self.idle_timeout = self.c_settings.get_timeout_val();
         }
     }
+}
+
+pub enum EditorForAny {
+    None,
+    Songs(EditorForSongs),
+    Albums(EditorForAlbums),
+    Artists(EditorForArtists),
 }

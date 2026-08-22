@@ -975,6 +975,61 @@ impl GuiElem for ListArtist {
         }
         vec![]
     }
+    fn mouse_pressed(&mut self, e: &mut EventInfo, button: MouseButton) -> Vec<GuiAction> {
+        if button == MouseButton::Right && e.take() {
+            let id = self.id;
+            let mut menu_actions: Vec<Box<dyn GuiElem + 'static>> = vec![Box::new(Button::new(
+                GuiElemCfg::default(),
+                move |_| {
+                    vec![GuiAction::Build(Box::new(move |db| {
+                        if let Some(me) = db.artists().get(&id) {
+                            vec![GuiAction::EditArtists(vec![me.clone()])]
+                        } else {
+                            vec![]
+                        }
+                    }))]
+                },
+                [Label::new(
+                    GuiElemCfg::default(),
+                    "Edit this artist".to_owned(),
+                    Color::WHITE,
+                    None,
+                    Vec2::new_y(0.5),
+                )],
+            ))];
+            if self.selected.contains_artist(&id) {
+                menu_actions.push(Box::new(Button::new(
+                    GuiElemCfg::default(),
+                    {
+                        let selected = self.selected.clone();
+                        move |_| {
+                            let selected = selected.clone();
+                            vec![GuiAction::Build(Box::new(move |db| {
+                                vec![GuiAction::EditArtists(selected.view(
+                                    |(artists, albums, songs)| {
+                                        artists
+                                            .iter()
+                                            .filter_map(|id| db.artists().get(id).cloned())
+                                            .collect()
+                                    },
+                                ))]
+                            }))]
+                        }
+                    },
+                    [Label::new(
+                        GuiElemCfg::default(),
+                        "Edit selected artists".to_owned(),
+                        Color::WHITE,
+                        None,
+                        Vec2::new_y(0.5),
+                    )],
+                )));
+            }
+            vec![GuiAction::ContextMenu(Some(menu_actions))]
+        } else {
+            vec![]
+        }
+    }
 }
 
 pub struct ListAlbum {
@@ -1120,6 +1175,61 @@ impl GuiElem for ListAlbum {
             }
         }
         vec![]
+    }
+    fn mouse_pressed(&mut self, e: &mut EventInfo, button: MouseButton) -> Vec<GuiAction> {
+        if button == MouseButton::Right && e.take() {
+            let id = self.id;
+            let mut menu_actions: Vec<Box<dyn GuiElem + 'static>> = vec![Box::new(Button::new(
+                GuiElemCfg::default(),
+                move |_| {
+                    vec![GuiAction::Build(Box::new(move |db| {
+                        if let Some(me) = db.albums().get(&id) {
+                            vec![GuiAction::EditAlbums(vec![me.clone()])]
+                        } else {
+                            vec![]
+                        }
+                    }))]
+                },
+                [Label::new(
+                    GuiElemCfg::default(),
+                    "Edit this album".to_owned(),
+                    Color::WHITE,
+                    None,
+                    Vec2::new_y(0.5),
+                )],
+            ))];
+            if self.selected.contains_album(&id) {
+                menu_actions.push(Box::new(Button::new(
+                    GuiElemCfg::default(),
+                    {
+                        let selected = self.selected.clone();
+                        move |_| {
+                            let selected = selected.clone();
+                            vec![GuiAction::Build(Box::new(move |db| {
+                                vec![GuiAction::EditAlbums(selected.view(
+                                    |(artists, albums, songs)| {
+                                        albums
+                                            .iter()
+                                            .filter_map(|id| db.albums().get(id).cloned())
+                                            .collect()
+                                    },
+                                ))]
+                            }))]
+                        }
+                    },
+                    [Label::new(
+                        GuiElemCfg::default(),
+                        "Edit selected albums".to_owned(),
+                        Color::WHITE,
+                        None,
+                        Vec2::new_y(0.5),
+                    )],
+                )));
+            }
+            vec![GuiAction::ContextMenu(Some(menu_actions))]
+        } else {
+            vec![]
+        }
     }
 }
 

@@ -311,7 +311,7 @@ impl Database {
             if prev_album.artist != album.artist {
                 // remove album from previous artist
                 if let Some(prev_artist) = self.artists.get_mut(&prev_album.artist) {
-                    if let Some(i) = prev_artist.albums.iter().position(|a| *a != prev_album.id) {
+                    if let Some(i) = prev_artist.albums.iter().position(|a| *a == prev_album.id) {
                         prev_artist.albums.remove(i);
                     } else {
                         eprintln!(

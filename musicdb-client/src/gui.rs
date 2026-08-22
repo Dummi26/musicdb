@@ -11,6 +11,8 @@ use std::{
 use musicdb_lib::{
     data::{
         AlbumId, ArtistId, CoverId, SongId,
+        album::Album,
+        artist::Artist,
         database::{ClientIo, Database},
         queue::Queue,
         song::Song,
@@ -35,9 +37,11 @@ use speedy2d::{
 use crate::merscfg::MersCfg;
 use crate::{
     gui_base::{Panel, ScrollBox},
+    gui_edit_album::EditorForAlbums,
+    gui_edit_artist::EditorForArtists,
     gui_edit_song::EditorForSongs,
     gui_notif::{NotifInfo, NotifOverlay},
-    gui_screen::GuiScreen,
+    gui_screen::{EditorForAny, GuiScreen},
     gui_song_adder::SongAdder,
     gui_text::Label,
     textcfg,
@@ -1278,8 +1282,8 @@ pub enum GuiAction {
     Do(Box<dyn FnOnce(&mut Gui)>),
     Exit,
     EditSongs(Vec<Song>),
-    // EditAlbums(Vec<Album>, bool),
-    // EditArtists(Vec<Artist>, bool),
+    EditAlbums(Vec<Album>),
+    EditArtists(Vec<Artist>),
     OpenAddSongsMenu,
     CloseAddSongsMenu,
 }
@@ -1474,7 +1478,13 @@ impl Gui {
                 }
             }
             GuiAction::EditSongs(songs) => {
-                self.gui.c_editing_songs = Some(EditorForSongs::new(songs));
+                self.gui.c_editing = EditorForAny::Songs(EditorForSongs::new(songs));
+            }
+            GuiAction::EditAlbums(albums) => {
+                self.gui.c_editing = EditorForAny::Albums(EditorForAlbums::new(albums));
+            }
+            GuiAction::EditArtists(artists) => {
+                self.gui.c_editing = EditorForAny::Artists(EditorForArtists::new(artists));
             }
             GuiAction::OpenAddSongsMenu => {
                 if self.gui.c_song_adder.is_none() {
