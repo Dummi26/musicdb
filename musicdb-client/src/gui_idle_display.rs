@@ -165,15 +165,14 @@ impl GuiElem for IdleDisplay {
                     self.artist_image_aspect_ratio.set_target(info.time, 0.0);
                     if let Some(artist) = info.database.artists().get(&artist_id) {
                         for tag in &artist.general.tags {
-                            if let Some(tag) = tag.strip_prefix("ImageExt=") {
-                                let filename = format!("{}.{}", artist.name, tag);
+                            if let Some(filename) = tag.strip_prefix("Image=") {
                                 self.current_artist_image =
-                                    Some((artist_id, Some((filename.clone(), None))));
-                                if !info.custom_images.contains_key(&filename) {
+                                    Some((artist_id, Some((filename.to_owned(), None))));
+                                if !info.custom_images.contains_key(filename) {
                                     info.custom_images.insert(
-                                        filename.clone(),
+                                        filename.to_owned(),
                                         GuiServerImage::new_custom_file(
-                                            filename,
+                                            filename.to_owned(),
                                             Arc::clone(&info.get_con),
                                         ),
                                     );

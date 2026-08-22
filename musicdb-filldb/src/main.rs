@@ -61,7 +61,7 @@ fn main() {
                         "--custom-files <path>: Server will use <path> as its custom-files directory. Additional data is loaded from here."
                     );
                     eprintln!(
-                        "--cf-artist-img: For each artist, check for an <artist>.{{jpg,png,...}} file. If it exists, add ImageExt=<extension> tag to the artist, so the image can be loaded by clients later."
+                        "--cf-artist-img: For each artist, check for an <artist>.d/<artist>.{{jpg,png,...}} file. If it exists, add Image=<path> tag to the artist, so the image can be loaded by clients later."
                     );
                     eprintln!(
                         "--export-custom-files <path>: Create <path> as a directory containing metadata from the *existing* dbfile, so that it can be loaded again using --custom-files <same-path>."
@@ -579,10 +579,11 @@ fn main() {
             for artist in database.artists_mut().values_mut() {
                 let normalized_artist_name =
                     normalize_to_file_path_component_for_custom_files(&artist.name);
-                let dir = custom_files.join(format!(
+                let dirname = format!(
                     "{}.d",
                     normalize_to_file_path_component_for_custom_files(&artist.name)
-                ));
+                );
+                let dir = custom_files.join(&dirname);
                 match fs::read_dir(&dir) {
                     Err(e) => {
                         eprintln!(
@@ -596,18 +597,15 @@ fn main() {
                             let p = entry.path();
                             if let Some(base) = p.file_stem().and_then(|v| v.to_str())
                                 && base == normalized_artist_name
-                                && let Some(ext) = p
-                                    .extension()
-                                    .and_then(|v| v.to_str())
-                                    .filter(|v| {
-                                        matches!(v.to_lowercase().as_str(), "png" | "jpg" | "jpeg")
-                                    })
-                                    .map(|v| v.to_owned())
+                                && let Ok(filename) = entry.file_name().into_string()
+                                && p.extension().and_then(|v| v.to_str()).is_some_and(|v| {
+                                    matches!(v.to_lowercase().as_str(), "png" | "jpg" | "jpeg")
+                                })
                             {
-                                files.push((p, ext));
+                                files.push((p, filename));
                             }
                         }
-                        if let Some((_, ext)) = if files.len() <= 1 {
+                        if let Some((_, filename)) = if files.len() <= 1 {
                             files.first()
                         } else {
                             eprintln!(
@@ -617,8 +615,10 @@ fn main() {
                                 std::fs::metadata(v).map(|m| m.len()).unwrap_or(0)
                             })
                         } {
-                            artist.general.tags.push(format!("SRCFILE:ImageExt={ext}"));
-                            artist.general.tags.push(format!("ImageExt={ext}"));
+                            artist
+                                .general
+                                .tags
+                                .push(format!("SRCFILE:Image={dirname}/{filename}"));
                         }
                     }
                 }
