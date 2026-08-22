@@ -573,32 +573,50 @@ fn main() {
     }
     if let Some(custom_files) = custom_files {
         if artist_img {
-            eprintln!("[info] Searching for <artist>.{{png,jpg,...}} files in custom-files dir...");
-            match fs::read_dir(&custom_files) {
-                Err(e) => {
-                    eprintln!("Can't read custom-files dir {custom_files:?}: {e}");
-                }
-                Ok(ls) => {
-                    let mut files = HashMap::new();
-                    for entry in ls.flatten() {
-                        let p = entry.path();
-                        if let Some(base) = p.file_stem().and_then(|v| v.to_str())
-                            && let Some(ext) = entry
-                                .path()
-                                .extension()
-                                .and_then(|v| v.to_str())
-                                .filter(|v| {
-                                    matches!(v.to_lowercase().as_str(), "png" | "jpg" | "jpeg")
-                                })
-                            && let Some(old) = files.insert(base.to_owned(), ext.to_owned())
-                        {
-                            eprintln!(
-                                "[warn] Not using file {base}.{old}, because {base}.{ext} was found."
-                            );
-                        }
+            eprintln!(
+                "[info] Searching for <artist>.d/<artist>.{{png,jpg,...}} files in custom-files dir..."
+            );
+            for artist in database.artists_mut().values_mut() {
+                let normalized_artist_name =
+                    normalize_to_file_path_component_for_custom_files(&artist.name);
+                let dir = custom_files.join(format!(
+                    "{}.d",
+                    normalize_to_file_path_component_for_custom_files(&artist.name)
+                ));
+                match fs::read_dir(&dir) {
+                    Err(e) => {
+                        eprintln!(
+                            "Can't read custom-files <artist>.d dir `{}`: {e}",
+                            dir.display()
+                        );
                     }
-                    for artist in database.artists_mut().values_mut() {
-                        if let Some(ext) = files.get(&artist.name) {
+                    Ok(ls) => {
+                        let mut files = vec![];
+                        for entry in ls.flatten() {
+                            let p = entry.path();
+                            if let Some(base) = p.file_stem().and_then(|v| v.to_str())
+                                && base == normalized_artist_name
+                                && let Some(ext) = p
+                                    .extension()
+                                    .and_then(|v| v.to_str())
+                                    .filter(|v| {
+                                        matches!(v.to_lowercase().as_str(), "png" | "jpg" | "jpeg")
+                                    })
+                                    .map(|v| v.to_owned())
+                            {
+                                files.push((p, ext));
+                            }
+                        }
+                        if let Some((_, ext)) = if files.len() <= 1 {
+                            files.first()
+                        } else {
+                            eprintln!(
+                                "[info] using the largest `{normalized_artist_name}.d/{normalized_artist_name}.*` image"
+                            );
+                            files.iter().max_by_key(|(v, _)| {
+                                std::fs::metadata(v).map(|m| m.len()).unwrap_or(0)
+                            })
+                        } {
                             artist.general.tags.push(format!("SRCFILE:ImageExt={ext}"));
                             artist.general.tags.push(format!("ImageExt={ext}"));
                         }
@@ -607,7 +625,7 @@ fn main() {
             }
         }
         eprintln!(
-            "[info] Searching for <artist>.tags, <artist>.d/<album>.tags, <artist>.d/singles/<song>.tags, <artist>.d/<album>.d/<song>.tags in custom-files dir..."
+            "[info] Searching for <artist>.d/<artist>.tags, <artist>.d/<album>.d/<album>.tags, <artist>.d/singles/<song>.tags, <artist>.d/<album>.d/songs/<song>.tags in custom-files dir..."
         );
         let l = database.artists().len() + database.albums().len() + database.songs().len();
         let mut cc = 0;
@@ -622,20 +640,20 @@ fn main() {
             }
         }
         for artist in artists.values_mut() {
-            // <artist>.tags
             cc += 1;
-            if let Ok(info) = fs::read_to_string(custom_files.join(format!(
+            // <artist>.d/
+            let dir = custom_files.join(format!(
+                "{}.d",
+                normalize_to_file_path_component_for_custom_files(&artist.name)
+            ));
+            // <artist>.d/<artist>.tags
+            if let Ok(info) = fs::read_to_string(dir.join(format!(
                 "{}.tags",
                 normalize_to_file_path_component_for_custom_files(&artist.name)
             ))) {
                 c += 1;
                 push_tags(&info, &mut artist.general.tags);
             }
-            // <artist>.d/
-            let dir = custom_files.join(format!(
-                "{}.d",
-                normalize_to_file_path_component_for_custom_files(&artist.name)
-            ));
             if fs::metadata(&dir).is_ok_and(|meta| meta.is_dir()) {
                 // <artist>.d/singles/
                 {
@@ -658,7 +676,12 @@ fn main() {
                     eprint!(" {cc}/{l} ({c})\r");
                     cc += 1;
                     if let Some(album) = albums.get_mut(album) {
-                        // <artist>.d/<album>.tags
+                        // <artist>.d/<album>.d/
+                        let dir = dir.join(format!(
+                            "{}.d",
+                            normalize_to_file_path_component_for_custom_files(&album.name)
+                        ));
+                        // <artist>.d/<album>.d/<album>.tags
                         if let Ok(info) = fs::read_to_string(dir.join(format!(
                             "{}.tags",
                             normalize_to_file_path_component_for_custom_files(&album.name)
@@ -666,15 +689,12 @@ fn main() {
                             c += 1;
                             push_tags(&info, &mut album.general.tags);
                         }
-                        // <artist>.d/<album>.d/
-                        let dir = dir.join(format!(
-                            "{}.d",
-                            normalize_to_file_path_component_for_custom_files(&album.name)
-                        ));
+                        // <artist>.d/<album>.d/songs/
+                        let dir = dir.join("songs");
                         for song in album.songs.iter() {
                             cc += 1;
                             if let Some(song) = songs.get_mut(song) {
-                                // <artist>.d/<album>.d/<song>.tags
+                                // <artist>.d/<album>.d/songs/<song>.tags
                                 if let Ok(info) = fs::read_to_string(dir.join(format!(
                                     "{}.tags",
                                     normalize_to_file_path_component_for_custom_files(&song.title)
@@ -993,18 +1013,18 @@ fn export_to_custom_files_dir(dbdir: String, path: PathBuf) {
     }
     eprintln!("Exporting .tags files...");
     for (artist_id, artist) in database.artists().iter() {
-        export_custom_files_tags(
-            &artist.general.tags,
-            &gen_internals(Some(*artist_id), artist.cover),
-            &path.join(format!(
-                "{}.tags",
-                normalize_to_file_path_component_for_custom_files(&artist.name)
-            )),
-        );
         let dir = path.join(format!(
             "{}.d",
             normalize_to_file_path_component_for_custom_files(&artist.name)
         ));
+        export_custom_files_tags(
+            &artist.general.tags,
+            &gen_internals(Some(*artist_id), artist.cover),
+            &dir.join(format!(
+                "{}.tags",
+                normalize_to_file_path_component_for_custom_files(&artist.name)
+            )),
+        );
         {
             let dir = dir.join("singles");
             for song_id in artist.singles.iter() {
@@ -1022,6 +1042,10 @@ fn export_to_custom_files_dir(dbdir: String, path: PathBuf) {
         }
         for album_id in artist.albums.iter() {
             if let Some(album) = database.albums().get(album_id) {
+                let dir = dir.join(format!(
+                    "{}.d",
+                    normalize_to_file_path_component_for_custom_files(&album.name,)
+                ));
                 export_custom_files_tags(
                     &album.general.tags,
                     &gen_internals(Some(*album_id), album.cover),
@@ -1030,10 +1054,7 @@ fn export_to_custom_files_dir(dbdir: String, path: PathBuf) {
                         normalize_to_file_path_component_for_custom_files(&album.name,)
                     )),
                 );
-                let dir = dir.join(format!(
-                    "{}.d",
-                    normalize_to_file_path_component_for_custom_files(&album.name,)
-                ));
+                let dir = dir.join("songs");
                 for song_id in album.songs.iter() {
                     if let Some(song) = database.songs().get(song_id) {
                         export_custom_files_tags(
@@ -1168,8 +1189,8 @@ fn export_custom_files_tags(tags: &[String], internals: &[String], path: &Path) 
     }
 }
 
-// TODO: load cover id?
-fn gen_internals(_id: Option<u64>, cover: Option<CoverId>) -> Vec<String> {
+// unused... for now?
+fn gen_internals(_id: Option<u64>, _cover: Option<CoverId>) -> Vec<String> {
     // [cover.map(|id| format!("cover={id}"))]
     //     .into_iter()
     //     .flatten()
