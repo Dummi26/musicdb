@@ -718,7 +718,7 @@ fn main() {
         }
         eprintln!();
         eprintln!("Loading saved queues...");
-        let queues_dir = custom_files.join("queues");
+        let queues_dir = custom_files.join("_queues");
         if let Ok(dir) = std::fs::read_dir(&queues_dir) {
             for name in dir {
                 let name = name.unwrap();
@@ -999,7 +999,7 @@ fn export_to_custom_files_dir(dbdir: String, path: PathBuf) {
         eprintln!("[WARN] Can't write to file `ids_songs`");
     }
     eprintln!("Exporting saved queues...");
-    let queues_dir = path.join("queues");
+    let queues_dir = path.join("_queues");
     if std::fs::create_dir_all(&queues_dir).is_ok() {
         for (name, queue) in database.queues.iter() {
             std::fs::write(
@@ -1166,21 +1166,22 @@ fn export_custom_files_tags(tags: &[String], internals: &[String], path: &Path) 
                 }
             }
         };
-        if allow_write && !mk_normalized_tags(&mut normalized_tags, tags, internals).is_empty() {
-            if let Some(p) = path.parent()
-                && let Err(e) = fs::create_dir_all(p)
-            {
-                eprintln!(
-                    "Could not create directory to contain {}: {e}",
-                    path.display()
-                );
-            }
-            if let Err(e) = fs::write(
+        if let Some(p) = path.parent()
+            && let Err(e) = fs::create_dir_all(p)
+        {
+            eprintln!(
+                "Could not create directory to contain {}: {e}",
+                path.display()
+            );
+        }
+        if allow_write
+            && !mk_normalized_tags(&mut normalized_tags, tags, internals).is_empty()
+            && let Err(e) = fs::write(
                 path,
                 mk_normalized_tags(&mut normalized_tags, tags, internals),
-            ) {
-                eprintln!("Could not save {}: {e}", path.display());
-            }
+            )
+        {
+            eprintln!("Could not save {}: {e}", path.display());
         }
     } else {
         eprintln!(
